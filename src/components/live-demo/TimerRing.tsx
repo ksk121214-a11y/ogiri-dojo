@@ -59,11 +59,14 @@ export default function TimerRing({
             strokeDashoffset: dashoffset,
             opacity: paused ? [1, 0.5, 1] : 1,
           }}
-          transition={
-            paused
-              ? { opacity: { duration: 1.3, repeat: Infinity, ease: "easeInOut" } }
-              : { duration: 0.15, ease: "linear" }
-          }
+          transition={{
+            strokeDashoffset: { duration: 0.15, ease: "linear" },
+            // 経過中（非paused）はopacityを毎tick即座に1へ固定し、明滅の余地を作らない。
+            // 明滅演出はpaused（審査中などの一時停止）の時だけ意図的に行う。
+            opacity: paused
+              ? { duration: 1.3, repeat: Infinity, ease: "easeInOut" }
+              : { duration: 0 },
+          }}
           className={ringColorClass}
         />
       </svg>
