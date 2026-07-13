@@ -7,7 +7,7 @@ import { useSnsStore } from "@/store/useSnsStore";
 
 const MAX_LENGTH = 60;
 
-// お題投稿フォーム。投稿後は詳細ページに遷移し、そのまま回答一覧（0件）が見える状態になる。
+// お題投稿フォーム。投稿後は寄合帳トップ（新着順の先頭に表示される）に戻る。
 export default function SnsNewTopicPage() {
   const router = useRouter();
   const addTopic = useSnsStore((s) => s.addTopic);
@@ -19,8 +19,10 @@ export default function SnsNewTopicPage() {
     e.preventDefault();
     const trimmed = body.trim();
     if (!trimmed || overLimit) return;
-    const topic = addTopic(trimmed);
-    router.push(`/sns/${topic.id}`);
+    // 静的サイト公開(GitHub Pages)では新規投稿のIDに対応する詳細ページが
+    // 事前生成されておらず直接遷移すると404になるため、投稿後は寄合帳トップに戻す。
+    addTopic(trimmed);
+    router.push("/sns");
   };
 
   return (

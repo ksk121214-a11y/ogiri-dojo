@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
 import SnsMyProfileCard from "@/components/sns/SnsMyProfileCard";
+import { isLocallyCreated } from "@/lib/staticContent";
 import { useSnsStore } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
 
@@ -197,32 +198,44 @@ function TopicFeedList({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      {topics.map((topic) => (
-        <div
-          key={topic.id}
-          className="flex flex-col gap-2 rounded-2xl border border-dojo-dark-brown/20 bg-dojo-light-brown/50 p-4 transition hover:border-dojo-curtain-gold hover:bg-dojo-light-brown sm:p-5"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <SnsAuthorBadge authorId={topic.authorId} />
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              <span className="rounded-full bg-dojo-curtain-gold/25 px-2.5 py-1 font-sans text-[10px] font-bold text-dojo-dark-brown">
-                お題
-              </span>
-              <span className="font-sans text-[10px] text-dojo-dark-brown">
-                {topic.createdAtLabel}
-              </span>
-            </div>
-          </div>
-          <Link href={`/sns/${topic.id}`} className="flex flex-col gap-2">
+      {topics.map((topic) => {
+        const linkDisabled = isLocallyCreated(topic.id);
+        const body = (
+          <>
             <p className="font-sans text-base font-bold leading-snug text-dojo-ink sm:text-lg">
               {topic.body}
             </p>
             <p className="font-sans text-xs text-dojo-dark-brown">
               回答 {answerCountByTopic.get(topic.id) ?? 0}件
             </p>
-          </Link>
-        </div>
-      ))}
+          </>
+        );
+        return (
+          <div
+            key={topic.id}
+            className="flex flex-col gap-2 rounded-2xl border border-dojo-dark-brown/20 bg-dojo-light-brown/50 p-4 transition hover:border-dojo-curtain-gold hover:bg-dojo-light-brown sm:p-5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <SnsAuthorBadge authorId={topic.authorId} />
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <span className="rounded-full bg-dojo-curtain-gold/25 px-2.5 py-1 font-sans text-[10px] font-bold text-dojo-dark-brown">
+                  お題
+                </span>
+                <span className="font-sans text-[10px] text-dojo-dark-brown">
+                  {topic.createdAtLabel}
+                </span>
+              </div>
+            </div>
+            {linkDisabled ? (
+              <div className="flex flex-col gap-2">{body}</div>
+            ) : (
+              <Link href={`/sns/${topic.id}`} className="flex flex-col gap-2">
+                {body}
+              </Link>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -240,6 +253,18 @@ function AnswerFeedList({
     <div className="flex flex-col gap-3">
       {answers.map((answer) => {
         const topic = topics.find((t) => t.id === answer.topicId);
+        const topicLinkDisabled = topic ? isLocallyCreated(topic.id) : false;
+        const answerLinkDisabled = isLocallyCreated(answer.id);
+        const answerBody = (
+          <>
+            <p className="font-sans text-sm font-bold text-dojo-ink sm:text-base">
+              {answer.body}
+            </p>
+            <p className="font-sans text-[11px] text-dojo-dark-brown">
+              ❤ {answer.likes.toLocaleString()}・ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件
+            </p>
+          </>
+        );
         return (
           <div
             key={answer.id}
@@ -252,21 +277,26 @@ function AnswerFeedList({
               </span>
             </div>
             {topic && (
-              <Link
-                href={`/sns/${topic.id}`}
-                className="w-fit rounded-full bg-dojo-curtain-gold/20 px-2.5 py-1 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-curtain-gold/30"
-              >
-                お題：{topic.body}
+              topicLinkDisabled ? (
+                <div className="w-fit rounded-full bg-dojo-curtain-gold/20 px-2.5 py-1 font-sans text-[10px] font-bold text-dojo-dark-brown">
+                  お題：{topic.body}
+                </div>
+              ) : (
+                <Link
+                  href={`/sns/${topic.id}`}
+                  className="w-fit rounded-full bg-dojo-curtain-gold/20 px-2.5 py-1 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-curtain-gold/30"
+                >
+                  お題：{topic.body}
+                </Link>
+              )
+            )}
+            {answerLinkDisabled ? (
+              <div className="flex flex-col gap-1">{answerBody}</div>
+            ) : (
+              <Link href={`/sns/answers/${answer.id}`} className="flex flex-col gap-1">
+                {answerBody}
               </Link>
             )}
-            <Link href={`/sns/answers/${answer.id}`} className="flex flex-col gap-1">
-              <p className="font-sans text-sm font-bold text-dojo-ink sm:text-base">
-                {answer.body}
-              </p>
-              <p className="font-sans text-[11px] text-dojo-dark-brown">
-                ❤ {answer.likes.toLocaleString()}・ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件
-              </p>
-            </Link>
           </div>
         );
       })}

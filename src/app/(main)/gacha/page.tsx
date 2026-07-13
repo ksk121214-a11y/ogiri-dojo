@@ -20,6 +20,8 @@ interface PullResult {
   isNew: boolean;
 }
 
+const MULTI_PULL_COUNT = 10;
+
 type MainTab = "gacha" | "shop";
 
 const TYPE_ORDER: ItemType[] = ["costume", "icon_part", "bg_pattern"];
@@ -84,15 +86,22 @@ export default function GachaPage() {
 function GachaTab() {
   const points = useUserStore((s) => s.user.points);
   const pullGacha = useUserStore((s) => s.pullGacha);
+  const pullGachaMulti = useUserStore((s) => s.pullGachaMulti);
   const [drawing, setDrawing] = useState(false);
   const [result, setResult] = useState<PullResult | null>(null);
+  const [multiResults, setMultiResults] = useState<
+    { item: CollectionItem; isNew: boolean }[] | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [resultKey, setResultKey] = useState(0);
+
+  const multiCost = GACHA_COST * MULTI_PULL_COUNT;
 
   const handlePull = () => {
     setError(null);
     setDrawing(true);
     setResult(null);
+    setMultiResults(null);
     // 抽選そのものは一瞬だが、演出のための「間」をわずかに作る（デザイン方針§4.1のノリを踏襲）
     window.setTimeout(() => {
       const outcome = pullGacha();
@@ -103,6 +112,23 @@ function GachaTab() {
       }
       setResultKey((k) => k + 1);
       setResult({ key: resultKey + 1, item: outcome.item, isNew: outcome.isNew });
+    }, 650);
+  };
+
+  const handlePullMulti = () => {
+    setError(null);
+    setDrawing(true);
+    setResult(null);
+    setMultiResults(null);
+    window.setTimeout(() => {
+      const outcome = pullGachaMulti(MULTI_PULL_COUNT);
+      setDrawing(false);
+      if (!outcome.ok) {
+        setError(outcome.reason);
+        return;
+      }
+      setResultKey((k) => k + 1);
+      setMultiResults(outcome.results);
     }, 650);
   };
 
@@ -124,7 +150,11 @@ function GachaTab() {
         </div>
       </div>
 
-      <div className="relative flex h-56 w-full max-w-sm items-center justify-center">
+      <div
+        className={`relative flex w-full items-center justify-center ${
+          multiResults ? "max-w-2xl" : "h-56 max-w-sm"
+        }`}
+      >
         <AnimatePresence mode="wait">
           {drawing ? (
             <motion.div
@@ -171,6 +201,44 @@ function GachaTab() {
                 {result.isNew ? "NEW!" : "所持済み（重複）"}
               </span>
             </motion.div>
+          ) : multiResults ? (
+            <motion.div
+              key={`multi-${resultKey}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="grid w-full grid-cols-3 gap-2 sm:grid-cols-5"
+            >
+              {multiResults.map((r, idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, scale: 0.5, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{
+                    delay: idx * 0.06,
+                    type: "spring",
+                    stiffness: 260,
+                    damping: 18,
+                  }}
+                  className={`relative flex flex-col items-center gap-1 rounded-xl border-2 bg-dojo-light-brown p-2 text-center ${RARITY_BORDER_CLASS[r.item.rarity]} ${RARITY_GLOW_CLASS[r.item.rarity]}`}
+                >
+                  {r.isNew && (
+                    <span className="absolute -right-1.5 -top-1.5 rounded-full bg-dojo-curtain-red px-1.5 py-0.5 font-sans text-[8px] font-bold text-dojo-washi-white">
+                      NEW
+                    </span>
+                  )}
+                  <span
+                    className={`font-brush text-xs ${RARITY_TEXT_CLASS[r.item.rarity]}`}
+                  >
+                    {r.item.rarity}
+                  </span>
+                  <span className="text-2xl">{ITEM_TYPE_EMOJI[r.item.type]}</span>
+                  <p className="w-full truncate font-sans text-[10px] font-bold text-dojo-ink">
+                    {r.item.name}
+                  </p>
+                </motion.div>
+              ))}
+            </motion.div>
           ) : (
             <motion.div
               key="idle"
@@ -188,14 +256,26 @@ function GachaTab() {
         <p className="font-sans text-xs text-dojo-curtain-red">{error}</p>
       )}
 
-      <button
-        type="button"
-        onClick={handlePull}
-        disabled={drawing || points < GACHA_COST}
-        className="rounded-full bg-dojo-curtain-red px-10 py-4 font-sans text-base font-bold text-dojo-washi-white shadow-[0_0_30px_rgba(192,38,63,0.4)] transition hover:bg-dojo-deep-crimson active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {drawing ? "抽選中……" : `ガチャを引く（${GACHA_COST}pt）`}
-      </button>
+      <div className="flex w-full max-w-sm flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={handlePull}
+          disabled={drawing || points < GACHA_COST}
+          className="flex-1 rounded-full bg-dojo-curtain-red px-8 py-4 font-sans text-base font-bold text-dojo-washi-white shadow-[0_0_30px_rgba(192,38,63,0.4)] transition hover:bg-dojo-deep-crimson active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {drawing ? "抽選中……" : `ガチャを引く（${GACHA_COST}pt）`}
+        </button>
+        <button
+          type="button"
+          onClick={handlePullMulti}
+          disabled={drawing || points < multiCost}
+          className="flex-1 rounded-full border-2 border-dojo-curtain-gold bg-dojo-backstage-navy px-8 py-4 font-sans text-base font-bold text-dojo-curtain-gold shadow-[0_0_30px_rgba(232,184,76,0.3)] transition hover:bg-dojo-backstage-navy/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {drawing
+            ? "抽選中……"
+            : `${MULTI_PULL_COUNT}連引く（${multiCost.toLocaleString()}pt）`}
+        </button>
+      </div>
 
       <div className="w-full max-w-sm rounded-xl border border-dojo-dark-brown/20 bg-dojo-light-brown/40 p-4">
         <p className="mb-2 font-sans text-[11px] tracking-widest text-dojo-dark-brown">

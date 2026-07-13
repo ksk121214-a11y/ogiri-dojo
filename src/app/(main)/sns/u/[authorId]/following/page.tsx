@@ -1,63 +1,15 @@
-"use client";
+import SnsAuthorFollowing from "@/components/sns/SnsAuthorFollowing";
+import { DUMMY_SNS_AUTHORS } from "@/data/snsAuthors";
 
-import Link from "next/link";
-import { useParams } from "next/navigation";
+export async function generateStaticParams() {
+  return DUMMY_SNS_AUTHORS.map((author) => ({ authorId: author.id }));
+}
 
-import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
-import { getDummySnsAuthor, getRandomOtherAuthors } from "@/data/snsAuthors";
-
-// ダミー投稿者のフォロー中一覧（簡易版）。厳密なフォロー関係は管理していないため、
-// 他のダミー投稿者から人数分だけ雰囲気として抽出して表示する。
-export default function SnsAuthorFollowingPage() {
-  const params = useParams<{ authorId: string }>();
-  const authorId = params.authorId;
-  const author = getDummySnsAuthor(authorId);
-
-  if (!author) {
-    return (
-      <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <p className="font-sans text-sm text-dojo-dark-brown">
-          演者が見つかりませんでした。
-        </p>
-        <Link href="/sns" className="font-sans text-xs font-bold text-dojo-ink hover:underline">
-          ← 寄合帳へ戻る
-        </Link>
-      </div>
-    );
-  }
-
-  const list = getRandomOtherAuthors(
-    authorId,
-    Math.min(author.followingCount, 10),
-    `${authorId}-following`,
-  );
-
-  return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <Link
-        href={`/sns/u/${authorId}`}
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← {author.displayName} のプロフィールへ戻る
-      </Link>
-
-      <div className="text-center">
-        <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">FOLLOWING</p>
-        <h1 className="mt-1 font-brush text-2xl text-dojo-dark-brown">
-          {author.displayName} のフォロー中
-        </h1>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {list.length === 0 && (
-          <p className="text-center font-sans text-xs text-dojo-dark-brown">
-            まだ誰もフォローしていません。
-          </p>
-        )}
-        {list.map((a) => (
-          <SnsFollowListRow key={a.id} author={a} />
-        ))}
-      </div>
-    </div>
-  );
+export default async function SnsAuthorFollowingPage({
+  params,
+}: {
+  params: Promise<{ authorId: string }>;
+}) {
+  const { authorId } = await params;
+  return <SnsAuthorFollowing authorId={authorId} />;
 }

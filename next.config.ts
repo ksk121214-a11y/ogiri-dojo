@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
+const repoName = "ogiri-dojo";
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: "export",
+  basePath: `/${repoName}`,
+  trailingSlash: true,
+  images: { unoptimized: true },
 };
 
 export default nextConfig;

@@ -31,6 +31,11 @@ interface UserState {
   addPoints: (amount: number) => void;
   addMastery: (amount: number) => void;
   pullGacha: () => { ok: true; item: CollectionItem; isNew: boolean } | { ok: false; reason: string };
+  pullGachaMulti: (
+    count: number,
+  ) =>
+    | { ok: true; results: { item: CollectionItem; isNew: boolean }[] }
+    | { ok: false; reason: string };
   purchaseItem: (itemId: string, price: number) => { ok: boolean; reason?: string };
   equipItem: (item: CollectionItem) => void;
   updateBio: (bio: string) => void;
@@ -72,6 +77,30 @@ export const useUserStore = create<UserState>()((set, get) => ({
       },
     }));
     return { ok: true, item, isNew };
+  },
+
+  pullGachaMulti: (count) => {
+    const { user } = get();
+    const totalCost = GACHA_COST * count;
+    if (user.points < totalCost) {
+      return { ok: false, reason: "ポイントが足りません" };
+    }
+    const results: { item: CollectionItem; isNew: boolean }[] = [];
+    let ownedItemIds = user.inventory.ownedItemIds;
+    for (let i = 0; i < count; i += 1) {
+      const item = drawGachaItem();
+      const isNew = !ownedItemIds.includes(item.id);
+      ownedItemIds = [...ownedItemIds, item.id];
+      results.push({ item, isNew });
+    }
+    set((s) => ({
+      user: {
+        ...s.user,
+        points: s.user.points - totalCost,
+        inventory: { ...s.user.inventory, ownedItemIds },
+      },
+    }));
+    return { ok: true, results };
   },
 
   purchaseItem: (itemId, price) => {
