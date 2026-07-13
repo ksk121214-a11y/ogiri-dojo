@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --background: #12101a;
+  --foreground: #f5f1e6;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans-jp);
+  --font-brush: var(--font-yuji-syuku);
+
+  /* デザイン方針.md §2 カラーパレット */
+  --color-dojo-stage-dark: #12101a; /* 舞台闇 */
+  --color-dojo-backstage-navy: #1f1d2b; /* 幕裏紺 */
+  --color-dojo-curtain-red: #c0263f; /* 緞帳赤 */
+  --color-dojo-deep-crimson: #8e1a2e; /* 深緋 */
+  --color-dojo-curtain-gold: #e8b84c; /* 幕金 */
+  --color-dojo-gold-foil: #f6d77c; /* 光箔 */
+  --color-dojo-spotlight-orange: #ff8a3d; /* 灯り橙（グラデ始点） */
+  --color-dojo-spotlight-orange-light: #ffd98e; /* 灯り橙（グラデ終点） */
+  --color-dojo-cheer-pink: #ff6fa5; /* 歓声ピンク */
+  --color-dojo-washi-white: #f5f1e6; /* 和紙白 */
+  --color-dojo-gray-purple: #b7b2c4; /* 灰紫 */
+  --color-dojo-score-0: #5b5866; /* 採点0点 */
+  --color-dojo-score-1: #f2b84b; /* 採点1点（灯り黄） */
+  --color-dojo-score-2: #e23a52; /* 採点2点（ウケた） */
+  --color-dojo-success: #4fb286; /* 成功/緑系 */
+
+  /* デザイン方針.md §2.5 配色改訂（2026-07-13、和風トーン）：
+     ホーム/ガチャ/ショップ/ランキング/マイページ等の通常画面のベースに使う。
+     ライブ体験（/live-demo）の暗転・幕間・演出は従来の舞台闇＋暖色スポットのまま残す。 */
+  --color-dojo-tatami-cream: #e8dcc4; /* 畳生成り：ベース背景 */
+  --color-dojo-light-brown: #d8c6a3; /* 薄茶：カード等の面 */
+  --color-dojo-dark-brown: #5b4530; /* 焦げ茶：縁線・濃色テキスト */
+  --color-dojo-tatami-green: #5c7a54; /* 畳縁緑：成功/OK表示・差し色 */
+  --color-dojo-ink: #2e2a24; /* 墨色：明るい背景での本文用濃色テキスト */
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
