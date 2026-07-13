@@ -5,13 +5,15 @@ import { motion } from "framer-motion";
 import { DEMO_TIMING } from "@/data/liveDemoData";
 import TimerRing from "./TimerRing";
 
-const SCORE_BUTTONS: { points: 0 | 1 | 2; label: string; className: string }[] = [
+const SCORE_BUTTONS: { points: 0 | 1 | 2 | 3; label: string; className: string }[] = [
   { points: 0, label: "0", className: "bg-dojo-score-0" },
   { points: 1, label: "1", className: "bg-dojo-score-1 text-dojo-stage-dark" },
   { points: 2, label: "2", className: "bg-dojo-score-2" },
+  { points: 3, label: "3", className: "bg-dojo-score-3 text-dojo-stage-dark" },
 ];
 
-// 審査サイクル中の共通カード（L3/L4）：対象回答＋（審査員のみ）0/1/2採点ボタン §4.5
+// 審査サイクル中の共通カード（L3/L4）：対象回答＋（審査員のみ）0/1/2/3採点ボタン §4.5
+// （2026-07-14改訂：0〜2点の3段階→0〜3点の4段階に変更）
 // お題そのものは同じ画面上部のTopicBanner（審査中は拡大表示）が担うため、
 // ここでは重複してお題を出さない（仕様書§4.5・デザイン方針§4.2との重複表示を解消）。
 export default function JudgingCard({
@@ -26,8 +28,8 @@ export default function JudgingCard({
   answerBody: string;
   remainingMs: number;
   isJudge: boolean;
-  myScore: 0 | 1 | 2 | null;
-  onScore?: (points: 0 | 1 | 2) => void;
+  myScore: 0 | 1 | 2 | 3 | null;
+  onScore?: (points: 0 | 1 | 2 | 3) => void;
 }) {
   return (
     <motion.div
@@ -54,19 +56,19 @@ export default function JudgingCard({
         <TimerRing
           remainingMs={remainingMs}
           totalMs={DEMO_TIMING.judgeMs}
-          size={48}
+          size={60}
           label="採点"
         />
       </div>
 
       {isJudge ? (
-        <div className="mt-2 flex items-center justify-center gap-3 sm:mt-3 sm:gap-4">
+        <div className="mt-2 flex items-center justify-center gap-2.5 sm:mt-3 sm:gap-3.5">
           {SCORE_BUTTONS.map((btn) => (
             <button
               key={btn.points}
               type="button"
               onClick={() => onScore?.(btn.points)}
-              className={`flex h-11 w-11 items-center justify-center rounded-full text-xl font-bold transition sm:h-14 sm:w-14 sm:text-2xl ${btn.className} ${
+              className={`flex h-12 w-12 items-center justify-center rounded-full text-2xl font-bold transition sm:h-16 sm:w-16 sm:text-3xl ${btn.className} ${
                 myScore === btn.points
                   ? "ring-4 ring-dojo-washi-white scale-110"
                   : "opacity-80 hover:opacity-100"

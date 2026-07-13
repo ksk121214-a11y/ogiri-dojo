@@ -111,12 +111,14 @@ export function buildTurns(
   return turns;
 }
 
-// 採点のランダム分布（多少の偏りをつける：0点よりは1・2点が出やすい寄席らしい甘め判定）
-export function randomBotScore(): 0 | 1 | 2 {
+// 採点のランダム分布（多少の偏りをつける：0点よりは1〜2点が出やすい寄席らしい甘め判定、
+// 3点は「大ウケ」枠のため出現率を絞る。2026-07-14改訂：0〜2点の3段階→0〜3点の4段階に変更）
+export function randomBotScore(): 0 | 1 | 2 | 3 {
   const r = Math.random();
-  if (r < 0.22) return 0;
-  if (r < 0.62) return 1;
-  return 2;
+  if (r < 0.15) return 0;
+  if (r < 0.45) return 1;
+  if (r < 0.8) return 2;
+  return 3;
 }
 
 export function randomBotAnswerBody(): string {

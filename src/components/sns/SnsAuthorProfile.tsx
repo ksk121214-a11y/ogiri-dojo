@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { useSnsStore } from "@/store/useSnsStore";
@@ -50,21 +51,14 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
         <p className="font-sans text-sm text-dojo-dark-brown">
           演者が見つかりませんでした。
         </p>
-        <Link href="/sns" className="font-sans text-xs font-bold text-dojo-ink hover:underline">
-          ← 寄合帳へ戻る
-        </Link>
+        <SnsBackButton className="font-sans text-xs font-bold text-dojo-ink hover:underline" />
       </div>
     );
   }
 
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
-      <Link
-        href="/sns"
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← 寄合帳へ戻る
-      </Link>
+      <SnsBackButton />
 
       <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center">
         <span

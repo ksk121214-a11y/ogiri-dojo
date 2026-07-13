@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
 import { DUMMY_SNS_AUTHORS, MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
 
@@ -14,12 +13,7 @@ const MY_FOLLOWERS = [...DUMMY_SNS_AUTHORS]
 export default function MyFollowersPage() {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <Link
-        href="/"
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← ホームへ戻る
-      </Link>
+      <SnsBackButton />
 
       <div className="text-center">
         <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">FOLLOWERS</p>

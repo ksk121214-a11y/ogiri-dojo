@@ -50,14 +50,19 @@ export default function AppHeader() {
         */}
         <nav className="-mx-1 flex gap-1 overflow-x-auto whitespace-nowrap pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {NAV_LINKS.map((link) => {
-            const active = pathname === link.href;
+            // ホームは完全一致のみ、それ以外はサブページ（例: /sns/u/me）にいる間も
+            // 該当タブが濃く表示され続けるようprefix一致で判定する（見た目で現在地が分かりやすいように）。
+            const active =
+              link.href === "/"
+                ? pathname === "/"
+                : pathname === link.href || pathname.startsWith(`${link.href}/`);
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`shrink-0 rounded-full px-2.5 py-1.5 font-sans text-[11px] transition sm:px-3 sm:text-sm ${
+                className={`shrink-0 rounded-full px-2.5 py-1.5 font-sans text-[11px] font-bold transition sm:px-3 sm:text-sm ${
                   active
-                    ? "bg-dojo-curtain-red text-dojo-washi-white"
+                    ? "bg-dojo-curtain-red text-dojo-washi-white shadow-[0_0_10px_rgba(192,38,63,0.45)]"
                     : "text-dojo-dark-brown hover:bg-dojo-light-brown hover:text-dojo-ink"
                 }`}
               >

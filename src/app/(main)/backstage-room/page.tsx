@@ -162,14 +162,15 @@ export default function BackstageRoomPage() {
             key={type}
             type="button"
             onClick={() => setActiveType(type)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 font-sans text-xs font-bold transition sm:text-sm ${
+            title={ITEM_TYPE_LABEL[type]}
+            aria-label={ITEM_TYPE_LABEL[type]}
+            className={`flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-full px-3 py-2 font-sans text-xs font-bold transition sm:text-sm ${
               activeType === type
                 ? "bg-dojo-curtain-red text-dojo-washi-white shadow-[0_0_14px_rgba(192,38,63,0.4)]"
                 : "text-dojo-dark-brown hover:bg-dojo-light-brown"
             }`}
           >
-            <span>{ITEM_TYPE_EMOJI[type]}</span>
-            {ITEM_TYPE_LABEL[type]}
+            <span className="text-xl">{ITEM_TYPE_EMOJI[type]}</span>
             <span className="text-[10px] font-normal opacity-70">
               ({ownedByType.get(type)?.length ?? 0})
             </span>

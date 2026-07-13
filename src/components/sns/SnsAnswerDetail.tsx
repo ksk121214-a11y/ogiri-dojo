@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -35,12 +36,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         <p className="font-sans text-sm text-dojo-dark-brown">
           回答が見つかりませんでした。
         </p>
-        <Link
-          href="/sns"
-          className="font-sans text-xs font-bold text-dojo-ink hover:underline"
-        >
-          ← 寄合帳へ戻る
-        </Link>
+        <SnsBackButton className="font-sans text-xs font-bold text-dojo-ink hover:underline" />
       </div>
     );
   }
@@ -58,12 +54,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <Link
-        href="/sns"
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← 寄合帳へ戻る
-      </Link>
+      <SnsBackButton />
 
       {topic && (
         <Link

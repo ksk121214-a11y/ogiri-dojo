@@ -28,6 +28,7 @@ export default function StageScreen() {
   const stageGroup = getStageGroup(state);
   const topicBody = turn ? getTopicBody(state, turn.topicId) : "";
   const judging = state.judging;
+  const revealPending = state.revealPending;
   const answeringRemainingMs = state.answeringRemainingMs;
   const myCount = state.answerCounts[MY_PARTICIPANT_ID] ?? 0;
   const queuedByMe = state.submissionQueue.some(
@@ -109,8 +110,8 @@ export default function StageScreen() {
               remainingMs={answeringRemainingMs}
               totalMs={DEMO_TIMING.answerMs}
               label="持ち時間"
-              paused={judging !== null}
-              size={56}
+              paused={judging !== null || revealPending !== null}
+              size={68}
             />
             <div className="flex items-center gap-2">
               {Array.from({ length: MAX_ANSWERS_PER_PLAYER }).map((_, i) => (
@@ -186,7 +187,7 @@ export default function StageScreen() {
             type="button"
             onClick={handleSubmit}
             disabled={submitDisabled}
-            className="mt-2 w-full rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-lg font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson disabled:cursor-not-allowed disabled:opacity-40 [@media(max-height:600px)]:py-2 [@media(max-height:600px)]:text-base"
+            className="mx-auto mt-2 block w-2/3 max-w-xs rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-lg font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson disabled:cursor-not-allowed disabled:opacity-40 [@media(max-height:600px)]:py-2 [@media(max-height:600px)]:text-base"
           >
             {queuedByMe ? "審査待ち……" : "送信する"}
           </button>

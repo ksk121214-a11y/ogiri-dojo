@@ -29,6 +29,7 @@ import type {
   DemoTurn,
   JudgingState,
   LivePhase,
+  RevealPending,
 } from "@/types/liveDemo";
 
 interface QueueItem {
@@ -68,7 +69,8 @@ export interface LiveDemoState {
   botAnswerSchedule: BotScheduleEvent[];
 
   judging: JudgingState | null;
-  myPendingScore: 0 | 1 | 2 | null;
+  revealPending: RevealPending | null; // 送信直後・前の審査サイクル終了直後の「一呼吸」（§1.1改訂）
+  myPendingScore: 0 | 1 | 2 | 3 | null;
 
   laughEventSeq: number; // 発生のたびに+1、演出コンポーネントの再トリガーに使う
   lastLaughAnswerId: string | null;
@@ -83,11 +85,11 @@ export interface LiveDemoState {
   closeLive: () => void;
   tick: (nowMs: number) => void;
   submitMyAnswer: (body: string) => { ok: boolean; reason?: string };
-  submitMyScore: (points: 0 | 1 | 2) => void;
+  submitMyScore: (points: 0 | 1 | 2 | 3) => void;
   scoreAnswer: (
     judgeParticipantId: string,
     answerId: string,
-    points: 0 | 1 | 2,
+    points: 0 | 1 | 2 | 3,
   ) => void;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
 }
@@ -108,6 +110,7 @@ const IDLE_STATE = {
   submissionQueue: [],
   botAnswerSchedule: [],
   judging: null,
+  revealPending: null,
   myPendingScore: null,
   laughEventSeq: 0,
   lastLaughAnswerId: null,
@@ -119,17 +122,42 @@ const IDLE_STATE = {
 export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
   // ---- 内部ヘルパー（審査サイクル・キュー処理・フェーズ送り） ----
 
+  // 送信済みキューの先頭を「一呼吸」の待機状態に移すだけで、まだ回答は作らない・審査も始めない。
+  // 実際の回答生成と審査開始はrevealDelayMs経過後にrevealNow()が行う（§1.1改訂：一呼吸置いてから回答表示）。
   function processQueue(now: number) {
     const state = get();
     if (state.judging !== null) return;
+    if (state.revealPending !== null) return;
     if (state.submissionQueue.length === 0) return;
-    const turn = state.turns[state.currentTurnIndex];
-    if (!turn) return;
-    const stageGroup = state.groups.find((g) => g.id === turn.groupId);
-    if (!stageGroup) return;
 
     const [item, ...rest] = state.submissionQueue;
-    const seq = (state.answerCounts[item.participantId] ?? 0) + 1;
+    set({
+      submissionQueue: rest,
+      revealPending: {
+        participantId: item.participantId,
+        body: item.body,
+        revealAt: now + DEMO_TIMING.revealDelayMs,
+      },
+    });
+  }
+
+  // 一呼吸の待機が明けたら実際に回答を生成し、審査サイクルを開始する。
+  function revealNow(now: number) {
+    const state = get();
+    const pending = state.revealPending;
+    if (!pending) return;
+    const turn = state.turns[state.currentTurnIndex];
+    if (!turn) {
+      set({ revealPending: null });
+      return;
+    }
+    const stageGroup = state.groups.find((g) => g.id === turn.groupId);
+    if (!stageGroup) {
+      set({ revealPending: null });
+      return;
+    }
+
+    const seq = (state.answerCounts[pending.participantId] ?? 0) + 1;
     const judgeCount = state.participants.filter(
       (p) => !stageGroup.memberIds.includes(p.id),
     ).length;
@@ -138,11 +166,11 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       id: genId("a"),
       turnId: turn.id,
       groupId: turn.groupId,
-      participantId: item.participantId,
+      participantId: pending.participantId,
       seq,
-      body: item.body,
+      body: pending.body,
       scoreTotal: 0,
-      twoPointVotes: 0,
+      topScoreVotes: 0,
       judgeCount,
       laughTriggered: false,
       createdAt: now,
@@ -150,9 +178,9 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     const endsAt = now + DEMO_TIMING.judgeMs;
 
     set({
-      submissionQueue: rest,
+      revealPending: null,
       answers: [...state.answers, answer],
-      answerCounts: { ...state.answerCounts, [item.participantId]: seq },
+      answerCounts: { ...state.answerCounts, [pending.participantId]: seq },
       judging: { answerId: answer.id, endsAt, judgeCount },
       myPendingScore: null,
     });
@@ -178,13 +206,14 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       (s) => s.answerId === judging.answerId,
     );
     const scoreTotal = relevantScores.reduce((sum, s) => sum + s.points, 0);
-    const twoPointVotes = relevantScores.filter((s) => s.points === 2).length;
-    // 過半数が2点なら笑いエフェクト発生 §4.3
-    const laughTriggered = twoPointVotes > Math.floor(judging.judgeCount / 2);
+    // 2026-07-14改訂：採点を0〜2点の3段階から0〜3点の4段階に変更。
+    // 笑いエフェクトのトリガーも「2点」から最高点の「3点（大ウケ）」の過半数に変更 §4.3
+    const topScoreVotes = relevantScores.filter((s) => s.points === 3).length;
+    const laughTriggered = topScoreVotes > Math.floor(judging.judgeCount / 2);
 
     const answers = state.answers.map((a) =>
       a.id === judging.answerId
-        ? { ...a, scoreTotal, twoPointVotes, laughTriggered }
+        ? { ...a, scoreTotal, topScoreVotes, laughTriggered }
         : a,
     );
 
@@ -210,6 +239,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       phase: "topic_reveal",
       phaseEndsAt: now + DEMO_TIMING.topicRevealMs,
       judging: null,
+      revealPending: null,
       myPendingScore: null,
     });
   }
@@ -241,6 +271,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       submissionQueue: [],
       botAnswerSchedule: schedule,
       judging: null,
+      revealPending: null,
       myPendingScore: null,
     });
   }
@@ -320,6 +351,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     );
     if (
       after.judging === null &&
+      after.revealPending === null &&
       after.submissionQueue.length === 0 &&
       (remainingMs <= 0 || allExhausted)
     ) {
@@ -364,10 +396,19 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       set({ lastTickAt: now });
 
       if (state.judging) {
-        if (now >= state.judging.endsAt) {
+        // 表示上のカウントダウンはendsAtで0になるが、実際に締め切るのはjudgeGraceMsぶん後。
+        // 「0になった瞬間でもギリギリ滑り込みで採点できる」余地を持たせる（2026-07-14追加）。
+        if (now >= state.judging.endsAt + DEMO_TIMING.judgeGraceMs) {
           resolveJudging(now);
         }
         return; // 採点中は持ち時間タイマーを進めない（pause方式 §1.1）
+      }
+
+      if (state.revealPending) {
+        if (now >= state.revealPending.revealAt) {
+          revealNow(now);
+        }
+        return; // 一呼吸置いている間も持ち時間タイマーを止める（審査中と同様の扱い）
       }
 
       if (state.phase === "answering") {

@@ -29,6 +29,7 @@ export default function AudienceScreen() {
   const turn = getCurrentTurn(state);
   const stageGroup = getStageGroup(state);
   const judging = state.judging;
+  const revealPending = state.revealPending;
 
   if (!turn || !stageGroup) return null;
   const topicBody = getTopicBody(state, turn.topicId);
@@ -62,8 +63,8 @@ export default function AudienceScreen() {
             remainingMs={state.answeringRemainingMs}
             totalMs={DEMO_TIMING.answerMs}
             label="持ち時間"
-            paused={judging !== null}
-            size={56}
+            paused={judging !== null || revealPending !== null}
+            size={68}
           />
         </div>
 

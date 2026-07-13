@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import NavTile from "@/components/app/NavTile";
+import TutorialModal from "@/components/app/TutorialModal";
 import { getNextRank, getRankByMeter, groupOwnedItems, getCollectionItem } from "@/data/collectionData";
 import { MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
 import { ITEM_TYPE_EMOJI, RARITY_TEXT_CLASS } from "@/lib/economyUi";
@@ -25,6 +26,7 @@ type MainView = "home" | "mypage";
 // 「マイページ」ボタン押下によるページ内ビュー切り替え（gacha/ranking画面のタブ切り替えと同じパターン）に変更した。
 export default function Home() {
   const [view, setView] = useState<MainView>("home");
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-8">
@@ -38,16 +40,25 @@ export default function Home() {
           <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
             ONLINE OGIRI LIVE
           </p>
-          <h1 className="font-brush text-5xl leading-relaxed text-dojo-dark-brown sm:text-7xl">
+          <button
+            type="button"
+            onClick={() => setTutorialOpen(true)}
+            className="font-brush text-5xl leading-relaxed text-dojo-dark-brown transition hover:text-dojo-curtain-red sm:text-7xl"
+          >
             大喜利道場
-          </h1>
+          </button>
           <p className="font-sans text-sm text-dojo-ink">
             決まった時間に、みんなで集まる大喜利ライブ。
+          </p>
+          <p className="font-sans text-[11px] text-dojo-dark-brown">
+            ↑タップで遊び方を見る
           </p>
         </motion.section>
       )}
 
       {view === "home" ? <HomeView onOpenMyPage={() => setView("mypage")} /> : <MyPageView onBack={() => setView("home")} />}
+
+      <TutorialModal open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
     </div>
   );
 }
@@ -175,6 +186,9 @@ function MyPageView({ onBack }: { onBack: () => void }) {
     .filter((item): item is NonNullable<typeof item> => !!item);
 
   const ownedItems = groupOwnedItems(user.inventory.ownedItemIds);
+  const equippedIcon = user.inventory.equipped.iconPartId
+    ? getCollectionItem(user.inventory.equipped.iconPartId)
+    : undefined;
 
   return (
     <section className="flex flex-col gap-6">
@@ -196,7 +210,13 @@ function MyPageView({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center sm:flex-row sm:items-start sm:gap-5 sm:text-left">
-        <AvatarPlaceholder size={88} />
+        <span className="flex h-[88px] w-[88px] shrink-0 items-center justify-center overflow-hidden rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream">
+          {equippedIcon ? (
+            <span className="text-4xl">{ITEM_TYPE_EMOJI[equippedIcon.type]}</span>
+          ) : (
+            <AvatarPlaceholder size={88} />
+          )}
+        </span>
         <div className="flex flex-col items-center gap-1 sm:items-start">
           <p className="font-sans text-[11px] text-dojo-dark-brown">
             演者名

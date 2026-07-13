@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import SnsBackButton from "@/components/sns/SnsBackButton";
 import { isLocallyCreated } from "@/lib/staticContent";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -45,12 +46,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         <p className="font-sans text-sm text-dojo-dark-brown">
           お題が見つかりませんでした。
         </p>
-        <Link
-          href="/sns"
-          className="font-sans text-xs font-bold text-dojo-ink hover:underline"
-        >
-          ← 寄合帳へ戻る
-        </Link>
+        <SnsBackButton className="font-sans text-xs font-bold text-dojo-ink hover:underline" />
       </div>
     );
   }
@@ -67,12 +63,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <Link
-        href="/sns"
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← 寄合帳へ戻る
-      </Link>
+      <SnsBackButton />
 
       <div className="rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-5 sm:p-6">
         <div className="flex items-center justify-between gap-2">

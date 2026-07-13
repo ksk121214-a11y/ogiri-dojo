@@ -26,6 +26,7 @@
   --color-dojo-score-0: #5b5866; /* 採点0点 */
   --color-dojo-score-1: #f2b84b; /* 採点1点（灯り黄） */
   --color-dojo-score-2: #e23a52; /* 採点2点（ウケた） */
+  --color-dojo-score-3: #ff8a3d; /* 採点3点（大ウケ、灯り橙） */
   --color-dojo-success: #4fb286; /* 成功/緑系 */
 
   /* デザイン方針.md §2.5 配色改訂（2026-07-13、和風トーン）：

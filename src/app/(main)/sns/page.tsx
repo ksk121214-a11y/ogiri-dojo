@@ -14,8 +14,8 @@ type AudienceKind = "forYou" | "following";
 type SortKind = "new" | "popular";
 
 const FEED_TABS: { key: FeedKind; label: string }[] = [
-  { key: "topics", label: "お題フィード" },
-  { key: "answers", label: "回答フィード" },
+  { key: "topics", label: "お題" },
+  { key: "answers", label: "回答" },
 ];
 
 const AUDIENCE_TABS: { key: AudienceKind; label: string }[] = [

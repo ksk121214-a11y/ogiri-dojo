@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
 import { getDummySnsAuthor, getRandomOtherAuthors } from "@/data/snsAuthors";
 
@@ -17,9 +16,7 @@ export default function SnsAuthorFollowers({ authorId }: { authorId: string }) {
         <p className="font-sans text-sm text-dojo-dark-brown">
           演者が見つかりませんでした。
         </p>
-        <Link href="/sns" className="font-sans text-xs font-bold text-dojo-ink hover:underline">
-          ← 寄合帳へ戻る
-        </Link>
+        <SnsBackButton className="font-sans text-xs font-bold text-dojo-ink hover:underline" />
       </div>
     );
   }
@@ -32,12 +29,7 @@ export default function SnsAuthorFollowers({ authorId }: { authorId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <Link
-        href={`/sns/u/${authorId}`}
-        className="w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline"
-      >
-        ← {author.displayName} のプロフィールへ戻る
-      </Link>
+      <SnsBackButton fallbackHref={`/sns/u/${authorId}`} />
 
       <div className="text-center">
         <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">FOLLOWERS</p>
