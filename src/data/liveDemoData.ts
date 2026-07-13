@@ -4,13 +4,13 @@
 
 export const GROUP_COUNT = 3;
 export const ROUNDS_PER_LIVE = 2; // 仕様書 §1.3 の既定値どおり2周
-export const MAX_ANSWERS_PER_PLAYER = 3; // 仕様書どおり
+export const MAX_ANSWERS_PER_PLAYER = 5; // 仕様書どおり（2026-07-14改訂：3回→5回）
 
 export const DEMO_TIMING = {
   interludeMs: 2400, // 実仕様: 幕間10〜20秒。デモは短縮
   openingMs: 2600, // 実仕様: 開幕30〜60秒
   topicRevealMs: 2200, // 実仕様: お題発表15〜30秒
-  answerMs: 120_000, // 実仕様どおり：持ち時間120秒（2分）。短縮しない
+  answerMs: 90_000, // 実仕様どおり：持ち時間90秒（2026-07-14改訂：120秒→90秒）。短縮しない
   judgeMs: 10_000, // 実仕様どおり：採点10秒。採点権を持つ全員が投票し終えたら10秒を待たず早期確定する（§1.1・§4.1）。短縮しない
   groupResultMs: 3_400, // 実仕様: 組結果20〜40秒
   laughEffectMs: 1_100, // デザイン方針§4.4: 0.8〜1.2秒で収束
