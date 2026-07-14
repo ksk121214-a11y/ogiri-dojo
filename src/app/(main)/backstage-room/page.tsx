@@ -114,7 +114,7 @@ export default function BackstageRoomPage() {
         initial={{ scale: 0.97, opacity: 0.7 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 260, damping: 18 }}
-        className={`relative flex flex-col items-center gap-3 overflow-hidden rounded-3xl border border-dojo-dark-brown/20 bg-gradient-to-b p-6 text-center sm:p-8 ${roomBgClass}`}
+        className={`relative mx-auto flex w-full max-w-lg flex-col items-center gap-3 overflow-hidden rounded-3xl border border-dojo-dark-brown/20 bg-gradient-to-b p-6 text-center sm:p-8 ${roomBgClass}`}
       >
         {/* 壁掛けテレビ */}
         <div className="flex w-full items-start justify-end">
