@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 
+import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import { getCollectionItem } from "@/data/collectionData";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
@@ -64,11 +65,7 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
         </div>
 
         <div className="relative">
-          <span
-            className={`flex h-[104px] w-[104px] items-center justify-center rounded-full text-5xl text-dojo-washi-white ${author.bgColorClass}`}
-          >
-            {author.emoji}
-          </span>
+          <AvatarPlaceholder size={104} />
           {icon && (
             <span className="absolute -right-2 -top-2 flex h-9 w-9 items-center justify-center rounded-full border-2 border-dojo-curtain-gold bg-dojo-tatami-cream text-lg shadow">
               {ITEM_TYPE_EMOJI.icon_part}

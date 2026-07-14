@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import { getCollectionItem, groupOwnedItems } from "@/data/collectionData";
+import { DUMMY_SNS_AUTHORS } from "@/data/snsAuthors";
 import {
   DEFAULT_ROOM_BG_CLASS,
   ITEM_TYPE_EMOJI,
@@ -34,6 +35,7 @@ export default function BackstageRoomPage() {
   const [activeType, setActiveType] = useState<ItemType>("costume");
   const [message, setMessage] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
+  const [showGreetingList, setShowGreetingList] = useState(false);
 
   const handleEquip = (item: NonNullable<ReturnType<typeof getCollectionItem>>) => {
     equipItem(item);
@@ -143,6 +145,54 @@ export default function BackstageRoomPage() {
           簡易な部屋イメージ（ダミー表示）
         </p>
       </motion.div>
+
+      <div className="flex flex-col items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowGreetingList((v) => !v)}
+          className="flex items-center gap-1.5 rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-5 py-2.5 font-sans text-sm font-bold text-dojo-ink transition hover:bg-dojo-light-brown"
+        >
+          <span aria-hidden>🙇</span>
+          {showGreetingList ? "他の演者一覧を閉じる" : "挨拶する"}
+        </button>
+
+        {showGreetingList && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex w-full flex-col gap-2"
+          >
+            {DUMMY_SNS_AUTHORS.map((author) => (
+              <div
+                key={author.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-dojo-dark-brown/15 bg-dojo-light-brown/60 p-3"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg text-dojo-washi-white ${author.bgColorClass}`}
+                  >
+                    {author.emoji}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-sans text-sm font-bold text-dojo-ink">
+                      {author.displayName}
+                    </p>
+                    <p className="font-sans text-[10px] text-dojo-dark-brown">
+                      {author.rankLabel}
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href={`/sns/u/${author.id}/backstage`}
+                  className="flex shrink-0 items-center gap-1 rounded-full bg-dojo-curtain-red px-3 py-1.5 font-sans text-xs font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+                >
+                  楽屋挨拶に行く →
+                </Link>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </div>
 
       <p className="rounded-full bg-dojo-curtain-gold/20 px-4 py-2 text-center font-sans text-[11px] font-bold text-dojo-dark-brown">
         🪄 下のカードをタップすると、その場ですぐに着せ替えできます
