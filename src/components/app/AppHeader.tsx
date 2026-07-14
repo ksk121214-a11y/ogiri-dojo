@@ -8,10 +8,10 @@ import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
   { href: "/", label: "ホーム" },
-  { href: "/live-demo", label: "ライブ体験" },
-  { href: "/gacha", label: "ガチャ" },
+  { href: "/live-demo", label: "大喜利ライブ" },
+  { href: "/gacha", label: "くじ引き" },
   { href: "/backstage-room", label: "楽屋" },
-  { href: "/ranking", label: "ランキング" },
+  { href: "/ranking", label: "番付表" },
   { href: "/sns", label: "寄合帳" },
 ] as const;
 

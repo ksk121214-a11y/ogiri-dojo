@@ -31,9 +31,9 @@ export default function StageScreen() {
   const revealPending = state.revealPending;
   const answeringRemainingMs = state.answeringRemainingMs;
   const myCount = state.answerCounts[MY_PARTICIPANT_ID] ?? 0;
-  const queuedByMe = state.submissionQueue.some(
-    (q) => q.participantId === MY_PARTICIPANT_ID,
-  );
+  // 「送信して審査待ちで予約」の仕組みは廃止。誰かの回答が表示・審査されている間は
+  // 送信そのものができない（入力は引き続き可能）§6改訂。
+  const busyWithOthers = judging !== null || revealPending !== null;
 
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +78,10 @@ export default function StageScreen() {
     }
   };
 
-  // 排他制御・キュー処理の対象は「送信」だけ。テキストの入力・編集自体は
+  // 排他制御の対象は「送信」だけ。テキストの入力・編集自体は
   // 審査サイクル中でも常に可能にする（回数上限に達した場合のみ入力欄を閉じる）§6。
   const overLimit = myCount >= MAX_ANSWERS_PER_PLAYER;
-  const submitDisabled = overLimit || queuedByMe || !draft.trim();
+  const submitDisabled = overLimit || busyWithOthers || !draft.trim();
 
   return (
     <ScreenShell className="!items-stretch !justify-center !overflow-hidden !px-3 !py-3 sm:!px-6 sm:!py-6">
@@ -171,8 +171,8 @@ export default function StageScreen() {
             placeholder={
               overLimit
                 ? "回答できる回数の上限に達しました"
-                : queuedByMe
-                  ? "送信済み。審査待ちです（続けて次の回答を書けます）"
+                : busyWithOthers
+                  ? "他の回答を審査中です。書きためておけます（送信は少し待ってね）"
                   : "回答を入力……"
             }
             rows={2}
@@ -189,7 +189,7 @@ export default function StageScreen() {
             disabled={submitDisabled}
             className="mx-auto mt-2 block w-2/3 max-w-xs rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-lg font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson disabled:cursor-not-allowed disabled:opacity-40 [@media(max-height:600px)]:py-2 [@media(max-height:600px)]:text-base"
           >
-            {queuedByMe ? "審査待ち……" : "送信する"}
+            {busyWithOthers ? "審査中…少し待ってね" : "送信する"}
           </button>
         </motion.div>
       </div>

@@ -433,17 +433,22 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
         return { ok: false, reason: "あなたの組の番ではありません" };
       }
       const used = state.answerCounts[MY_PARTICIPANT_ID] ?? 0;
-      const queuedByMe = state.submissionQueue.filter(
-        (q) => q.participantId === MY_PARTICIPANT_ID,
-      ).length;
-      if (used + queuedByMe >= MAX_ANSWERS_PER_PLAYER) {
+      if (used >= MAX_ANSWERS_PER_PLAYER) {
         return { ok: false, reason: "回答できる回数の上限です" };
       }
       const trimmed = body.trim();
       if (!trimmed) return { ok: false, reason: "回答を入力してください" };
 
-      // 入力・編集はいつでも可能。排他制御されるのは送信（キュー投入）のみ §6：
-      // 審査サイクル中でもキューには積み、processQueueは審査中は何もせず待機する。
+      // 入力・編集はいつでも可能だが、送信（＝予約）は誰かの回答が表示・審査されている間はできない §6改訂：
+      // 「送信して審査待ちの状態で予約しておく」仕組みを廃止し、他の回答と被っていないか
+      // 確認してから送信できるようにする（他人の回答中に送って取り返しがつかなくなるのを防ぐ）。
+      if (state.judging !== null || state.revealPending !== null) {
+        return {
+          ok: false,
+          reason: "他の回答の審査中は送信できません。終わってから送信してください",
+        };
+      }
+
       set({
         submissionQueue: [
           ...state.submissionQueue,
