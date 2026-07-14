@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
-import { getCollectionItem, getRankByMeter } from "@/data/collectionData";
+import MyIconAvatar from "@/components/app/MyIconAvatar";
+import { getRankByMeter } from "@/data/collectionData";
 import { MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
-import { ITEM_TYPE_EMOJI } from "@/lib/economyUi";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -25,22 +24,13 @@ export default function SnsMyProfileCard() {
   const [bioDraft, setBioDraft] = useState(user.bio);
 
   const rank = getRankByMeter(user.masteryMeter);
-  const iconItem = user.inventory.equipped.iconPartId
-    ? getCollectionItem(user.inventory.equipped.iconPartId)
-    : undefined;
 
   const ownAnswers = answers.filter((a) => a.authorId === "me");
   const totalLikes = ownAnswers.reduce((sum, a) => sum + a.likes, 0);
 
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center">
-      <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream">
-        {iconItem ? (
-          <span className="text-3xl">{ITEM_TYPE_EMOJI[iconItem.type]}</span>
-        ) : (
-          <AvatarPlaceholder size={64} />
-        )}
-      </span>
+      <MyIconAvatar size={64} />
       <div>
         <p className="font-brush text-2xl text-dojo-ink">{user.displayName}</p>
         <p className="mt-1 font-sans text-xs font-bold text-dojo-ink">

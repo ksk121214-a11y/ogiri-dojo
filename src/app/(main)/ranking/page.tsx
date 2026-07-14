@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 
+import InitialAvatar from "@/components/app/InitialAvatar";
+import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ReportButton from "@/components/app/ReportButton";
 import { ARCHIVE_LIVES, getAllArchiveAnswers } from "@/data/archiveData";
 import { getRankByMeter, RANK_DEFINITIONS } from "@/data/collectionData";
 import { DUMMY_RANKING } from "@/data/rankingData";
@@ -90,9 +93,14 @@ function RankingTab() {
             }`}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="w-7 shrink-0 text-center font-sans text-xs text-dojo-dark-brown">
+              <span className="w-5 shrink-0 text-center font-sans text-xs text-dojo-dark-brown">
                 {idx + 1}
               </span>
+              {isMe ? (
+                <MyIconAvatar size={36} />
+              ) : (
+                <InitialAvatar name={entry.name} seed={idx} size={36} />
+              )}
               <div className="min-w-0">
                 <p className="truncate font-sans text-sm font-bold text-dojo-ink">
                   {entry.name}
@@ -103,9 +111,12 @@ function RankingTab() {
                 </p>
               </div>
             </div>
-            <span className="shrink-0 font-sans text-xs tabular-nums text-dojo-dark-brown">
-              {entry.score.toLocaleString()}
-            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="font-sans text-xs tabular-nums text-dojo-dark-brown">
+                {entry.score.toLocaleString()}
+              </span>
+              {!isMe && <ReportButton size={18} />}
+            </div>
           </div>
         );
       })}

@@ -2,6 +2,9 @@
 
 import { motion } from "framer-motion";
 
+import InitialAvatar from "@/components/app/InitialAvatar";
+import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ReportButton from "@/components/app/ReportButton";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
 import {
   getCurrentTurn,
@@ -35,28 +38,48 @@ export default function GroupResultScreen() {
       </p>
 
       <div className="mt-6 w-full max-w-md space-y-2">
-        {ranking.map((entry, idx) => (
-          <motion.div
-            key={entry.participant.id}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: idx * 0.12 }}
-            className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
-              entry.participant.id === MY_PARTICIPANT_ID
-                ? "border-dojo-curtain-gold bg-dojo-backstage-navy"
-                : "border-dojo-gray-purple/20 bg-dojo-backstage-navy/60"
-            }`}
-          >
-            <span className="font-sans text-sm">
-              <span className="mr-2 text-dojo-gray-purple">{idx + 1}位</span>
-              {entry.participant.displayName}
-              {entry.participant.id === MY_PARTICIPANT_ID ? "（あなた）" : ""}
-            </span>
-            <span className="font-sans font-bold tabular-nums text-dojo-spotlight-orange-light">
-              {entry.total}点
-            </span>
-          </motion.div>
-        ))}
+        {ranking.map((entry, idx) => {
+          const isMe = entry.participant.id === MY_PARTICIPANT_ID;
+          const participantIndex = state.participants.findIndex(
+            (p) => p.id === entry.participant.id,
+          );
+          return (
+            <motion.div
+              key={entry.participant.id}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.12 }}
+              className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                isMe
+                  ? "border-dojo-curtain-gold bg-dojo-backstage-navy"
+                  : "border-dojo-gray-purple/20 bg-dojo-backstage-navy/60"
+              }`}
+            >
+              <span className="flex min-w-0 items-center gap-2.5 font-sans text-sm">
+                <span className="text-dojo-gray-purple">{idx + 1}位</span>
+                {isMe ? (
+                  <MyIconAvatar size={28} />
+                ) : (
+                  <InitialAvatar
+                    name={entry.participant.displayName}
+                    seed={participantIndex}
+                    size={28}
+                  />
+                )}
+                <span className="truncate">
+                  {entry.participant.displayName}
+                  {isMe ? "（あなた）" : ""}
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="font-sans font-bold tabular-nums text-dojo-spotlight-orange-light">
+                  {entry.total}点
+                </span>
+                {!isMe && <ReportButton size={18} />}
+              </span>
+            </motion.div>
+          );
+        })}
       </div>
 
       {laughAnswers.length > 0 && (

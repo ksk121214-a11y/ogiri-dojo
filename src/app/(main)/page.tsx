@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useState } from "react";
 
-import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
+import MyIconAvatar from "@/components/app/MyIconAvatar";
 import NavTile from "@/components/app/NavTile";
 import TutorialModal from "@/components/app/TutorialModal";
 import { getNextRank, getRankByMeter, groupOwnedItems, getCollectionItem } from "@/data/collectionData";
@@ -186,9 +186,6 @@ function MyPageView({ onBack }: { onBack: () => void }) {
     .filter((item): item is NonNullable<typeof item> => !!item);
 
   const ownedItems = groupOwnedItems(user.inventory.ownedItemIds);
-  const equippedIcon = user.inventory.equipped.iconPartId
-    ? getCollectionItem(user.inventory.equipped.iconPartId)
-    : undefined;
 
   return (
     <section className="flex flex-col gap-6">
@@ -210,13 +207,7 @@ function MyPageView({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center sm:flex-row sm:items-start sm:gap-5 sm:text-left">
-        <span className="flex h-[88px] w-[88px] shrink-0 items-center justify-center overflow-hidden rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream">
-          {equippedIcon ? (
-            <span className="text-4xl">{ITEM_TYPE_EMOJI[equippedIcon.type]}</span>
-          ) : (
-            <AvatarPlaceholder size={88} />
-          )}
-        </span>
+        <MyIconAvatar size={88} />
         <div className="flex flex-col items-center gap-1 sm:items-start">
           <p className="font-sans text-[11px] text-dojo-dark-brown">
             演者名

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import ReportButton from "@/components/app/ReportButton";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
@@ -60,7 +61,10 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
       <SnsBackButton />
 
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center">
+      <div className="relative flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center">
+        <div className="absolute right-4 top-4">
+          <ReportButton />
+        </div>
         <span
           className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-3xl text-dojo-washi-white ${author.bgColorClass}`}
         >
