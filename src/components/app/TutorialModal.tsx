@@ -2,6 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 
+import { MAX_ANSWERS_PER_PLAYER } from "@/data/liveDemoData";
+
 // ホームの「大喜利道場」タイトルを押すと出るチュートリアル/説明モーダル。
 // 仕様書.md §0・§1の要点を、初めて触る人向けに噛み砕いて紹介する。
 const STEPS: { emoji: string; title: string; body: string }[] = [
@@ -12,8 +14,8 @@ const STEPS: { emoji: string; title: string; body: string }[] = [
   },
   {
     emoji: "📝",
-    title: "舞台では持ち時間内に何度でも回答",
-    body: "自分の組の番が来たら、持ち時間の間にお題への回答を送信します。送信するたびに、客席が0〜3点で採点する審査サイクルが挟まります。",
+    title: `舞台では持ち時間内に最大${MAX_ANSWERS_PER_PLAYER}回回答`,
+    body: `自分の組の番が来たら、持ち時間の間にお題への回答を最大${MAX_ANSWERS_PER_PLAYER}回まで送信できます。送信するたびに、客席が0〜3点で採点する審査サイクルが挟まります（他の回答が審査されている間は送信できませんが、入力は可能です）。`,
   },
   {
     emoji: "🙌",

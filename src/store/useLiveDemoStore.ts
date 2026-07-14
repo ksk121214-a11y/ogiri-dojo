@@ -476,14 +476,22 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
           : {}),
       });
 
-      // 早期確定：採点権を持つ審査員全員が投票し終えたら10秒を待たず即座に締め切る（§1.1・§4.1）
+      // 早期確定：採点権を持つ審査員全員が投票し終えたら10秒を待たず締め切る（§1.1・§4.1）。
+      // ただしその場でresolveJudging()すると、最後に押した審査員自身の採点ボタンの
+      // 光る演出が1フレームも描画されないままカードが消えてしまうため、
+      // earlyConfirmDelayMsぶんだけ猶予を置いてから締め切る（2026-07-14追加）。
       const votedJudgeCount = new Set(
         nextScores
           .filter((s) => s.answerId === answerId)
           .map((s) => s.judgeParticipantId),
       ).size;
       if (votedJudgeCount >= judging.judgeCount) {
-        resolveJudging(Date.now());
+        setTimeout(() => {
+          const latestJudging = get().judging;
+          if (latestJudging && latestJudging.answerId === answerId) {
+            resolveJudging(Date.now());
+          }
+        }, DEMO_TIMING.earlyConfirmDelayMs);
       }
     },
 
