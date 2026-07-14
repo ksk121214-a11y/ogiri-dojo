@@ -6,7 +6,6 @@ import { useMemo, useState } from "react";
 
 import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import { getCollectionItem, groupOwnedItems } from "@/data/collectionData";
-import { DUMMY_SNS_AUTHORS } from "@/data/snsAuthors";
 import {
   DEFAULT_ROOM_BG_CLASS,
   ITEM_TYPE_EMOJI,
@@ -25,6 +24,9 @@ const EQUIPPED_KEY: Record<ItemType, "costumeId" | "iconPartId" | "bgPatternId">
   bg_pattern: "bgPatternId",
 };
 
+// 「挨拶された回数」はいいね数・閲覧数の代わりの指標として一旦ダミー表示する（本実装までの仮値）。
+const DUMMY_GREETING_COUNT = 132;
+
 // 楽屋（カスタム専用の部屋）画面：所持している衣装・アイコンパーツ・背景柄を選んで
 // 見た目を切り替えられるダミーUI。マイページ（実績・段位の確認）とは役割を分け、
 // ここでは「着せ替え・模様替え」の操作そのものを主役にする。
@@ -35,7 +37,6 @@ export default function BackstageRoomPage() {
   const [activeType, setActiveType] = useState<ItemType>("costume");
   const [message, setMessage] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
-  const [showGreetingList, setShowGreetingList] = useState(false);
 
   const handleEquip = (item: NonNullable<ReturnType<typeof getCollectionItem>>) => {
     equipItem(item);
@@ -71,17 +72,34 @@ export default function BackstageRoomPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="text-center">
-        <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
-          BACKSTAGE ROOM
-        </p>
-        <h1 className="mt-1 font-brush text-3xl text-dojo-dark-brown sm:text-4xl">
-          楽屋
-        </h1>
-        <p className="mt-2 font-sans text-xs text-dojo-dark-brown">
-          ここでは所持している衣装・アイコンパーツ・背景柄をタップするだけで、その場ですぐに模様替え・着せ替えができます。買い物は「ガチャ」内の衣装蔵で。
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col items-center">
+          <span className="font-sans text-[9px] text-dojo-dark-brown">
+            挨拶された回数
+          </span>
+          <span className="font-sans text-xl font-bold tabular-nums text-dojo-curtain-gold">
+            {DUMMY_GREETING_COUNT}
+          </span>
+        </div>
+        <div className="flex-1 text-center">
+          <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
+            BACKSTAGE ROOM
+          </p>
+          <h1 className="mt-1 font-brush text-3xl text-dojo-dark-brown sm:text-4xl">
+            楽屋
+          </h1>
+        </div>
+        <Link
+          href="/backstage-room/greetings"
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown sm:text-sm"
+        >
+          <span aria-hidden>🙇</span>
+          楽屋挨拶に行く
+        </Link>
       </div>
+      <p className="text-center font-sans text-xs text-dojo-dark-brown">
+        ここでは所持している衣装・アイコンパーツ・背景柄をタップするだけで、その場ですぐに模様替え・着せ替えができます。買い物は「ガチャ」内の衣装蔵で。
+      </p>
 
       {message && (
         <p className="rounded-lg border border-dojo-curtain-gold/40 bg-dojo-light-brown px-4 py-2 text-center font-sans text-xs font-bold text-dojo-ink">
@@ -145,54 +163,6 @@ export default function BackstageRoomPage() {
           簡易な部屋イメージ（ダミー表示）
         </p>
       </motion.div>
-
-      <div className="flex flex-col items-center gap-3">
-        <button
-          type="button"
-          onClick={() => setShowGreetingList((v) => !v)}
-          className="flex items-center gap-1.5 rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-5 py-2.5 font-sans text-sm font-bold text-dojo-ink transition hover:bg-dojo-light-brown"
-        >
-          <span aria-hidden>🙇</span>
-          {showGreetingList ? "他の演者一覧を閉じる" : "挨拶する"}
-        </button>
-
-        {showGreetingList && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex w-full flex-col gap-2"
-          >
-            {DUMMY_SNS_AUTHORS.map((author) => (
-              <div
-                key={author.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-dojo-dark-brown/15 bg-dojo-light-brown/60 p-3"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg text-dojo-washi-white ${author.bgColorClass}`}
-                  >
-                    {author.emoji}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-sans text-sm font-bold text-dojo-ink">
-                      {author.displayName}
-                    </p>
-                    <p className="font-sans text-[10px] text-dojo-dark-brown">
-                      {author.rankLabel}
-                    </p>
-                  </div>
-                </div>
-                <Link
-                  href={`/sns/u/${author.id}/backstage`}
-                  className="flex shrink-0 items-center gap-1 rounded-full bg-dojo-curtain-red px-3 py-1.5 font-sans text-xs font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
-                >
-                  楽屋挨拶に行く →
-                </Link>
-              </div>
-            ))}
-          </motion.div>
-        )}
-      </div>
 
       <p className="rounded-full bg-dojo-curtain-gold/20 px-4 py-2 text-center font-sans text-[11px] font-bold text-dojo-dark-brown">
         🪄 下のカードをタップすると、その場ですぐに着せ替えできます

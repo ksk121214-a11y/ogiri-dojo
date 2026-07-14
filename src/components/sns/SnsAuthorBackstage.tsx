@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useState } from "react";
 
 import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import SnsBackButton from "@/components/sns/SnsBackButton";
@@ -12,10 +13,13 @@ import {
   ROOM_BG_CLASS,
 } from "@/lib/economyUi";
 
+const GREETING_PHRASES = ["おはようございます", "よろしくお願いします"] as const;
+
 // 「楽屋に挨拶」ボタンから訪れる、他の演者（ダミー投稿者）の楽屋を覗き見る専用ページ。
 // 自分の楽屋（backstage-room）と違い、着せ替え操作は一切できない見学専用の表示。
 export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
   const author = getDummySnsAuthor(authorId);
+  const [sentPhrase, setSentPhrase] = useState<string | null>(null);
 
   if (!author) {
     return (
@@ -100,6 +104,31 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
           簡易な部屋イメージ（ダミー表示）
         </p>
       </motion.div>
+
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-wrap justify-center gap-2">
+          {GREETING_PHRASES.map((phrase) => (
+            <button
+              key={phrase}
+              type="button"
+              onClick={() => setSentPhrase(phrase)}
+              className="rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown active:scale-95"
+            >
+              {phrase}
+            </button>
+          ))}
+        </div>
+        {sentPhrase && (
+          <motion.p
+            key={sentPhrase}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="font-sans text-xs font-bold text-dojo-curtain-red"
+          >
+            「{sentPhrase}」と挨拶しました！
+          </motion.p>
+        )}
+      </div>
     </div>
   );
 }
