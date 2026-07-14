@@ -139,30 +139,35 @@ function HomeView({ onOpenMyPage }: { onOpenMyPage: () => void }) {
             emoji="🎤"
             title="大喜利ライブ"
             description="開演から表彰までのライブ進行をモックで体験する"
+            flavorText="決まった時間に道場に集まり、舞台に立って大喜利で腕を競う本編。寄席で言う「本題」にあたる、道場いちばんの晴れ舞台。"
           />
           <NavTile
             href="/gacha"
             emoji="🎰"
             title="くじ引き"
             description="ポイントで衣装・パーツ・背景柄を引く／衣装蔵で個別購入する"
+            flavorText="寄席のくじ引き。楽屋の合間にふらっと引く、ちょっとした運試しのコーナー。当たった衣装やアイコンパーツは楽屋でそのまま身につけられる。"
           />
           <NavTile
             href="/backstage-room"
             emoji="🚪"
             title="楽屋"
             description="所持アイテムでその場で着せ替え・模様替えする"
+            flavorText="出番前後の演者が身支度をする控室。ここで衣装や小道具を選んで、その日の高座に上がる準備を整える。他の演者の楽屋にも挨拶に行ける。"
           />
           <NavTile
             href="/ranking"
             emoji="🏆"
             title="番付表"
             description="段位・スコアの一覧や過去のライブを振り返る"
+            flavorText="相撲や寄席の番付になぞらえた、道場に集う演者たちの序列表。段位や成績がひと目でわかる。"
           />
           <NavTile
             href="/sns"
             emoji="📔"
             title="寄合帳"
             description="道場の仲間とお題・回答を投稿し合う"
+            flavorText="楽屋雀たちが世間話やお題のやり取りを書き留める、寄席の「寄合帳」にちなんだ交流ノート。フォローやツッコミもここで。"
           />
         </div>
       </section>
