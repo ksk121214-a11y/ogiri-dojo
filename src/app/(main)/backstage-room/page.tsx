@@ -72,8 +72,8 @@ export default function BackstageRoomPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col items-center">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
+        <div className="flex flex-col items-center justify-self-start">
           <span className="font-sans text-[9px] text-dojo-dark-brown">
             挨拶された回数
           </span>
@@ -81,7 +81,7 @@ export default function BackstageRoomPage() {
             {DUMMY_GREETING_COUNT}
           </span>
         </div>
-        <div className="flex-1 text-center">
+        <div className="text-center">
           <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
             BACKSTAGE ROOM
           </p>
@@ -91,7 +91,7 @@ export default function BackstageRoomPage() {
         </div>
         <Link
           href="/backstage-room/greetings"
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown sm:text-sm"
+          className="flex shrink-0 items-center gap-1.5 justify-self-end rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown sm:text-sm"
         >
           <span aria-hidden>🙇</span>
           楽屋挨拶に行く
