@@ -137,13 +137,13 @@ function HomeView({ onOpenMyPage }: { onOpenMyPage: () => void }) {
           <NavTile
             href="/live-demo"
             emoji="🎤"
-            title="ライブ体験"
+            title="大喜利ライブ"
             description="開演から表彰までのライブ進行をモックで体験する"
           />
           <NavTile
             href="/gacha"
             emoji="🎰"
-            title="ガチャ"
+            title="くじ引き"
             description="ポイントで衣装・パーツ・背景柄を引く／衣装蔵で個別購入する"
           />
           <NavTile
@@ -155,8 +155,14 @@ function HomeView({ onOpenMyPage }: { onOpenMyPage: () => void }) {
           <NavTile
             href="/ranking"
             emoji="🏆"
-            title="ランキング"
+            title="番付表"
             description="段位・スコアの一覧や過去のライブを振り返る"
+          />
+          <NavTile
+            href="/sns"
+            emoji="📔"
+            title="寄合帳"
+            description="道場の仲間とお題・回答を投稿し合う"
           />
         </div>
       </section>
