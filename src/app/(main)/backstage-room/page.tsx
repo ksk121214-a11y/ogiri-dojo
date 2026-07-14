@@ -91,9 +91,8 @@ export default function BackstageRoomPage() {
         </div>
         <Link
           href="/backstage-room/greetings"
-          className="flex shrink-0 items-center gap-1.5 justify-self-end rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown sm:text-sm"
+          className="shrink-0 justify-self-end whitespace-nowrap rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown sm:text-sm"
         >
-          <span aria-hidden>🙇</span>
           楽屋挨拶に行く
         </Link>
       </div>
