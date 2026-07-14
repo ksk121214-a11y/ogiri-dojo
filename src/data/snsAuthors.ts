@@ -11,24 +11,28 @@ export interface SnsAuthorProfile {
   bgColorClass: string;
   followerCount: number;
   followingCount: number;
+  // 「楽屋に挨拶」で覗きに行った時に見える、装備中の衣装・アイコンパーツ・背景柄（ダミー実装）。
+  equippedCostumeId: string;
+  equippedIconPartId: string;
+  equippedBgPatternId: string;
 }
 
 export const DUMMY_SNS_AUTHORS: SnsAuthorProfile[] = [
-  { id: "author-raitoningu", displayName: "笑福亭ライトニング", rankLabel: "真打", emoji: "⚡", bgColorClass: "bg-dojo-curtain-red", followerCount: 342, followingCount: 58 },
-  { id: "author-hina", displayName: "座布団ヒナ", rankLabel: "二ツ目", emoji: "🌸", bgColorClass: "bg-dojo-cheer-pink", followerCount: 128, followingCount: 96 },
-  { id: "author-tetsuya", displayName: "早口テツヤ", rankLabel: "前座", emoji: "🎤", bgColorClass: "bg-dojo-spotlight-orange", followerCount: 41, followingCount: 73 },
-  { id: "author-sakura", displayName: "花形亭サクラ", rankLabel: "花形真打", emoji: "🎀", bgColorClass: "bg-dojo-deep-crimson", followerCount: 512, followingCount: 44 },
-  { id: "author-konbu", displayName: "扇子亭こんぶ", rankLabel: "二ツ目", emoji: "🪭", bgColorClass: "bg-dojo-tatami-green", followerCount: 156, followingCount: 112 },
-  { id: "author-akira", displayName: "三日月アキラ", rankLabel: "大看板", emoji: "🌙", bgColorClass: "bg-dojo-dark-brown", followerCount: 890, followingCount: 23 },
-  { id: "author-syrup", displayName: "落語亭シロップ", rankLabel: "前座", emoji: "🍯", bgColorClass: "bg-dojo-curtain-gold", followerCount: 37, followingCount: 65 },
-  { id: "author-kana", displayName: "めくり札カナ", rankLabel: "見習い", emoji: "🎴", bgColorClass: "bg-dojo-cheer-pink", followerCount: 12, followingCount: 88 },
-  { id: "author-kenta", displayName: "招き猫ケンタ", rankLabel: "二ツ目", emoji: "🐱", bgColorClass: "bg-dojo-curtain-gold", followerCount: 174, followingCount: 130 },
-  { id: "author-jirou", displayName: "べらんめえ次郎", rankLabel: "名人", emoji: "🥋", bgColorClass: "bg-dojo-deep-crimson", followerCount: 620, followingCount: 51 },
-  { id: "author-masa", displayName: "太鼓持ちマサ", rankLabel: "前座", emoji: "🥁", bgColorClass: "bg-dojo-spotlight-orange", followerCount: 29, followingCount: 47 },
-  { id: "author-minami", displayName: "楽屋裏ミナミ", rankLabel: "見習い", emoji: "🍡", bgColorClass: "bg-dojo-tatami-green", followerCount: 18, followingCount: 61 },
-  { id: "author-ryou", displayName: "半纏のリョウ", rankLabel: "二ツ目", emoji: "🏮", bgColorClass: "bg-dojo-curtain-red", followerCount: 143, followingCount: 99 },
-  { id: "author-ginji", displayName: "大看板・銀次", rankLabel: "達人", emoji: "👑", bgColorClass: "bg-dojo-dark-brown", followerCount: 758, followingCount: 33 },
-  { id: "author-yuu", displayName: "高座のユウ", rankLabel: "真打", emoji: "🎭", bgColorClass: "bg-dojo-cheer-pink", followerCount: 298, followingCount: 84 },
+  { id: "author-raitoningu", displayName: "笑福亭ライトニング", rankLabel: "真打", emoji: "⚡", bgColorClass: "bg-dojo-curtain-red", followerCount: 342, followingCount: 58, equippedCostumeId: "costume-keiko-maekake", equippedIconPartId: "icon-sensu", equippedBgPatternId: "bg-chochin" },
+  { id: "author-hina", displayName: "座布団ヒナ", rankLabel: "二ツ目", emoji: "🌸", bgColorClass: "bg-dojo-cheer-pink", followerCount: 128, followingCount: 96, equippedCostumeId: "costume-gakuran", equippedIconPartId: "icon-tenugui", equippedBgPatternId: "bg-seigaiha" },
+  { id: "author-tetsuya", displayName: "早口テツヤ", rankLabel: "前座", emoji: "🎤", bgColorClass: "bg-dojo-spotlight-orange", followerCount: 41, followingCount: 73, equippedCostumeId: "costume-jinbei", equippedIconPartId: "icon-datemegane", equippedBgPatternId: "bg-kinpaku" },
+  { id: "author-sakura", displayName: "花形亭サクラ", rankLabel: "花形真打", emoji: "🎀", bgColorClass: "bg-dojo-deep-crimson", followerCount: 512, followingCount: 44, equippedCostumeId: "costume-parka", equippedIconPartId: "icon-tachimic", equippedBgPatternId: "bg-donchou-gara" },
+  { id: "author-konbu", displayName: "扇子亭こんぶ", rankLabel: "二ツ目", emoji: "🪭", bgColorClass: "bg-dojo-tatami-green", followerCount: 156, followingCount: 112, equippedCostumeId: "costume-yoreyore-suit", equippedIconPartId: "icon-zabuton-badge", equippedBgPatternId: "bg-spotlight" },
+  { id: "author-akira", displayName: "三日月アキラ", rankLabel: "大看板", emoji: "🌙", bgColorClass: "bg-dojo-dark-brown", followerCount: 890, followingCount: 23, equippedCostumeId: "costume-kuromontsuki", equippedIconPartId: "icon-maneki-badge", equippedBgPatternId: "bg-neon-yose" },
+  { id: "author-syrup", displayName: "落語亭シロップ", rankLabel: "前座", emoji: "🍯", bgColorClass: "bg-dojo-curtain-gold", followerCount: 37, followingCount: 65, equippedCostumeId: "costume-shimarakugo", equippedIconPartId: "icon-taiko-bachi", equippedBgPatternId: "bg-kamifubuki" },
+  { id: "author-kana", displayName: "めくり札カナ", rankLabel: "見習い", emoji: "🎴", bgColorClass: "bg-dojo-cheer-pink", followerCount: 12, followingCount: 88, equippedCostumeId: "costume-ohayashi", equippedIconPartId: "icon-matoi-mini", equippedBgPatternId: "bg-chochin" },
+  { id: "author-kenta", displayName: "招き猫ケンタ", rankLabel: "二ツ目", emoji: "🐱", bgColorClass: "bg-dojo-curtain-gold", followerCount: 174, followingCount: 130, equippedCostumeId: "costume-mitsuzoroi", equippedIconPartId: "icon-kinsen-aura", equippedBgPatternId: "bg-seigaiha" },
+  { id: "author-jirou", displayName: "べらんめえ次郎", rankLabel: "名人", emoji: "🥋", bgColorClass: "bg-dojo-deep-crimson", followerCount: 620, followingCount: 51, equippedCostumeId: "costume-nishikie", equippedIconPartId: "icon-kamifubuki-ring", equippedBgPatternId: "bg-kinpaku" },
+  { id: "author-masa", displayName: "太鼓持ちマサ", rankLabel: "前座", emoji: "🥁", bgColorClass: "bg-dojo-spotlight-orange", followerCount: 29, followingCount: 47, equippedCostumeId: "costume-enbifuku", equippedIconPartId: "icon-sensu", equippedBgPatternId: "bg-donchou-gara" },
+  { id: "author-minami", displayName: "楽屋裏ミナミ", rankLabel: "見習い", emoji: "🍡", bgColorClass: "bg-dojo-tatami-green", followerCount: 18, followingCount: 61, equippedCostumeId: "costume-neon-haori", equippedIconPartId: "icon-tenugui", equippedBgPatternId: "bg-spotlight" },
+  { id: "author-ryou", displayName: "半纏のリョウ", rankLabel: "二ツ目", emoji: "🏮", bgColorClass: "bg-dojo-curtain-red", followerCount: 143, followingCount: 99, equippedCostumeId: "costume-donchou", equippedIconPartId: "icon-datemegane", equippedBgPatternId: "bg-neon-yose" },
+  { id: "author-ginji", displayName: "大看板・銀次", rankLabel: "達人", emoji: "👑", bgColorClass: "bg-dojo-dark-brown", followerCount: 758, followingCount: 33, equippedCostumeId: "costume-hikari-matoi", equippedIconPartId: "icon-tachimic", equippedBgPatternId: "bg-kamifubuki" },
+  { id: "author-yuu", displayName: "高座のユウ", rankLabel: "真打", emoji: "🎭", bgColorClass: "bg-dojo-cheer-pink", followerCount: 298, followingCount: 84, equippedCostumeId: "costume-keiko-maekake", equippedIconPartId: "icon-zabuton-badge", equippedBgPatternId: "bg-chochin" },
 ];
 
 // 自分（"me"）のフォロワー一覧を仮表示する際に使う人数（マイページのサマリー表示とも一致させる）。

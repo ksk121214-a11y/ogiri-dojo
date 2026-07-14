@@ -102,7 +102,16 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           </div>
         </div>
 
-        <SnsFollowButton authorId={authorId} />
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <SnsFollowButton authorId={authorId} />
+          <Link
+            href={`/sns/u/${authorId}/backstage`}
+            className="flex items-center gap-1.5 rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream px-4 py-2 font-sans text-xs font-bold text-dojo-ink transition hover:bg-dojo-light-brown"
+          >
+            <span aria-hidden>🙇</span>
+            楽屋に挨拶
+          </Link>
+        </div>
       </div>
 
       <div className="flex justify-center gap-2">

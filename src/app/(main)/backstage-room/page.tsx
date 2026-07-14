@@ -6,7 +6,13 @@ import { useMemo, useState } from "react";
 
 import AvatarPlaceholder from "@/components/app/AvatarPlaceholder";
 import { getCollectionItem, groupOwnedItems } from "@/data/collectionData";
-import { ITEM_TYPE_EMOJI, ITEM_TYPE_LABEL, RARITY_TEXT_CLASS } from "@/lib/economyUi";
+import {
+  DEFAULT_ROOM_BG_CLASS,
+  ITEM_TYPE_EMOJI,
+  ITEM_TYPE_LABEL,
+  RARITY_TEXT_CLASS,
+  ROOM_BG_CLASS,
+} from "@/lib/economyUi";
 import { useUserStore } from "@/store/useUserStore";
 import type { CollectionItem, ItemType } from "@/types/economy";
 
@@ -17,20 +23,6 @@ const EQUIPPED_KEY: Record<ItemType, "costumeId" | "iconPartId" | "bgPatternId">
   icon_part: "iconPartId",
   bg_pattern: "bgPatternId",
 };
-
-// 背景柄IDごとの部屋プレビュー用グラデーション（実アセット導入までのダミー表現）。
-// 既存の背景柄7種（collectionData.ts）それぞれのイメージに寄せた色味を、
-// globals.cssのdojo-*トークンだけで表現する。
-const ROOM_BG_CLASS: Record<string, string> = {
-  "bg-chochin": "from-dojo-curtain-red/30 via-dojo-spotlight-orange/20 to-dojo-tatami-cream",
-  "bg-seigaiha": "from-dojo-backstage-navy/30 via-dojo-gray-purple/20 to-dojo-tatami-cream",
-  "bg-kinpaku": "from-dojo-gold-foil/35 via-dojo-curtain-gold/15 to-dojo-tatami-cream",
-  "bg-donchou-gara": "from-dojo-curtain-red/35 via-dojo-curtain-gold/20 to-dojo-tatami-cream",
-  "bg-spotlight": "from-dojo-spotlight-orange/35 via-dojo-spotlight-orange-light/15 to-dojo-tatami-cream",
-  "bg-neon-yose": "from-dojo-cheer-pink/30 via-dojo-spotlight-orange/20 to-dojo-tatami-cream",
-  "bg-kamifubuki": "from-dojo-cheer-pink/30 via-dojo-gold-foil/25 to-dojo-tatami-cream",
-};
-const DEFAULT_ROOM_BG_CLASS = "from-dojo-light-brown/40 via-dojo-tatami-cream to-dojo-tatami-cream";
 
 // 楽屋（カスタム専用の部屋）画面：所持している衣装・アイコンパーツ・背景柄を選んで
 // 見た目を切り替えられるダミーUI。マイページ（実績・段位の確認）とは役割を分け、
