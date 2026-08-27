@@ -1,3 +1,4 @@
+import { ClockGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
 
 // 決め打ちのバーコード風の縦棒パターン（Math.randomはSSR/CSRの表示差異を招くため使わず、
@@ -38,7 +39,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           {live.time} <span className="text-lg font-bold sm:text-xl">開演</span>
         </p>
         <p className="mt-1 flex items-center gap-1 text-xs font-bold text-[var(--ink)]">
-          <span aria-hidden>🕐</span>
+          <ClockGlyph />
           受付 {live.reception}
         </p>
       </div>

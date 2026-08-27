@@ -48,12 +48,17 @@ export default function StadiumHeader() {
             </span>
           </button>
 
+          {/*
+            参考デザインはタイトル＋名前・ポイントのみのシンプルな構成のため、
+            ログイン/ログアウトは枠付きボタンにせず、控えめな下線リンク程度の
+            見た目に留める（機能・処理自体はuseAuthStoreのまま変更しない）。
+          */}
           {!authLoading && (
             authUser ? (
               <button
                 type="button"
                 onClick={() => signOut()}
-                className="shrink-0 rounded-full border border-[var(--border-dark)] px-2 py-1 font-sans text-[10px] font-bold text-[var(--muted-on-dark)] transition hover:border-[var(--accent)] hover:text-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                className="shrink-0 font-sans text-[10px] text-[var(--muted-on-dark)] underline decoration-[var(--border-dark)] underline-offset-2 transition hover:text-[var(--text-on-dark)] hover:decoration-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
               >
                 ログアウト
               </button>
@@ -61,7 +66,7 @@ export default function StadiumHeader() {
               <button
                 type="button"
                 onClick={() => signInWithX()}
-                className="shrink-0 rounded-full border border-[var(--border-dark)] px-2 py-1 font-sans text-[10px] font-bold text-[var(--text-on-dark)] transition hover:border-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                className="shrink-0 font-sans text-[10px] text-[var(--muted-on-dark)] underline decoration-[var(--border-dark)] underline-offset-2 transition hover:text-[var(--text-on-dark)] hover:decoration-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
               >
                 Xでログイン
               </button>

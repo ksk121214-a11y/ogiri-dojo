@@ -1,5 +1,6 @@
 "use client";
 
+import { PlayGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
 
 // 地下ライブハウスのステージをイメージしたヒーロー。実写素材が無いため、写真を貼る代わりに
@@ -9,6 +10,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
   return (
     <section className={`${styles.heroPanel} relative rounded-2xl px-5 py-7 sm:px-6 sm:py-8`}>
       <div className={styles.halftone} aria-hidden />
+      <div className={styles.heroOverlay} aria-hidden />
       <div
         role="img"
         aria-label="スポットライトに照らされたマイクスタンドのイラスト"
@@ -49,7 +51,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           onClick={onHowToPlay}
           className={`${styles.pressable} mt-1 flex items-center gap-1.5 rounded-md border border-[var(--text-on-dark)]/70 px-4 py-2 text-xs font-bold text-[var(--text-on-dark)] transition hover:bg-[var(--text-on-dark)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
         >
-          <span aria-hidden>▶</span>
+          <PlayGlyph />
           遊び方を見る
         </button>
       </div>

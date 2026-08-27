@@ -57,11 +57,25 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='2.4' fill='%23f1e9d9' fill-opacity='0.5'/%3E%3C/svg%3E");
-  background-size: 16px 16px;
-  -webkit-mask-image: linear-gradient(to left, black, transparent 70%);
-  mask-image: linear-gradient(to left, black, transparent 70%);
+  opacity: 0.65;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Ccircle cx='7' cy='7' r='2.1' fill='%23f1e9d9' fill-opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 14px 14px;
+}
+
+/* 実写のステージ写真が無い代わりに、ハーフトーンの上から黒いオーバーレイを重ねて
+   奥行きと文字の可読性を出す（左を暗く、マイク側の右を明るく残す）。 */
+.heroOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(23, 23, 23, 0.97) 0%,
+    rgba(23, 23, 23, 0.86) 40%,
+    rgba(23, 23, 23, 0.4) 70%,
+    rgba(23, 23, 23, 0.05) 100%
+  );
 }
 
 /* チケット風カード：CSS Gridで「本券／半券」の2カラムに分ける */
