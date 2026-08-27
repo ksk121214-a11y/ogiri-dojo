@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
 // 誰の回答が確定しても、舞台側・客席側どちらの画面でも同じように「名前：点数」を
@@ -50,7 +51,7 @@ export default function ScoreRevealToast() {
           exit={{ opacity: 0, y: -10, scale: 0.9 }}
           className="pointer-events-none fixed bottom-8 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-full bg-dojo-curtain-gold px-6 py-3 font-brush text-xl text-dojo-stage-dark shadow-lg"
         >
-          {toast.name}：{toast.points}点！
+          {truncateLiveDisplayName(toast.name)}：{toast.points}点！
         </motion.div>
       )}
     </AnimatePresence>

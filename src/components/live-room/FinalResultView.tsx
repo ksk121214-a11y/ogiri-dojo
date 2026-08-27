@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { FinalResultData } from "@/store/useLiveFollowerStore";
 
@@ -90,8 +91,7 @@ export default function FinalResultView({
                   <InitialAvatar name={top3[3 - step].name} seed={3 - step} size={28} />
                 )}
                 <p className="font-sans text-lg font-bold">
-                  {top3[3 - step].name}
-                  {top3[3 - step].participantId === myParticipantId ? "（あなた）" : ""}
+                  {truncateLiveDisplayName(top3[3 - step].name)}
                 </p>
               </div>
               <p className="mt-1 font-sans text-sm font-bold text-[#ff8f00]">
@@ -126,10 +126,7 @@ export default function FinalResultView({
                         ) : (
                           <InitialAvatar name={r.name} seed={idx} size={24} />
                         )}
-                        <span className="truncate">
-                          {r.name}
-                          {isMe ? "（あなた）" : ""}
-                        </span>
+                        <span className="truncate">{truncateLiveDisplayName(r.name)}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="tabular-nums text-[#ff8f00]">{r.total}点</span>

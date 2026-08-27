@@ -75,6 +75,14 @@ export default function LivePage() {
     }
   }, [currentPhase]);
 
+  // ページ離脱時（ホームに戻る・他ページへ遷移等）は必ずBGMを止める。
+  // closedフェーズに到達しないままアンマウントされるケースの保険（「終了しても音が鳴り続ける」対策）。
+  useEffect(() => {
+    return () => {
+      stopBgm();
+    };
+  }, []);
+
   const remainingSec =
     live?.answering_paused && live.answering_remaining_ms != null
       ? Math.ceil(live.answering_remaining_ms / 1000)

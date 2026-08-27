@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import ScreenShell from "@/components/live-demo/ScreenShell";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
@@ -105,8 +106,7 @@ export default function OpeningView() {
                 }`}
               >
                 <span className="truncate font-sans text-white/90">
-                  {participantNames[p.id] ?? "（名前未設定）"}
-                  {isMe ? "（あなた）" : ""}
+                  {truncateLiveDisplayName(participantNames[p.id] ?? "（名前未設定）")}
                 </span>
                 <span className="shrink-0 font-sans text-xs text-white/60">
                   {ROLE_LABEL[p.preferred_role]}

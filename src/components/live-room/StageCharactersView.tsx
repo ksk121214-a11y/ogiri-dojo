@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 
 import { BASE_PATH } from "@/lib/basePath";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 
 const EMPTY_SCORE_REVEALS: Record<string, number> = {};
 
@@ -16,14 +17,12 @@ const EMPTY_SCORE_REVEALS: Record<string, number> = {};
 // いるため、ここでは演壇・アイコンの列だけを画面下部に固定表示する（fixed）。
 export default function StageCharactersView({
   members,
-  myParticipantId,
   activeParticipantId,
   revealPendingParticipantId = null,
   scoreReveals = EMPTY_SCORE_REVEALS,
   compact = false,
 }: {
   members: { id: string; name: string }[];
-  myParticipantId: string | null;
   activeParticipantId: string | null;
   // 送信直後・まだ回答フリップが出ていない「一呼吸」中の対象者。この間は回答フリップが
   // まだ画面を覆っていないため、回答席の光る演出が実際に見える唯一のタイミング
@@ -49,7 +48,6 @@ export default function StageCharactersView({
       {members.map((member) => {
         const isActive = member.id === activeParticipantId;
         const isGlowingSeat = isActive || member.id === revealPendingParticipantId;
-        const isMe = member.id === myParticipantId;
         const scoreRevealValue = scoreReveals[member.id];
         const showScore = scoreRevealValue !== undefined;
         return (
@@ -134,8 +132,7 @@ export default function StageCharactersView({
                       isActive ? "font-bold text-[#7ab2ff]" : "text-white/70"
                     }`}
                   >
-                    {member.name}
-                    {isMe ? "（あなた）" : ""}
+                    {truncateLiveDisplayName(member.name)}
                   </p>
                   <div
                     className="relative aspect-square w-full"

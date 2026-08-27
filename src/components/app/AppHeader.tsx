@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
+import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
@@ -19,6 +21,7 @@ const NAV_LINKS = [
 // ライブ画面（/live、旧ダミー版/live-demo）はフルスクリーンの舞台演出のため、このヘッダーは出さない。
 export default function AppHeader() {
   const pathname = usePathname();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const user = useUserStore((s) => s.user);
   const rank = getRankByMeter(user.masteryMeter);
   const profile = useProfileStore((s) => s.profile);
@@ -42,7 +45,11 @@ export default function AppHeader() {
             爆笑スタジアム
           </Link>
           <div className="flex min-w-0 items-center gap-2">
-            <div className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right sm:gap-2 sm:px-3">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right transition hover:bg-dojo-curtain-gold/30 sm:gap-2 sm:px-3"
+            >
               <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
                 <span className="hidden sm:inline">{rank.label}・</span>
                 {displayName}
@@ -50,7 +57,7 @@ export default function AppHeader() {
               <span className="shrink-0 font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
                 {user.points.toLocaleString()}pt
               </span>
-            </div>
+            </button>
             {!authLoading && (
               authUser ? (
                 <button
@@ -101,6 +108,7 @@ export default function AppHeader() {
           })}
         </nav>
       </div>
+      {historyOpen && <PointHistoryModal onClose={() => setHistoryOpen(false)} />}
     </header>
   );
 }

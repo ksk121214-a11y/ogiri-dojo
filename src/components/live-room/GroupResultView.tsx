@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { GroupResultData } from "@/store/useLiveFollowerStore";
 
@@ -57,10 +58,7 @@ export default function GroupResultView({
                 ) : (
                   <InitialAvatar name={entry.name} seed={idx} size={28} />
                 )}
-                <span className="truncate">
-                  {entry.name}
-                  {isMe ? "（あなた）" : ""}
-                </span>
+                <span className="truncate">{truncateLiveDisplayName(entry.name)}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="font-sans font-bold tabular-nums text-[#ff8f00]">

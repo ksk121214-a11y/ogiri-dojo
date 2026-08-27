@@ -12,6 +12,7 @@ import ScreenShell from "@/components/live-demo/ScreenShell";
 import TimerRing from "@/components/live-demo/TimerRing";
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { LIVE_ROOM_TIMING, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
 import { fitAspect, useElementSize } from "@/lib/useElementSize";
 import { playSfx } from "@/lib/sfx";
@@ -242,7 +243,6 @@ export default function AudienceAnsweringView() {
           <div className="relative flex w-full flex-col items-center">
             <StageCharactersView
               members={stageMembers}
-              myParticipantId={myParticipant.id}
               activeParticipantId={activeParticipantId}
               revealPendingParticipantId={revealPendingParticipantId}
               scoreReveals={seatScores}
@@ -261,7 +261,9 @@ export default function AudienceAnsweringView() {
                 <div className="flex h-full w-full flex-col items-center gap-2">
                   <div className="w-full min-h-[100px] flex-1">
                     <AnswerRevealCard
-                      authorName={participantNames[displayedAnswer.participant_id] ?? "（名前未設定）"}
+                      authorName={truncateLiveDisplayName(
+                        participantNames[displayedAnswer.participant_id] ?? "（名前未設定）",
+                      )}
                       answerBody={displayedAnswer.body}
                       fillHeight
                       scaleUp={false}

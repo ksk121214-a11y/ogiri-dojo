@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useUserStore } from "@/store/useUserStore";
 
+export const DISPLAY_NAME_MAX_LENGTH = 10;
+
 export interface DojoProfile {
   id: string;
   displayName: string;
@@ -60,6 +62,9 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     if (!userId) return { ok: false, reason: "ログインしていません" };
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: "名前を入力してください" };
+    if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
+      return { ok: false, reason: `名前は${DISPLAY_NAME_MAX_LENGTH}文字以内にしてください` };
+    }
 
     const { error } = await supabase
       .from("profiles")

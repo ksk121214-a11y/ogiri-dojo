@@ -31,53 +31,50 @@ export default function MyPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col items-center gap-4 rounded-3xl bg-white p-6 text-center shadow-sm sm:flex-row sm:items-start sm:gap-5 sm:text-left">
-        <MyIconAvatar size={80} />
-        <div className="flex flex-1 flex-col items-center gap-1 sm:items-start">
-          <p className="font-sans text-lg font-bold text-dojo-ink">{displayName}</p>
-          <p className="font-sans text-xs font-bold text-dojo-dark-brown/80">
-            段位：{rank.label}
-          </p>
-          <p className="mt-1 max-w-xs font-sans text-xs text-dojo-ink/80">{user.bio}</p>
+      <div className="flex flex-col items-center gap-2 rounded-3xl bg-white p-6 text-center shadow-sm">
+        <MyIconAvatar size={72} bare />
+        <p className="mt-1 font-sans text-lg font-bold text-dojo-ink">{displayName}</p>
+        <p className="font-sans text-xs font-bold text-dojo-dark-brown/80">
+          段位：{rank.label}
+        </p>
+        <p className="mt-1 max-w-xs font-sans text-xs text-dojo-ink/80">{user.bio}</p>
 
-          <div className="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start">
-            <button
-              type="button"
-              onClick={() => setStatsOpen(true)}
-              className="rounded-full bg-dojo-tatami-cream px-4 py-1.5 font-sans text-xs font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
-            >
-              段位・実績を見る
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditOpen(true)}
-              className="flex items-center gap-1 rounded-full border border-dojo-dark-brown/15 px-4 py-1.5 font-sans text-xs font-bold text-dojo-dark-brown transition hover:bg-black/5"
-            >
-              <span aria-hidden>✎</span>
-              編集する
-            </button>
-          </div>
+        <div className="mt-2 flex items-center gap-4">
+          <Link href="/sns/u/me/following" className="flex items-center gap-1">
+            <span className="font-sans text-sm font-bold tabular-nums text-dojo-ink">
+              {followingAuthorIds.length}
+            </span>
+            <span className="font-sans text-[11px] text-dojo-dark-brown/70 hover:underline">
+              フォロー中
+            </span>
+          </Link>
+          <Link href="/sns/u/me/followers" className="flex items-center gap-1">
+            <span className="font-sans text-sm font-bold tabular-nums text-dojo-ink">
+              {MY_FOLLOWER_DISPLAY_COUNT}
+            </span>
+            <span className="font-sans text-[11px] text-dojo-dark-brown/70 hover:underline">
+              フォロワー
+            </span>
+          </Link>
         </div>
-      </div>
 
-      <div className="flex items-center justify-around gap-3 rounded-3xl bg-white p-4 shadow-sm">
-        <Link href="/sns/u/me/following" className="flex flex-col items-center gap-0.5">
-          <span className="font-sans text-lg font-bold tabular-nums text-dojo-ink">
-            {followingAuthorIds.length}
-          </span>
-          <span className="font-sans text-[11px] text-dojo-dark-brown/70 hover:underline">
-            フォロー中
-          </span>
-        </Link>
-        <span className="h-8 w-px bg-dojo-dark-brown/10" />
-        <Link href="/sns/u/me/followers" className="flex flex-col items-center gap-0.5">
-          <span className="font-sans text-lg font-bold tabular-nums text-dojo-ink">
-            {MY_FOLLOWER_DISPLAY_COUNT}
-          </span>
-          <span className="font-sans text-[11px] text-dojo-dark-brown/70 hover:underline">
-            フォロワー
-          </span>
-        </Link>
+        <div className="mt-3 flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setStatsOpen(true)}
+            className="rounded-full bg-dojo-tatami-cream px-4 py-1.5 font-sans text-xs font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+          >
+            段位・実績を見る
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            className="flex items-center gap-1 rounded-full border border-dojo-dark-brown/15 px-4 py-1.5 font-sans text-xs font-bold text-dojo-dark-brown transition hover:bg-black/5"
+          >
+            <span aria-hidden>✎</span>
+            編集する
+          </button>
+        </div>
       </div>
 
       <div>

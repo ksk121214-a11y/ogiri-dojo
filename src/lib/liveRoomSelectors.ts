@@ -9,6 +9,15 @@ export interface RoomRankingEntry {
   total: number;
 }
 
+// ライブ画面（舞台・客席・結果発表）で表示する参加者名の共通の丸め込み。
+// 5文字までは表示し、6文字目以降は省略する（狭いスペースに詰め込むための割り切り）。
+export const LIVE_DISPLAY_NAME_MAX_LENGTH = 5;
+export function truncateLiveDisplayName(name: string): string {
+  return name.length > LIVE_DISPLAY_NAME_MAX_LENGTH
+    ? name.slice(0, LIVE_DISPLAY_NAME_MAX_LENGTH)
+    : name;
+}
+
 // この組・この周のスコア上位（組結果発表用）。turnIdの回答だけを集計対象にする。
 export function getGroupTurnRanking(
   answers: AnswerRow[],

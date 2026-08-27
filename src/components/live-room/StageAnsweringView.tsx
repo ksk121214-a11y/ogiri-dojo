@@ -11,6 +11,7 @@ import ScreenShell from "@/components/live-demo/ScreenShell";
 import StageHeaderBanner from "@/components/live-demo/StageHeaderBanner";
 import TimerRing from "@/components/live-demo/TimerRing";
 import { LIVE_ROOM_TIMING, MAX_ANSWERS_PER_PLAYER, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
+import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
 import { fitAspect, useElementSize } from "@/lib/useElementSize";
 import { playSfx } from "@/lib/sfx";
@@ -166,7 +167,6 @@ export default function StageAnsweringView() {
         .filter((a) => !a.revealed_at)
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]
         ?.participant_id ?? null;
-  const isMyAnswerJudging = displayedAnswer?.participant_id === myParticipant.id;
   const eligibleJudgeCount = participants.filter(
     (p) => p.role === "player" && p.group_id !== currentTurn.group_id,
   ).length;
@@ -268,7 +268,6 @@ export default function StageAnsweringView() {
           */}
           <StageCharactersView
             members={stageMembers}
-            myParticipantId={myParticipant.id}
             activeParticipantId={activeParticipantId}
             revealPendingParticipantId={revealPendingParticipantId}
             scoreReveals={seatScores}
@@ -286,10 +285,9 @@ export default function StageAnsweringView() {
                 <div className="flex h-full w-full flex-col items-center gap-2">
                   <div className="w-full min-h-[100px] flex-1">
                     <AnswerRevealCard
-                      authorName={
-                        (participantNames[displayedAnswer.participant_id] ?? "（名前未設定）") +
-                        (isMyAnswerJudging ? "（あなた）" : "")
-                      }
+                      authorName={truncateLiveDisplayName(
+                        participantNames[displayedAnswer.participant_id] ?? "（名前未設定）",
+                      )}
                       answerBody={displayedAnswer.body}
                       fillHeight
                       scaleUp={false}

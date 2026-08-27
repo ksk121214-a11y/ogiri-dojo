@@ -4,10 +4,10 @@ import { useState } from "react";
 
 import { BASE_PATH } from "@/lib/basePath";
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
-import { useProfileStore } from "@/store/useProfileStore";
+import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
-const NAME_MAX_LENGTH = 10;
+const NAME_MAX_LENGTH = DISPLAY_NAME_MAX_LENGTH;
 const BIO_MAX_LENGTH = 80;
 
 // マイページの演者名カードから開く編集モーダル。
@@ -40,6 +40,10 @@ export default function MyProfileEditModal({
     e.preventDefault();
     if (!trimmedName) {
       setError("名前を入力してください");
+      return;
+    }
+    if (trimmedName.length > NAME_MAX_LENGTH) {
+      setError(`名前は${NAME_MAX_LENGTH}文字以内にしてください`);
       return;
     }
     setSubmitting(true);
@@ -123,11 +127,14 @@ export default function MyProfileEditModal({
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value.slice(0, NAME_MAX_LENGTH))}
-            maxLength={NAME_MAX_LENGTH}
+            onChange={(e) => setName(e.target.value)}
             className="w-full rounded-xl border border-dojo-dark-brown/15 bg-white px-3 py-2 font-sans text-sm text-dojo-ink outline-none focus:border-dojo-ink"
           />
-          <span className="self-end font-sans text-[11px] text-dojo-dark-brown/70">
+          <span
+            className={`self-end font-sans text-[11px] ${
+              name.length > NAME_MAX_LENGTH ? "font-bold text-dojo-deep-crimson" : "text-dojo-dark-brown/70"
+            }`}
+          >
             {name.length} / {NAME_MAX_LENGTH}
           </span>
         </label>
@@ -158,7 +165,7 @@ export default function MyProfileEditModal({
           </button>
           <button
             type="submit"
-            disabled={submitting || !trimmedName}
+            disabled={submitting || !trimmedName || trimmedName.length > NAME_MAX_LENGTH}
             className="rounded-full bg-dojo-ink px-5 py-2 font-sans text-sm font-bold text-dojo-washi-white transition disabled:opacity-40"
           >
             {submitting ? "保存中…" : "保存する"}

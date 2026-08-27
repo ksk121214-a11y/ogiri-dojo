@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { useProfileStore } from "@/store/useProfileStore";
+import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 
 // ログイン後、display_name_set=falseの間だけ表示する高座名(演者名)の初回設定モーダル。
 // 後から自由に変更できる想定のため、閉じるボタンは置かず「決めるまで進めない」形にしている。
@@ -34,23 +34,29 @@ export default function DisplayNameSetupModal() {
       >
         <h2 className="font-brush text-lg text-dojo-dark-brown">高座名を決めましょう</h2>
         <p className="mt-2 font-sans text-xs text-dojo-dark-brown">
-          道場で名乗る名前を決めてください。後からでも変更できます。
+          道場で名乗る名前を{DISPLAY_NAME_MAX_LENGTH}文字以内で決めてください。後からでも変更できます。
         </p>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          maxLength={10}
-          placeholder="例: 高座のあなた"
+          placeholder="例: 高座の花子"
           autoFocus
           className="mt-4 w-full rounded-full border border-dojo-dark-brown/30 bg-dojo-washi-white px-4 py-2 font-sans text-sm text-dojo-ink outline-none focus:border-dojo-curtain-red"
         />
+        <span
+          className={`mt-1 block text-right font-sans text-[11px] ${
+            name.length > DISPLAY_NAME_MAX_LENGTH ? "font-bold text-dojo-deep-crimson" : "text-dojo-dark-brown/70"
+          }`}
+        >
+          {name.length} / {DISPLAY_NAME_MAX_LENGTH}
+        </span>
         {error && (
           <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{error}</p>
         )}
         <button
           type="submit"
-          disabled={submitting || !name.trim()}
+          disabled={submitting || !name.trim() || name.trim().length > DISPLAY_NAME_MAX_LENGTH}
           className="mt-4 w-full rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-sm font-bold text-dojo-washi-white transition disabled:opacity-50"
         >
           {submitting ? "設定中…" : "この名前にする"}
