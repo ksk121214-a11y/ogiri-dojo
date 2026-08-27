@@ -42,7 +42,8 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           <p className="mt-1 text-3xl font-black text-[var(--accent)] sm:text-4xl">
             {live.time} <span className="text-xl font-bold sm:text-2xl">開演</span>
           </p>
-          <p className="mt-1 flex items-center gap-1 text-sm font-bold text-[var(--ink)]">
+          {/* 前回の文字拡大で1行に収まらず折り返っていたため、この行だけ一段階小さくして1行に戻す。 */}
+          <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-xs font-bold text-[var(--ink)]">
             <ClockGlyph />
             受付 {live.reception}
           </p>

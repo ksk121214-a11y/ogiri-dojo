@@ -15,7 +15,15 @@ export default function AccountSummary() {
 
   return (
     <section className="flex items-center gap-3 rounded-2xl bg-[var(--paper)] px-4 py-3.5 text-[var(--ink)]">
-      <MyIconAvatar size={48} />
+      {/*
+        MyIconAvatarの通常表示は寄合帳等の畳生成りテーマに合わせたdojo-curtain-gold(金色)の
+        縁取りが付く。このホーム画面の配色（チャコール×生成り×赤オレンジ）から浮くため、
+        bareモード（縁取りなし）で受け取り、この画面専用のパレットに沿った縁を自前で付ける
+        （MyIconAvatar自体は他画面共通のコンポーネントなので変更しない）。
+      */}
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border-dark)] bg-white">
+        <MyIconAvatar size={38} bare />
+      </span>
       <div className="min-w-0 flex-1">
         <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[var(--ink)]/70">
           ログイン中

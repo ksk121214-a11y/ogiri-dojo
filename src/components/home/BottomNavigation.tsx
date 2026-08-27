@@ -35,18 +35,21 @@ function CalendarIcon({ active }: { active: boolean }) {
 }
 
 function BookIcon({ active }: { active: boolean }) {
+  const color = active ? "var(--accent)" : "var(--text-on-dark)";
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+      {/* 見開きで開いた本のシルエット（中央の背から左右のページが弧を描いて広がる形）。
+          以前は縦長の長方形2枚に見え「本」と分かりづらかったため、弧のあるページ形状にした。 */}
       <path
-        d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"
-        stroke={active ? "var(--accent)" : "var(--text-on-dark)"}
-        strokeWidth={active ? 2.2 : 1.8}
+        d="M12 7c-1.8-1.4-4.7-1.9-7.2-1.5v12.7c2.5-.4 5.4.1 7.2 1.5V7Z"
+        stroke={color}
+        strokeWidth={active ? 2.1 : 1.7}
         strokeLinejoin="round"
       />
       <path
-        d="M20 5.5c0-.8-.7-1.5-1.5-1.5H12v16h6.5a1.5 1.5 0 0 0 1.5-1.5v-13Z"
-        stroke={active ? "var(--accent)" : "var(--text-on-dark)"}
-        strokeWidth={active ? 2.2 : 1.8}
+        d="M12 7c1.8-1.4 4.7-1.9 7.2-1.5v12.7c-2.5-.4-5.4.1-7.2 1.5V7Z"
+        stroke={color}
+        strokeWidth={active ? 2.1 : 1.7}
         strokeLinejoin="round"
       />
     </svg>
