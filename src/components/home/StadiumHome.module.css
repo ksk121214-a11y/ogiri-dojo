@@ -19,15 +19,15 @@
      テラコッタ寄りの赤オレンジ1色に統一した（--accent-2は廃止）。 */
   --accent: #bf4a2a;
   --accent-dark: #96391f;
-  /* 2026-08-28: 「ONLINE OGIRI LIVEタグ・チケット・参加するボタン」はdark-grain-512.webpを
-     background-blend-mode:overlayで重ねていたが、この素材が黒背景用の暗いグレースケール
-     （平均輝度が低い）なため、明るいアクセント色に重ねると全体がかなり暗く沈んでしまい、
-     文字色（純粋な--accent）と見比べると別の色に見えてしまっていた。--accentとほぼ同じ色の
-     半透明ベールを重ねる方式に変えて色味のズレを抑えたが、それでも実際にレンダリングされた
-     ピクセル色を計測すると(183,72,41)で、地の文字色(191,74,42)よりまだ少し暗かった。
-     テクスチャの透け具合（アルファ値）はそのままに、ベールの色だけをその分だけ明るく
-     （実測から逆算した(199,76,43)相当）補正し、平均するとほぼ同じ色に見えるようにしている。 */
-  --accent-veil: #c74c2bf2;
+  /* 2026-08-28: 「テクスチャを薄めずに100%の質感で使ってほしい、その上で色を
+     文字色に近づけて」の要望で、透明ベールで質感を弱める方式はやめ、
+     .grainDark等と同じくbackground-blend-mode:overlayをフル強度のまま使う。
+     ただしoverlay自体はdark-grain-512.webp（暗いグレースケール）を重ねると
+     結果が暗く沈む非線形な合成のため、素の--accentをそのまま下地にすると
+     文字色より暗くなってしまう。overlayの計算式から逆算し、暗く沈む分を
+     見込んで意図的に明るく振った色（--accent-textured-base）を下地にすることで、
+     質感を100%効かせたまま平均的な見た目の色を文字色に近づけている。 */
+  --accent-textured-base: #d99987;
   --border-dark: #312f2b;
 
   position: relative;
@@ -67,12 +67,11 @@
 }
 
 .grainAccent {
-  background-color: var(--accent);
-  background-image:
-    linear-gradient(var(--accent-veil), var(--accent-veil)),
-    url("/images/textures/dark-grain-512.webp");
-  background-repeat: no-repeat, repeat;
-  background-size: 100% 100%, 170px 170px;
+  background-color: var(--accent-textured-base);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 170px 170px;
 }
 
 /*
