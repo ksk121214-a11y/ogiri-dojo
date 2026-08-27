@@ -321,14 +321,24 @@ export default function ScoringPhysicsBoard({
           const baseColor = ballColorsRef.current.get(body.id) ?? "#ffffff";
           const color =
             goldProgress > 0 ? lerpColor(baseColor, PERFECT_BALL_COLOR, goldProgress) : baseColor;
-          ctx.save();
+          // shadowBlurはCanvas 2Dの中でも特に重い操作で、堆積中の玉すべてに毎フレーム
+          // かけると（審査員が多い組では最大数十個）メインスレッドを圧迫し、setTimeout等の
+          // 他の処理まで遅延させる原因になっていた（効果音が遅れて鳴る・演出が出ない等）。
+          // グロー感は縁取り+中心のハイライトで代替し、shadowBlurは弾ける一瞬(popping)だけに絞る。
           ctx.beginPath();
           ctx.arc(body.position.x, body.position.y, body.circleRadius, 0, Math.PI * 2);
           ctx.fillStyle = color;
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 14 + goldProgress * 10;
           ctx.fill();
-          ctx.restore();
+          ctx.beginPath();
+          ctx.arc(
+            body.position.x - body.circleRadius * 0.3,
+            body.position.y - body.circleRadius * 0.3,
+            body.circleRadius * 0.35,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.fill();
 
           if (
             !lineFlashedRef.current &&

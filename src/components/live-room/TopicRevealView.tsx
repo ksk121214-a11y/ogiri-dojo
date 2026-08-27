@@ -12,7 +12,9 @@ import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 // public/sounds/topic-reveal.mp3（歓声と拍手）の実測尺（afinfoで確認、約4.1秒）。
 const TOPIC_REVEAL_SE_MS = 4100;
 // ライブ画面に切り替わった後、この効果音をどれだけ被らせて鳴り終わらせたいか。
-const OVERLAP_MS = 800;
+// 2026-08-27：「もう少し遅れて鳴って、次のライブ画面が始まってから鳴り終わる感じ」に
+// という要望を受けて800ms→2000msに拡大。
+const OVERLAP_MS = 2_000;
 
 // お題発表フェーズの実バックエンド版。src/components/live-demo/TopicRevealScreen.tsxと
 // 同じ見た目の考え方だが、useLiveDemoStoreではなくuseLiveFollowerStoreの実データを見る。

@@ -48,7 +48,7 @@ export default function MyIconAvatar({
 
   return (
     <span
-      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-dojo-curtain-gold/60 bg-dojo-tatami-cream"
+      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-dojo-curtain-gold/60 bg-white"
       style={{ width: size, height: size }}
     >
       {glyph}

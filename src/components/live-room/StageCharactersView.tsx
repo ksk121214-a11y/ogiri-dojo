@@ -67,21 +67,26 @@ export default function StageCharactersView({
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">
                 {isMe ? (
-                  <span
-                    aria-hidden
-                    className="absolute inset-0"
-                    style={{
-                      backgroundColor: avatarColor,
-                      WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                      maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                      WebkitMaskSize: "contain",
-                      maskSize: "contain",
-                      WebkitMaskRepeat: "no-repeat",
-                      maskRepeat: "no-repeat",
-                      WebkitMaskPosition: "center",
-                      maskPosition: "center",
-                    }}
-                  />
+                  <>
+                    {/* 線画の外周円とほぼ同じ大きさ(直径≒画像幅の92%)の白い円を下敷きにし、
+                        円の中が背景の舞台色で透けないようにする。 */}
+                    <span aria-hidden className="absolute inset-[4%] rounded-full bg-white" />
+                    <span
+                      aria-hidden
+                      className="absolute inset-0"
+                      style={{
+                        backgroundColor: avatarColor,
+                        WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                        maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                        WebkitMaskSize: "contain",
+                        maskSize: "contain",
+                        WebkitMaskRepeat: "no-repeat",
+                        maskRepeat: "no-repeat",
+                        WebkitMaskPosition: "center",
+                        maskPosition: "center",
+                      }}
+                    />
+                  </>
                 ) : (
                   <Image
                     src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
@@ -167,21 +172,24 @@ export default function StageCharactersView({
                     }
                   >
                     {isMe ? (
-                      <span
-                        aria-hidden
-                        className="absolute inset-0"
-                        style={{
-                          backgroundColor: avatarColor,
-                          WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                          maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                          WebkitMaskSize: "contain",
-                          maskSize: "contain",
-                          WebkitMaskRepeat: "no-repeat",
-                          maskRepeat: "no-repeat",
-                          WebkitMaskPosition: "center",
-                          maskPosition: "center",
-                        }}
-                      />
+                      <>
+                        <span aria-hidden className="absolute inset-[4%] rounded-full bg-white" />
+                        <span
+                          aria-hidden
+                          className="absolute inset-0"
+                          style={{
+                            backgroundColor: avatarColor,
+                            WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                            maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                            WebkitMaskSize: "contain",
+                            maskSize: "contain",
+                            WebkitMaskRepeat: "no-repeat",
+                            maskRepeat: "no-repeat",
+                            WebkitMaskPosition: "center",
+                            maskPosition: "center",
+                          }}
+                        />
+                      </>
                     ) : (
                       <Image
                         src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}

@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import InitialAvatar from "@/components/app/InitialAvatar";
@@ -135,6 +136,14 @@ export default function FinalResultView({
                     </div>
                   );
                 })}
+              </div>
+              <div className="mt-4 flex justify-center">
+                <Link
+                  href="/"
+                  className="rounded-full bg-[#3b5bff] px-6 py-2.5 font-sans text-sm font-bold text-white transition hover:bg-[#2947e0]"
+                >
+                  ホームに戻る
+                </Link>
               </div>
             </motion.div>
           )}
