@@ -3,7 +3,9 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 
+import CurtainOverlay from "@/components/live-demo/CurtainOverlay";
 import ScreenShell from "@/components/live-demo/ScreenShell";
+import { hasSeenCurtain } from "@/lib/curtainSeen";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
@@ -25,6 +27,9 @@ export default function OpeningView() {
   const followerError = useLiveFollowerStore((s) => s.error);
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
   const [joining, setJoining] = useState(false);
+  // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
+  // 開く演出・音・BGMを体験してもらうため、このタブでまだ見ていなければここで見せる。
+  const [showCurtain] = useState(() => !hasSeenCurtain());
 
   // 参加者一覧に新しい名前が増えるたびに1回鳴らす（マウント時点で既にいる人数ぶんは対象外、
   // その後リアルタイムで増えた分だけ鳴らしたいので初期値をnullにして初回は基準を記録するだけにする）。
@@ -47,6 +52,7 @@ export default function OpeningView() {
 
   return (
     <ScreenShell>
+      {showCurtain && <CurtainOverlay />}
       <p className="font-sans text-xs tracking-widest text-white/60">開幕</p>
       <motion.h2
         initial={{ opacity: 0, y: 10 }}

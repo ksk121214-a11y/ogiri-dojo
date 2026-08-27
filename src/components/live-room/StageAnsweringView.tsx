@@ -268,6 +268,7 @@ export default function StageAnsweringView() {
           */}
           <StageCharactersView
             members={stageMembers}
+            myParticipantId={myParticipant.id}
             activeParticipantId={activeParticipantId}
             revealPendingParticipantId={revealPendingParticipantId}
             scoreReveals={seatScores}

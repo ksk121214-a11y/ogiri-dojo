@@ -10,7 +10,7 @@ const TEST_MODE = process.env.NEXT_PUBLIC_LIVE_TIMING_MODE === "test";
 const PRODUCTION_TIMING = {
   interludeMs: 15_000, // 実仕様: 幕間10〜20秒
   openingMs: 45_000, // 実仕様: 開幕30〜60秒
-  topicRevealMs: 22_000, // 実仕様: お題発表15〜30秒（+2秒）
+  topicRevealMs: 15_000, // 2026-08-27改訂：22秒→15秒（実仕様レンジ15〜30秒の下限、テンポ優先）
   answerMs: 60_000, // 2026-08-27改訂：90秒→60秒
   judgeMs: 10_000, // 実仕様どおり：採点10秒
   judgeGraceMs: 400, // 採点タイマー表示が0になった後の滑り込み猶予

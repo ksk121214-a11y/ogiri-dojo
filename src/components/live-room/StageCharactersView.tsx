@@ -5,6 +5,7 @@ import Image from "next/image";
 
 import { BASE_PATH } from "@/lib/basePath";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
+import { useUserStore } from "@/store/useUserStore";
 
 const EMPTY_SCORE_REVEALS: Record<string, number> = {};
 
@@ -17,12 +18,15 @@ const EMPTY_SCORE_REVEALS: Record<string, number> = {};
 // いるため、ここでは演壇・アイコンの列だけを画面下部に固定表示する（fixed）。
 export default function StageCharactersView({
   members,
+  myParticipantId = null,
   activeParticipantId,
   revealPendingParticipantId = null,
   scoreReveals = EMPTY_SCORE_REVEALS,
   compact = false,
 }: {
   members: { id: string; name: string }[];
+  // 自分のアイコンだけ、マイページで選んだ色（useUserStore.avatarColor）で塗った線画にする。
+  myParticipantId?: string | null;
   activeParticipantId: string | null;
   // 送信直後・まだ回答フリップが出ていない「一呼吸」中の対象者。この間は回答フリップが
   // まだ画面を覆っていないため、回答席の光る演出が実際に見える唯一のタイミング
@@ -37,6 +41,7 @@ export default function StageCharactersView({
   scoreReveals?: Record<string, number>;
   compact?: boolean;
 }) {
+  const avatarColor = useUserStore((s) => s.user.avatarColor);
   return (
     <div
       className={`flex items-end justify-center ${
@@ -48,6 +53,7 @@ export default function StageCharactersView({
       {members.map((member) => {
         const isActive = member.id === activeParticipantId;
         const isGlowingSeat = isActive || member.id === revealPendingParticipantId;
+        const isMe = member.id === myParticipantId;
         const scoreRevealValue = scoreReveals[member.id];
         const showScore = scoreRevealValue !== undefined;
         return (
@@ -60,13 +66,31 @@ export default function StageCharactersView({
           >
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">
-                <Image
-                  src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
-                  alt=""
-                  fill
-                  sizes="64px"
-                  className="object-contain"
-                />
+                {isMe ? (
+                  <span
+                    aria-hidden
+                    className="absolute inset-0"
+                    style={{
+                      backgroundColor: avatarColor,
+                      WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                      maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                      WebkitMaskSize: "contain",
+                      maskSize: "contain",
+                      WebkitMaskRepeat: "no-repeat",
+                      maskRepeat: "no-repeat",
+                      WebkitMaskPosition: "center",
+                      maskPosition: "center",
+                    }}
+                  />
+                ) : (
+                  <Image
+                    src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
+                    alt=""
+                    fill
+                    sizes="64px"
+                    className="object-contain"
+                  />
+                )}
               </div>
             ) : (
               <>
@@ -142,13 +166,31 @@ export default function StageCharactersView({
                         : undefined
                     }
                   >
-                    <Image
-                      src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
-                      alt=""
-                      fill
-                      sizes="150px"
-                      className="object-contain"
-                    />
+                    {isMe ? (
+                      <span
+                        aria-hidden
+                        className="absolute inset-0"
+                        style={{
+                          backgroundColor: avatarColor,
+                          WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                          maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+                          WebkitMaskSize: "contain",
+                          maskSize: "contain",
+                          WebkitMaskRepeat: "no-repeat",
+                          maskRepeat: "no-repeat",
+                          WebkitMaskPosition: "center",
+                          maskPosition: "center",
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
+                        alt=""
+                        fill
+                        sizes="150px"
+                        className="object-contain"
+                      />
+                    )}
                   </div>
                 </div>
               </>

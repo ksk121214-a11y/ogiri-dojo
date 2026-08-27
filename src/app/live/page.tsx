@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
@@ -13,7 +14,7 @@ import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
 import OpeningView from "@/components/live-room/OpeningView";
 import StageAnsweringView from "@/components/live-room/StageAnsweringView";
 import TopicRevealView from "@/components/live-room/TopicRevealView";
-import { playBgm, stopBgm } from "@/lib/bgm";
+import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
@@ -70,7 +71,9 @@ export default function LivePage() {
       playBgm("live");
     } else if (currentPhase === "group_result" || currentPhase === "final_result") {
       playBgm("waiting");
-    } else if (currentPhase === "closed") {
+    } else if (currentPhase === "closed" || currentPhase === null) {
+      // closedはもちろん、購読が切れてliveそのものが取得できなくなった場合も
+      // 「絶対に音が止まる」ことを優先し、念のため止めておく。
       stopBgm();
     }
   }, [currentPhase]);
@@ -81,6 +84,14 @@ export default function LivePage() {
     return () => {
       stopBgm();
     };
+  }, []);
+
+  // ブラウザの自動再生制限で途中参加時にBGMが鳴らないことがあるため、
+  // ページ内の最初のクリック/タップで一度だけ再生を試みる。
+  useEffect(() => {
+    const retry = () => retryCurrentBgm();
+    document.addEventListener("pointerdown", retry, { once: true });
+    return () => document.removeEventListener("pointerdown", retry);
   }, []);
 
   const remainingSec =
@@ -154,9 +165,29 @@ export default function LivePage() {
       {liveLoading ? (
         <p className="font-sans text-sm text-dojo-dark-brown">状態を確認中…</p>
       ) : !live ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">
-          まだライブは開演していません。司会の開始をお待ちください。
-        </p>
+        <>
+          <p className="font-sans text-sm text-dojo-dark-brown">
+            まだライブは開演していません。司会の開始をお待ちください。
+          </p>
+          <Link
+            href="/"
+            className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+          >
+            ホームに戻る
+          </Link>
+        </>
+      ) : live.current_phase === "closed" ? (
+        <>
+          <p className="font-sans text-sm text-dojo-dark-brown">
+            本日のライブは終了しました。お疲れさまでした！
+          </p>
+          <Link
+            href="/"
+            className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+          >
+            ホームに戻る
+          </Link>
+        </>
       ) : (
         <>
           <div className="flex flex-col items-center gap-1">
@@ -171,7 +202,7 @@ export default function LivePage() {
             )}
           </div>
 
-          {!myParticipant && live.current_phase !== "closed" && (
+          {!myParticipant && (
             <div className="flex gap-2">
               <button
                 type="button"

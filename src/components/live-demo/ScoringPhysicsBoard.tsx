@@ -423,6 +423,13 @@ export default function ScoringPhysicsBoard({
     const engine = engineRef.current;
     if (!engine) return;
     const balls = engine.world.bodies.filter((b) => b.circleRadius);
+    if (balls.length === 0) {
+      // 誰も点を入れず玉が1個も無い（0点）場合は、弾ける演出も音も鳴らさない
+      // （「0ポイントなのに弾ける音がする」対策）。
+      lastPopWasPerfectRef.current = false;
+      onPerfect?.();
+      return;
+    }
     const isPerfectScore = totalSpawnedRef.current >= maxBallsRef.current;
     poppingBallsRef.current = balls.map((b) => ({
       x: b.position.x,

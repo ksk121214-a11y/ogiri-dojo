@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
 import { playBgm } from "@/lib/bgm";
+import { markCurtainSeen } from "@/lib/curtainSeen";
 import { playSfx } from "@/lib/sfx";
 
 // 寄席の開幕演出：閉じた緞帳(どんちょう)が左右にサッと開く。
@@ -35,6 +36,7 @@ export default function CurtainOverlay({ onAnimationComplete }: CurtainOverlayPr
       // 幕が開く音（琴の滑奏）が鳴ったのと同時に、待機画面BGMを鳴らし始める
       // （それより前は無音のまま）。
       playBgm("waiting");
+      markCurtainSeen();
     }, OPEN_DELAY_MS);
     return () => clearTimeout(openTimer);
   }, []);

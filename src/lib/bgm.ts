@@ -106,6 +106,16 @@ export function playBgm(name: BgmName) {
   }
 }
 
+// ブラウザの自動再生制限で鳴らせなかったBGMを、ユーザーの最初の操作（クリック/タップ）を
+// きっかけに再試行するための関数。「途中から参加すると音が鳴らないことがある」対策として
+// document全体の最初のクリック/タッチで1回だけ呼ぶ想定（呼び出し側はLivePage参照）。
+export function retryCurrentBgm() {
+  if (typeof window === "undefined" || !current) return;
+  if (current.audio.paused && !muted) {
+    current.audio.play().catch(() => {});
+  }
+}
+
 export function stopBgm() {
   if (!current) return;
   const prev = current;
