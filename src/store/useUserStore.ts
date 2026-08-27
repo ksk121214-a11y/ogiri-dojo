@@ -10,6 +10,7 @@ import type { CollectionItem, DojoUser, ItemType } from "@/types/economy";
 const INITIAL_USER: DojoUser = {
   displayName: "あなた",
   bio: "高座に立つのが夢の見習いです。よろしくお願いします！",
+  avatarColor: "#C0263F",
   rank: "zenza",
   masteryMeter: 260, // 「前座」到達済み・「二ツ目」まであと少し、という体験しやすい初期値
   points: 5000, // ガチャ・ショップを試しやすいよう多めに設定
@@ -39,6 +40,7 @@ interface UserState {
   purchaseItem: (itemId: string, price: number) => { ok: boolean; reason?: string };
   equipItem: (item: CollectionItem) => void;
   updateBio: (bio: string) => void;
+  updateAvatarColor: (color: string) => void;
   resetUser: () => void;
 }
 
@@ -146,6 +148,10 @@ export const useUserStore = create<UserState>()((set, get) => ({
 
   updateBio: (bio) => {
     set((s) => ({ user: { ...s.user, bio } }));
+  },
+
+  updateAvatarColor: (color) => {
+    set((s) => ({ user: { ...s.user, avatarColor: color } }));
   },
 
   resetUser: () => set({ user: INITIAL_USER }),

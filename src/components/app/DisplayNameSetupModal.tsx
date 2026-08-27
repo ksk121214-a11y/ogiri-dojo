@@ -40,7 +40,7 @@ export default function DisplayNameSetupModal() {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          maxLength={20}
+          maxLength={10}
           placeholder="例: 高座のあなた"
           autoFocus
           className="mt-4 w-full rounded-full border border-dojo-dark-brown/30 bg-dojo-washi-white px-4 py-2 font-sans text-sm text-dojo-ink outline-none focus:border-dojo-curtain-red"

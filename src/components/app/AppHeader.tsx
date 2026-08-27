@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { getRankByMeter } from "@/data/collectionData";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
@@ -20,6 +21,8 @@ export default function AppHeader() {
   const pathname = usePathname();
   const user = useUserStore((s) => s.user);
   const rank = getRankByMeter(user.masteryMeter);
+  const profile = useProfileStore((s) => s.profile);
+  const displayName = profile?.displayName ?? user.displayName;
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
@@ -38,12 +41,13 @@ export default function AppHeader() {
           >
             爆笑スタジアム
           </Link>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-dojo-dark-brown/30 bg-dojo-light-brown px-3 py-1.5 text-right">
-              <span className="font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
-                {rank.label}・{user.displayName}
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right sm:gap-2 sm:px-3">
+              <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
+                <span className="hidden sm:inline">{rank.label}・</span>
+                {displayName}
               </span>
-              <span className="font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
+              <span className="shrink-0 font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
                 {user.points.toLocaleString()}pt
               </span>
             </div>

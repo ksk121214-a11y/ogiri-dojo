@@ -16,7 +16,7 @@ export default function NavTile({
   flavorText,
 }: {
   href: string;
-  emoji: string;
+  emoji?: string;
   title: string;
   description: string;
   flavorText: string;
@@ -28,13 +28,13 @@ export default function NavTile({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group flex flex-col gap-2 rounded-2xl border border-dojo-dark-brown/20 bg-dojo-light-brown/60 p-5 text-left transition hover:border-dojo-curtain-gold hover:bg-dojo-light-brown"
+        className="group flex flex-col gap-2 rounded-3xl bg-white p-5 text-left shadow-sm transition hover:shadow-md"
       >
-        <span className="text-3xl">{emoji}</span>
-        <span className="font-sans text-base font-bold text-dojo-ink group-hover:text-dojo-dark-brown">
+        {emoji && <span className="text-3xl">{emoji}</span>}
+        <span className="font-sans text-base font-bold text-dojo-ink">
           {title}
         </span>
-        <span className="font-sans text-xs text-dojo-dark-brown">
+        <span className="font-sans text-xs text-dojo-dark-brown/70">
           {description}
         </span>
       </button>
@@ -53,9 +53,9 @@ export default function NavTile({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-dojo-curtain-gold/50 bg-dojo-tatami-cream p-6 text-center"
+              className="flex w-full max-w-sm flex-col items-center rounded-3xl bg-white p-6 text-center shadow-2xl"
             >
-              <span className="text-4xl">{emoji}</span>
+              {emoji && <span className="text-4xl">{emoji}</span>}
               <p className="mt-2 font-brush text-xl text-dojo-ink">{title}</p>
               <p className="mt-3 max-h-72 overflow-y-auto font-sans text-sm leading-relaxed text-dojo-dark-brown">
                 {flavorText}
@@ -64,7 +64,7 @@ export default function NavTile({
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-full border border-dojo-dark-brown/30 px-5 py-2 font-sans text-sm font-bold text-dojo-dark-brown transition hover:border-dojo-curtain-gold hover:text-dojo-ink"
+                  className="rounded-full px-5 py-2 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-black/5"
                 >
                   閉じる
                 </button>

@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useUserStore } from "@/store/useUserStore";
 
 export interface DojoProfile {
   id: string;
@@ -71,6 +72,9 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
         ? { profile: { ...s.profile, displayName: trimmed, displayNameSet: true } }
         : s,
     );
+    // ranking/寄合帳など、まだuseProfileStoreを直接見ていない箇所とも名前がズレないよう、
+    // ダミーのuseUserStore側にも同じ名前を反映しておく。
+    useUserStore.setState((s) => ({ user: { ...s.user, displayName: trimmed } }));
     return { ok: true };
   },
 }));
@@ -84,6 +88,9 @@ if (typeof window !== "undefined") {
     useProfileStore.setState({ loading: true });
     fetchProfile(userId).then((profile) => {
       useProfileStore.setState({ profile, loading: false });
+      if (profile) {
+        useUserStore.setState((s) => ({ user: { ...s.user, displayName: profile.displayName } }));
+      }
     });
   };
 
