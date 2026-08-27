@@ -9,17 +9,12 @@ import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
   { href: "/", label: "ホーム" },
-  { href: "/live", label: "大喜利ライブ" },
-  { href: "/gacha", label: "くじ引き" },
-  { href: "/backstage-room", label: "楽屋" },
-  { href: "/ranking", label: "番付表" },
-  { href: "/sns", label: "寄合帳" },
+  { href: "/mypage", label: "マイページ" },
 ] as const;
 
-// ホーム/ガチャ/楽屋/ランキング/SNSで共通利用する簡易ナビゲーション。
-// 第6ラウンドフィードバックでショップ→ガチャ、過去のライブ→ランキング、マイページ→ホームに
-// それぞれページ内タブ/セクションとして統合し、ナビ項目を8→5に整理した。
-// その後、姉妹プロジェクト「大喜利SNS」の簡易版（お題投稿・回答投稿・いいね）をSNSとして追加し5→6に。
+// ホーム/マイページで共通利用する簡易ナビゲーション。
+// 2026-08-27：くじ引き・楽屋・番付表は今後のアプデで追加予定のため導線をいったん撤去、
+// 寄合帳（SNS）はマイページ（/mypage）に統合し、大喜利ライブはホームのMENUタイルへ移動した。
 // ライブ画面（/live、旧ダミー版/live-demo）はフルスクリーンの舞台演出のため、このヘッダーは出さない。
 export default function AppHeader() {
   const pathname = usePathname();
@@ -39,7 +34,7 @@ export default function AppHeader() {
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/"
-            className="font-brush text-lg text-dojo-dark-brown sm:text-xl"
+            className="shrink-0 whitespace-nowrap font-brush text-base text-dojo-dark-brown sm:text-xl"
           >
             爆笑スタジアム
           </Link>

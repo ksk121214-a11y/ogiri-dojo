@@ -108,7 +108,7 @@ export default function StageCharacters({
                         transition={{ type: "spring", stiffness: 260, damping: 16 }}
                         className="pointer-events-none absolute left-1/2 top-[48%] z-40 -translate-x-1/2 -translate-y-1/2"
                       >
-                        <span className="font-digital text-3xl font-black tabular-nums text-black sm:text-5xl">
+                        <span className="font-sans text-3xl font-black tabular-nums text-black sm:text-5xl">
                           {scoreRevealValue}
                         </span>
                       </motion.div>

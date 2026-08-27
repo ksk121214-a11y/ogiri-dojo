@@ -11,7 +11,7 @@ const PRODUCTION_TIMING = {
   interludeMs: 15_000, // 実仕様: 幕間10〜20秒
   openingMs: 45_000, // 実仕様: 開幕30〜60秒
   topicRevealMs: 22_000, // 実仕様: お題発表15〜30秒（+2秒）
-  answerMs: 90_000, // 実仕様どおり：持ち時間90秒
+  answerMs: 60_000, // 2026-08-27改訂：90秒→60秒
   judgeMs: 10_000, // 実仕様どおり：採点10秒
   judgeGraceMs: 400, // 採点タイマー表示が0になった後の滑り込み猶予
   groupResultMs: 30_000, // 実仕様: 組結果20〜40秒
@@ -69,4 +69,4 @@ export const REVEAL_SEQUENCE_MS =
   SCORE_REVEAL_DELAY_MS + LIVE_ROOM_TIMING.scoreDisplayMs + LIVE_ROOM_TIMING.gateTailMs;
 
 export const MAX_ANSWERS_PER_PLAYER = 5;
-export const ROUNDS_PER_LIVE_DEFAULT = 2;
+export const ROUNDS_PER_LIVE_DEFAULT = 1; // 2026-08-27改訂：2周→1周
