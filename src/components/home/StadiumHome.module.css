@@ -19,6 +19,12 @@
      テラコッタ寄りの赤オレンジ1色に統一した（--accent-2は廃止）。 */
   --accent: #bf4a2a;
   --accent-dark: #96391f;
+  /* 2026-08-28: 「ONLINE OGIRI LIVEタグ・チケット・参加するボタン」はdark-grain-512.webpを
+     background-blend-mode:overlayで重ねていたが、この素材が黒背景用の暗いグレースケール
+     （平均輝度が低い）なため、明るいアクセント色に重ねると全体がかなり暗く沈んでしまい、
+     文字色（純粋な--accent）と見比べると別の色に見えてしまっていた。--accentとほぼ同じ色の
+     半透明ベールを重ねる方式に変えて、色味のズレを抑えつつうっすら質感だけ乗せる。 */
+  --accent-veil: #bf4a2af2;
   --border-dark: #312f2b;
 
   position: relative;
@@ -59,10 +65,11 @@
 
 .grainAccent {
   background-color: var(--accent);
-  background-image: url("/images/textures/dark-grain-512.webp");
-  background-blend-mode: overlay;
-  background-repeat: repeat;
-  background-size: 170px 170px;
+  background-image:
+    linear-gradient(var(--accent-veil), var(--accent-veil)),
+    url("/images/textures/dark-grain-512.webp");
+  background-repeat: no-repeat, repeat;
+  background-size: 100% 100%, 170px 170px;
 }
 
 /*
@@ -141,7 +148,15 @@
   mask-image: linear-gradient(to left, black 0%, black 45%, transparent 100%);
 }
 
-/* チケット風カード：CSS Gridで「本券／半券」の2カラムに分ける */
+/*
+ * チケット風カード：CSS Gridで「本券／半券」の2カラムに分ける。
+ * 本券と半券の境界の丸い切り欠きは、以前はページ背景色（--bg）で塗った円を上に
+ * 重ねて「それっぽく」見せていたが、実際の背景（黒い紙の質感）とは別物の平坦な
+ * 円になってしまっていた。mask-imageで.ticket自体に本物の穴を開け、その位置に
+ * 実際に見えている背景（質感込み）がそのまま透けるようにしている。
+ * mask-compositeは「土台（全面不透明）→上ノッチをsubtract（くり抜く）→
+ * 下ノッチをsubtract」の順で、2つの円だけが透明になるようにしている。
+ */
 .ticket {
   position: relative;
   overflow: hidden;
@@ -151,25 +166,19 @@
      backgroundは使わない（shorthandはbackground-imageも一緒にリセットしてしまうため）。 */
   color: var(--ink);
   border-radius: 20px;
-}
-
-/* 本券と半券の境界の丸い切り欠き（チケットの背景色＝ページの背景色で円を描き、食い込ませる） */
-.notchTop,
-.notchBottom {
-  position: absolute;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
-  border-radius: 9999px;
-  background: var(--bg);
-  right: 96px;
-  transform: translateX(50%);
-}
-.notchTop {
-  top: -10px;
-}
-.notchBottom {
-  bottom: -10px;
+  --notch-x: calc(100% - 96px);
+  -webkit-mask-image:
+    linear-gradient(black, black),
+    radial-gradient(circle 10px at var(--notch-x) 0px, black 99%, transparent 100%),
+    radial-gradient(circle 10px at var(--notch-x) 100%, black 99%, transparent 100%);
+  mask-image:
+    linear-gradient(black, black),
+    radial-gradient(circle 10px at var(--notch-x) 0px, black 99%, transparent 100%),
+    radial-gradient(circle 10px at var(--notch-x) 100%, black 99%, transparent 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-composite: source-over, destination-out, destination-out;
+  mask-composite: add, subtract, subtract;
 }
 
 .stubDivider {

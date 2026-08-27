@@ -12,8 +12,9 @@ const BARCODE_PATTERN = [
 ];
 const BARCODE_BAR_GAP = 1;
 // 「広げて」の要望で一度150にしたが、「チケットを少しだけ縦幅狭くして」の要望で
-// 128→108と重ねて詰めた。
-const BARCODE_HEIGHT = 108;
+// 128→108と詰め、「バーコードが上の数字と被ってる」の指摘でさらに92に詰めて
+// チケット番号バッジとの間隔を確保した。
+const BARCODE_HEIGHT = 92;
 // 「サイズ感はそのまま、縦線→横線に」の要望で、枠の縦横サイズ自体は変えず
 // （旧・縦棒バーコードの実測サイズ≒幅46px×高さ150px）、中の線の向きだけ横に変える。
 const BARCODE_WIDTH = 46;
@@ -39,10 +40,12 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         次回ライブ
       </span>
 
+      {/*
+        本券／半券の境界の丸い切り欠きは、以前は背景色（--bg）で塗った円を重ねる
+        「見せかけ」だったが、.ticket自体にmask-imageで本物の穴を開ける方式に変えたため
+        （StadiumHome.module.cssの.ticket参照）、ここにあった専用のdivは不要になった。
+      */}
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={styles.notchTop} aria-hidden />
-        <div className={styles.notchBottom} aria-hidden />
-
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
         <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
           <p className="text-base font-bold text-[var(--ink)]/60">{live.year}年</p>
