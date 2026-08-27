@@ -15,8 +15,9 @@
   --ink: #171513;
   --text-on-dark: #f1e9d9;
   --muted-on-dark: #aaa297;
-  --accent: #e44724;
-  --accent-dark: #bd3218;
+  /* 2026-08-28改訂：もう少し濃く赤みの強いオレンジにしたいとの要望で微調整。 */
+  --accent: #cf3a1c;
+  --accent-dark: #a52c14;
   --border-dark: #312f2b;
 
   position: relative;
