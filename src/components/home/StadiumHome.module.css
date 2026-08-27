@@ -19,9 +19,9 @@
      --accent-2はチケットと参加するボタンだけに使うオレンジ寄りの色。 */
   --accent: #cf3a1c;
   --accent-dark: #a52c14;
-  /* 2026-08-28再改訂：「少しだけオレンジみを強く」の要望でさらに微調整。 */
-  --accent-2: #ce6f1c;
-  --accent-2-dark: #a95a17;
+  /* 2026-08-28再々改訂：「もう少しだけオレンジに」の要望でさらに一段調整。 */
+  --accent-2: #ce7b1c;
+  --accent-2-dark: #a2601c;
   --border-dark: #312f2b;
 
   position: relative;
