@@ -504,45 +504,51 @@ async function runBotBehavior() {
     });
   }
 
-  for (const bot of bots) {
-    const participant = participants.find((p) => p.id === bot.participantId);
-    if (!participant || participant.role !== "player") continue;
-    if ((botCooldownUntil.get(bot.participantId) ?? 0) > now) continue;
+  // 各ボットの行動判定・DB書き込みは互いに独立しているため、for...ofの逐次awaitではなく
+  // Promise.allで並列実行する。ボット数が多い（審査員が多い組）ほど、直列だと
+  // 「ボット数×DBラウンドトリップ」ぶん合計レイテンシが線形に伸び、500ms間隔のポーリング
+  // 全体を遅延させ続けてしまう（効果音が遅れる・回答フリップが出ない等の一因と考えられる）。
+  await Promise.all(
+    bots.map(async (bot) => {
+      const participant = participants.find((p) => p.id === bot.participantId);
+      if (!participant || participant.role !== "player") return;
+      if ((botCooldownUntil.get(bot.participantId) ?? 0) > now) return;
 
-    if (participant.group_id === turn.group_id) {
-      if (answeringTimeUp || busy) continue;
-      // 舞台上のボット：残り回答数があれば低確率で送信する。
-      const myAnswerCount = answers.filter((a) => a.participant_id === bot.participantId).length;
-      if (myAnswerCount >= 5) continue;
-      if (Math.random() >= 0.03) continue;
-      const { error } = await bot.client.from("answers").insert({
-        turn_id: turn.id,
-        participant_id: bot.participantId,
-        seq: myAnswerCount + 1,
-        body: randomBotAnswerBody(),
-      });
-      if (!error) {
-        botCooldownUntil.set(bot.participantId, now + randomDelay(3_000, 9_000));
+      if (participant.group_id === turn.group_id) {
+        if (answeringTimeUp || busy) return;
+        // 舞台上のボット：残り回答数があれば低確率で送信する。
+        const myAnswerCount = answers.filter((a) => a.participant_id === bot.participantId).length;
+        if (myAnswerCount >= 5) return;
+        if (Math.random() >= 0.03) return;
+        const { error } = await bot.client.from("answers").insert({
+          turn_id: turn.id,
+          participant_id: bot.participantId,
+          seq: myAnswerCount + 1,
+          body: randomBotAnswerBody(),
+        });
+        if (!error) {
+          botCooldownUntil.set(bot.participantId, now + randomDelay(3_000, 9_000));
+        }
+      } else if (activeAnswer) {
+        // 客席のボット：表示中の回答にまだ採点していなければ低確率で採点する。
+        const alreadyScored = scores.some((s) => s.judge_participant_id === bot.participantId);
+        if (alreadyScored) return;
+        if (Math.random() >= 0.2) return;
+        if (!answerPerfectRoundIds.has(activeAnswer.id)) {
+          answerPerfectRoundIds.set(activeAnswer.id, Math.random() < 0.8);
+        }
+        const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
+        const { error } = await bot.client.from("scores").insert({
+          answer_id: activeAnswer.id,
+          judge_participant_id: bot.participantId,
+          points: isPerfectRound ? 3 : randomBotScore(),
+        });
+        if (!error) {
+          botCooldownUntil.set(bot.participantId, now + randomDelay(1_000, 3_000));
+        }
       }
-    } else if (activeAnswer) {
-      // 客席のボット：表示中の回答にまだ採点していなければ低確率で採点する。
-      const alreadyScored = scores.some((s) => s.judge_participant_id === bot.participantId);
-      if (alreadyScored) continue;
-      if (Math.random() >= 0.2) continue;
-      if (!answerPerfectRoundIds.has(activeAnswer.id)) {
-        answerPerfectRoundIds.set(activeAnswer.id, Math.random() < 0.8);
-      }
-      const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
-      const { error } = await bot.client.from("scores").insert({
-        answer_id: activeAnswer.id,
-        judge_participant_id: bot.participantId,
-        points: isPerfectRound ? 3 : randomBotScore(),
-      });
-      if (!error) {
-        botCooldownUntil.set(bot.participantId, now + randomDelay(1_000, 3_000));
-      }
-    }
-  }
+    }),
+  );
 }
 
 // フェーズ・ターンの自動進行。

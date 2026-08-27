@@ -32,7 +32,7 @@ const SFX_PATHS = {
 
 export type SfxName = keyof typeof SFX_PATHS;
 
-const SE_VOLUME = 0.7;
+const SE_VOLUME = 0.45; // 2026-08-27改訂：0.7→0.45（もう少し控えめに）
 
 const MUTE_STORAGE_KEY = "ogiri-sfx-muted";
 

@@ -16,10 +16,11 @@ const BGM_PATHS = {
 export type BgmName = keyof typeof BGM_PATHS;
 
 // ライブ中BGMは効果音と重なる場面が一番多いので、他の2曲よりさらに控えめにする。
+// 2026-08-27改訂：全体的にもう少し控えめにしたいとの要望で1割ほど下げた。
 const BGM_VOLUME: Record<BgmName, number> = {
-  waiting: 0.18,
-  entrance: 0.18,
-  live: 0.09,
+  waiting: 0.13,
+  entrance: 0.13,
+  live: 0.06,
 };
 const FADE_MS = 700;
 
