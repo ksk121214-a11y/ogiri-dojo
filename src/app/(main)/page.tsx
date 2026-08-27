@@ -135,10 +135,10 @@ function HomeView({ onOpenMyPage }: { onOpenMyPage: () => void }) {
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <NavTile
-            href="/live-demo"
+            href="/live"
             emoji="🎤"
             title="大喜利ライブ"
-            description="開演から表彰までのライブ進行をモックで体験する"
+            description="開演時間になったら道場に集まり、舞台と客席に分かれて競う本編"
             flavorText="決まった時間に道場に集まり、舞台に立って大喜利で腕を競う本編です。開幕演出のあと、自分の組の出番が来たら90秒の持ち時間の中でお題への回答を送信します（最大5回まで）。1件送信するごとに、客席が0〜3点で採点する審査サイクルが挟まり、点数が高いと「笑いエフェクト」が舞台に発生します。誰かの回答が表示・審査されている間は送信できませんが、入力は自由にできます。全周が終わると個人1〜3位が表彰され、ポイントと熟練度メーターがもらえます。"
           />
           <NavTile

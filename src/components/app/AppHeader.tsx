@@ -9,7 +9,7 @@ import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
   { href: "/", label: "ホーム" },
-  { href: "/live-demo", label: "大喜利ライブ" },
+  { href: "/live", label: "大喜利ライブ" },
   { href: "/gacha", label: "くじ引き" },
   { href: "/backstage-room", label: "楽屋" },
   { href: "/ranking", label: "番付表" },
@@ -20,7 +20,7 @@ const NAV_LINKS = [
 // 第6ラウンドフィードバックでショップ→ガチャ、過去のライブ→ランキング、マイページ→ホームに
 // それぞれページ内タブ/セクションとして統合し、ナビ項目を8→5に整理した。
 // その後、姉妹プロジェクト「大喜利SNS」の簡易版（お題投稿・回答投稿・いいね）をSNSとして追加し5→6に。
-// ライブ体験画面（/live-demo）はフルスクリーンの舞台演出のため、このヘッダーは出さない。
+// ライブ画面（/live、旧ダミー版/live-demo）はフルスクリーンの舞台演出のため、このヘッダーは出さない。
 export default function AppHeader() {
   const pathname = usePathname();
   const user = useUserStore((s) => s.user);
