@@ -15,19 +15,14 @@
   --ink: #171513;
   --text-on-dark: #f1e9d9;
   --muted-on-dark: #aaa297;
-  /* 2026-08-28: 赤とオレンジ(--accent-2)に分かれていたアクセント色を、添付の
-     テラコッタ寄りの赤オレンジ1色に統一した（--accent-2は廃止）。 */
-  --accent: #bf4a2a;
-  --accent-dark: #96391f;
-  /* 2026-08-28: 「テクスチャを薄めずに100%の質感で使ってほしい、その上で色を
-     文字色に近づけて」の要望で、透明ベールで質感を弱める方式はやめ、
-     .grainDark等と同じくbackground-blend-mode:overlayをフル強度のまま使う。
-     ただしoverlay自体はdark-grain-512.webp（暗いグレースケール）を重ねると
-     結果が暗く沈む非線形な合成のため、素の--accentをそのまま下地にすると
-     文字色より暗くなってしまう。overlayの計算式から逆算し、暗く沈む分を
-     見込んで意図的に明るく振った色（--accent-textured-base）を下地にすることで、
-     質感を100%効かせたまま平均的な見た目の色を文字色に近づけている。 */
-  --accent-textured-base: #d99987;
+  /* 2026-08-28: 「色を#C8250Cで統一」の要望でアクセントカラーを変更。 */
+  --accent: #c8250c;
+  --accent-dark: #901b09;
+  /* .grainDark等と同じくbackground-blend-mode:overlayをフル強度のまま使うため、
+     overlayの計算式から「暗く沈む分」を逆算し、意図的に明るく振った色を下地にすることで、
+     質感を100%効かせたまま平均的な見た目の色を--accent（文字色）に近づけている。
+     --accentを変更するたびに、この値も--accentに合わせて計算し直す必要がある。 */
+  --accent-textured-base: #e08435;
   --border-dark: #312f2b;
 
   position: relative;
