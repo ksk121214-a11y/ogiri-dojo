@@ -28,7 +28,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
 
       <div className="flex flex-col gap-1 px-5 pt-6 pb-5">
         <p className="text-xs font-bold text-[var(--ink)]/60">{live.year}年</p>
-        <p className="text-4xl font-black leading-none tracking-tight text-[var(--ink)] sm:text-[2.75rem]">
+        <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)] sm:text-6xl">
           {live.month}
           <span className="mx-0.5 text-xl font-bold sm:text-2xl">月</span>
           {live.day}
