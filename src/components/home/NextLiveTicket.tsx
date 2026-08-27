@@ -50,21 +50,20 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         </div>
 
         {/*
-          バーコードはflex-1で縦方向に伸ばし、チケット番号・「OGIRI LIVE」の縦書き・星の
-          間を埋めるように配置する。バー自体は縦棒だが、以前は高さを64pxに固定していたため
-          横長の帯に見えていた。左カラムの高さいっぱいに伸ばして「縦長」の帯にする。
+          バーコードは縦棒ではなく「横棒を縦に積んだ」ラダー状に変更。
+          コンテナをflex-colにし、各バーは幅いっぱい・高さだけ可変にする。
         */}
         <div className={`${styles.stubDivider} flex flex-col items-center gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--paper)]`}>
           <span className="shrink-0 rounded-sm border border-[var(--paper)]/60 px-1.5 py-0.5 text-xs font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
-          <div className="flex w-full flex-1 items-stretch justify-center gap-[2px]" aria-hidden>
+          <div className="flex w-full flex-1 flex-col items-stretch justify-center gap-[2px]" aria-hidden>
             {BARCODE_PATTERN.map((w, i) => (
               <span
                 key={i}
                 className={styles.barcodeBar}
-                style={{ width: 1 + w * 0.6, background: "var(--paper)" }}
+                style={{ height: 1 + w * 0.6, width: "100%", background: "var(--paper)" }}
               />
             ))}
           </div>
