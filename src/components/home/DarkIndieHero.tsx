@@ -15,7 +15,6 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
   return (
     <section className={`${styles.heroPanel} ${styles.grainDark} relative px-5 py-4`}>
       <div className={styles.halftone} aria-hidden />
-      <div className={styles.heroOverlay} aria-hidden />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-0 w-[40%]">
         <Image
           src={`${BASE_PATH}/images/mic-halftone.webp`}
@@ -44,7 +43,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           スタジアム
         </h1>
         <div className="flex max-w-[62%] flex-col items-start gap-2">
-          <p className="whitespace-nowrap text-2xl font-bold text-[var(--accent-2)]">— 大喜利ライブ —</p>
+          <p className="whitespace-nowrap text-2xl font-bold text-[var(--accent)]">— 大喜利ライブ —</p>
           <p className="text-base leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>

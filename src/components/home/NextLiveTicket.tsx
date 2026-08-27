@@ -11,8 +11,9 @@ const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
 ];
 const BARCODE_BAR_GAP = 1;
-// 「広げて」の要望で一度150にしたが、「チケットを少しだけ縦幅狭くして」の要望で少し詰めた。
-const BARCODE_HEIGHT = 128;
+// 「広げて」の要望で一度150にしたが、「チケットを少しだけ縦幅狭くして」の要望で
+// 128→108と重ねて詰めた。
+const BARCODE_HEIGHT = 108;
 // 「サイズ感はそのまま、縦線→横線に」の要望で、枠の縦横サイズ自体は変えず
 // （旧・縦棒バーコードの実測サイズ≒幅46px×高さ150px）、中の線の向きだけ横に変える。
 const BARCODE_WIDTH = 46;
@@ -43,7 +44,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         <div className={styles.notchBottom} aria-hidden />
 
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
-        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+        <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
           <p className="text-base font-bold text-[var(--ink)]/60">{live.year}年</p>
           <p className="whitespace-nowrap text-5xl font-black leading-none tracking-tight text-[var(--ink)]">
             {live.month}
@@ -52,11 +53,11 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
             <span className="text-xl font-bold">日</span>
             <span className="ml-0.5 text-base font-bold">（{live.weekday}）</span>
           </p>
-          <p className="mt-0.5 text-4xl font-black text-[var(--accent-2)]">
+          <p className="mt-0.5 text-4xl font-black text-[var(--accent)]">
             {live.time} <span className="text-2xl font-bold">開演</span>
           </p>
           {/* 前回の文字拡大で1行に収まらず折り返っていたため、この行だけ一段階小さくして1行に戻す。 */}
-          <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap text-sm font-bold text-[var(--ink)]">
+          <p className="flex items-center gap-1 whitespace-nowrap text-sm font-bold text-[var(--ink)]">
             <ClockGlyph />
             受付 {live.reception}
           </p>
@@ -67,12 +68,12 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           「大きく広げた縦棒バーコード」と「OGIRI LIVE＋星」を横並びにする
           （以前は縦一列にすべて積んでいたが、画像のように横に並べる形へ変更）。
         */}
-        <div className={`${styles.stubDivider} ${styles.grainAccent2} flex flex-col items-center gap-2 px-2 py-2 text-[var(--ink)]`}>
+        <div className={`${styles.stubDivider} ${styles.grainAccent2} flex flex-col items-center gap-1.5 px-2 py-1.5 text-[var(--ink)]`}>
           <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
-          <div className="flex items-stretch justify-center gap-2">
+          <div className="flex items-center justify-center gap-2">
             {/*
               枠のサイズ(46×150)は維持しつつ、中身を縦棒(幅が違う棒を横に並べる)から
               横棒(高さが違う棒を縦に積む)に変更。各棒はflexGrowでパターンの数値に
@@ -92,7 +93,12 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
               ))}
             </div>
 
-            <div className="flex flex-col items-center justify-between" style={{ height: BARCODE_HEIGHT }}>
+            {/*
+              高さをBARCODE_HEIGHTに固定してitems-stretchの行に置くと、縦書きの
+              「OGIRI LIVE」が収まりきらず2列に折り返ってしまうため、この一角だけは
+              高さを固定せず自然な高さのまま中央揃えにする（行全体はitems-center）。
+            */}
+            <div className="flex flex-col items-center justify-center gap-2">
               <span className="[writing-mode:vertical-rl] text-sm font-bold tracking-widest">
                 OGIRI LIVE
               </span>
