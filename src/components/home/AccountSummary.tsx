@@ -18,14 +18,11 @@ export default function AccountSummary() {
   return (
     <section className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
       {/*
-        MyIconAvatarの通常表示は寄合帳等の畳生成りテーマに合わせたdojo-curtain-gold(金色)の
-        縁取りが付く。このホーム画面の配色（チャコール×生成り×赤オレンジ）から浮くため、
-        bareモード（縁取りなし）で受け取り、この画面専用のパレットに沿った縁を自前で付ける
+        「アイコンは丸で囲わずそのままの感じで」の要望のため、円形の縁取り・背景は付けず、
+        bareモード（縁取りなし）のMyIconAvatarをそのまま置く
         （MyIconAvatar自体は他画面共通のコンポーネントなので変更しない）。
       */}
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border-dark)] bg-white">
-        <MyIconAvatar size={38} bare />
-      </span>
+      <MyIconAvatar size={44} bare />
       <div className="min-w-0 flex-1">
         <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-1.5 py-0.5 text-xs font-bold tracking-widest text-[var(--ink)]/70">
           ログイン中

@@ -22,7 +22,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           alt="ハーフトーン調のヴィンテージマイクのイラスト"
           fill
           sizes="200px"
-          className="object-contain object-bottom opacity-95"
+          className="object-contain object-bottom opacity-70"
         />
       </div>
 
@@ -44,7 +44,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           スタジアム
         </h1>
         <div className="flex max-w-[62%] flex-col items-start gap-2">
-          <p className="whitespace-nowrap text-2xl font-bold text-[var(--accent)]">— 大喜利ライブ —</p>
+          <p className="whitespace-nowrap text-2xl font-bold text-[var(--accent-2)]">— 大喜利ライブ —</p>
           <p className="text-base leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>
