@@ -17,14 +17,14 @@ export default function InterludeScreen() {
         transition={{ duration: 0.8 }}
         style={{
           background:
-            "radial-gradient(circle at center, rgba(255,138,61,0.35), transparent 60%)",
+            "radial-gradient(circle at center, rgba(59,91,255,0.35), transparent 60%)",
         }}
       />
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6 }}
-        className="font-sans text-xs tracking-[0.5em] text-dojo-gray-purple"
+        className="font-sans text-xs tracking-[0.5em] text-[#7ab2ff]"
       >
         本日開演
       </motion.p>
@@ -32,15 +32,17 @@ export default function InterludeScreen() {
         initial={{ opacity: 0, scale: 0.85, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.9, ease: "easeOut", delay: 0.2 }}
-        className="mt-4 font-brush text-6xl text-dojo-curtain-gold drop-shadow-[0_0_25px_rgba(232,184,76,0.6)] sm:text-8xl"
+        className="mt-4 font-sans text-5xl font-black text-white drop-shadow-[0_0_25px_rgba(59,91,255,0.8)] sm:text-8xl"
       >
-        大喜利道場
+        <span className="whitespace-nowrap">爆笑</span>
+        <wbr />
+        <span className="whitespace-nowrap">スタジアム</span>
       </motion.h1>
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6, delay: 0.9 }}
-        className="mt-6 font-sans text-sm text-dojo-washi-white/80"
+        className="mt-6 font-sans text-sm text-white/70"
       >
         まもなく開演します……
       </motion.p>

@@ -4,6 +4,7 @@ import { motion, useAnimation } from "framer-motion";
 import { useEffect, useState } from "react";
 
 import { getNextRank, getRankByMeter } from "@/data/collectionData";
+import { playSfx } from "@/lib/sfx";
 import type { RankDefinition } from "@/types/economy";
 
 const SIZE = 208;
@@ -44,6 +45,10 @@ export default function MasteryGauge({
   const [displayNext, setDisplayNext] = useState(startNext);
   const [showPromotion, setShowPromotion] = useState(false);
   const [settled, setSettled] = useState(false);
+
+  useEffect(() => {
+    if (showPromotion) playSfx("masteryLevelup");
+  }, [showPromotion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,19 +125,19 @@ export default function MasteryGauge({
               x2="100%"
               y2="100%"
             >
-              <stop offset="0%" stopColor="#FF8A3D" />
-              <stop offset="100%" stopColor="#E8B84C" />
+              <stop offset="0%" stopColor="#3b5bff" />
+              <stop offset="100%" stopColor="#7ab2ff" />
             </linearGradient>
           </defs>
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
-          <p className="font-sans text-[10px] tracking-widest text-dojo-gray-purple">
+          <p className="font-sans text-[10px] tracking-widest text-white/60">
             熟練度メーター
           </p>
-          <p className="mt-1 font-brush text-3xl text-dojo-curtain-gold">
+          <p className="mt-1 font-sans text-3xl font-black text-[#7ab2ff]">
             {displayRank.label}
           </p>
-          <p className="mt-1 font-sans text-[11px] text-dojo-gray-purple">
+          <p className="mt-1 font-sans text-[11px] text-white/60">
             {displayNext ? `次は「${displayNext.label}」` : "最高位に到達"}
           </p>
         </div>
@@ -142,7 +147,7 @@ export default function MasteryGauge({
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="font-sans text-xs text-dojo-spotlight-orange-light"
+          className="font-sans text-xs text-[#ff8f4a]"
         >
           今回の獲得：+{gained}
         </motion.p>
@@ -153,13 +158,13 @@ export default function MasteryGauge({
           initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0 }}
-          className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-dojo-stage-dark/80"
+          className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-[#0d0a1a]/85"
         >
           <motion.p
             initial={{ y: 12, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.15 }}
-            className="font-sans text-xs tracking-widest text-dojo-cheer-pink"
+            className="font-sans text-xs tracking-widest text-[#ff3b5b]"
           >
             昇段
           </motion.p>
@@ -167,7 +172,7 @@ export default function MasteryGauge({
             initial={{ scale: 0.6, opacity: 0 }}
             animate={{ scale: 1.1, opacity: 1 }}
             transition={{ delay: 0.25, type: "spring", stiffness: 220, damping: 14 }}
-            className="font-brush text-5xl text-dojo-curtain-gold drop-shadow-[0_0_30px_rgba(232,184,76,0.7)] sm:text-6xl"
+            className="font-sans text-5xl font-black text-[#7ab2ff] drop-shadow-[0_0_30px_rgba(59,91,255,0.8)] sm:text-6xl"
           >
             {endRank.label}
           </motion.p>
@@ -175,7 +180,7 @@ export default function MasteryGauge({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
-            className="font-sans text-xs text-dojo-washi-white/80"
+            className="font-sans text-xs text-white/80"
           >
             に昇段しました
           </motion.p>

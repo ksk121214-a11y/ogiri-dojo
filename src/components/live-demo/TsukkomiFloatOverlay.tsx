@@ -24,7 +24,16 @@ const MAX_CONCURRENT = 8;
 // 拍手・テンプレツッコミの浮遊エフェクト。ボタン列のすぐ上（画面下部）から出現し、
 // 画面の上の方に向かって移動しながらフェードアウトする（デザイン方針§4.4・仕様書C要件）。
 // 舞台（回答者）画面・客席（観客）画面のどちらでも同じイベントが見えるようにする（§9）。
-export default function TsukkomiFloatOverlay() {
+//
+// このファイルはlive-demo専用ではなく、本番のlive-room（StageAnsweringView/
+// AudienceAnsweringView）からも直接importされている共有コンポーネントのため、
+// 既存の呼び出し箇所（palette省略＝"dojo"）の見た目は一切変えない。palette="neon2"は
+// live-demoの再スキン済み画面だけが渡す。
+export default function TsukkomiFloatOverlay({
+  palette = "dojo",
+}: {
+  palette?: "dojo" | "neon2";
+}) {
   const tsukkomiSeq = useLiveDemoStore((s) => s.tsukkomiSeq);
   const lastTsukkomi = useLiveDemoStore((s) => s.lastTsukkomi);
   const [items, setItems] = useState<FloatItem[]>([]);
@@ -32,7 +41,15 @@ export default function TsukkomiFloatOverlay() {
   const offsetIndexRef = useRef(0);
 
   useEffect(() => {
-    if (tsukkomiSeq === seenSeqRef.current || !lastTsukkomi) return;
+    // 「爆笑」は下から上に浮くバッジではなく、LaughMarkOverlay側の観客の頭上マークで
+    // 表現するため、ここでは素通りさせる（ツッコミ・拍手は従来通りここで浮かせる）。
+    if (
+      tsukkomiSeq === seenSeqRef.current ||
+      !lastTsukkomi ||
+      (lastTsukkomi.kind === "stamp" && lastTsukkomi.text === "爆笑")
+    ) {
+      return;
+    }
     seenSeqRef.current = tsukkomiSeq;
     const xPercent = X_OFFSETS[offsetIndexRef.current % X_OFFSETS.length];
     offsetIndexRef.current += 1;
@@ -69,7 +86,9 @@ export default function TsukkomiFloatOverlay() {
             className={`absolute -translate-x-1/2 whitespace-nowrap ${
               item.kind === "clap"
                 ? "text-2xl"
-                : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-brush text-sm text-dojo-curtain-gold"
+                : palette === "neon2"
+                  ? "rounded-full border border-[#3b5bff] bg-[#0d0a1a]/90 px-4 py-1 font-sans text-sm font-bold text-[#7ab2ff]"
+                  : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-brush text-sm text-dojo-curtain-gold"
             }`}
           >
             {item.kind === "clap" ? "👏" : item.text}

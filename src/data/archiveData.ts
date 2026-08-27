@@ -25,7 +25,7 @@ export interface ArchiveLive {
 export const ARCHIVE_LIVES: ArchiveLive[] = [
   {
     id: "live-20260706",
-    title: "第12回 大喜利道場",
+    title: "第12回 爆笑スタジアム",
     dateLabel: "2026年7月6日（月）21:00開演",
     topics: [
       {
@@ -51,7 +51,7 @@ export const ARCHIVE_LIVES: ArchiveLive[] = [
   },
   {
     id: "live-20260629",
-    title: "第11回 大喜利道場",
+    title: "第11回 爆笑スタジアム",
     dateLabel: "2026年6月29日（月）21:00開演",
     topics: [
       {

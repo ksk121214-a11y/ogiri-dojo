@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-noto-sans-jp);
   --font-brush: var(--font-yuji-syuku);
+  --font-digital: var(--font-orbitron);
 
   /* デザイン方針.md §2 カラーパレット */
   --color-dojo-stage-dark: #12101a; /* 舞台闇 */
@@ -42,4 +43,11 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* 舞台の台座グラフィックが意図的に画面幅より少しはみ出す設計のため、
+     documentのscrollWidthがviewport幅を超える。overflow-x/yの片方だけを
+     hidden化するとSafariでvisible側がautoに化ける問題を再発するため触れず、
+     代わりにtouch-actionで横方向のスワイプ操作自体を封じ、実機で指が触れて
+     横スクロールしてしまい表示が左右にズレて見えるのを防ぐ。 */
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-x: none;
 }

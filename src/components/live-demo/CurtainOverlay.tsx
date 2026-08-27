@@ -3,6 +3,9 @@
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
+import { playBgm } from "@/lib/bgm";
+import { playSfx } from "@/lib/sfx";
+
 // 寄席の開幕演出：閉じた緞帳(どんちょう)が左右にサッと開く。
 // 画像素材は使わず、CSSグラデーション+box-shadowだけで布のドレープ(ひだ)の陰影を表現し、
 // 開き切る直前に微細な逆揺れ(たわみ)を挟んで布の柔らかさを演出する。
@@ -26,7 +29,13 @@ export default function CurtainOverlay({ onAnimationComplete }: CurtainOverlayPr
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    const openTimer = setTimeout(() => setOpen(true), OPEN_DELAY_MS);
+    const openTimer = setTimeout(() => {
+      setOpen(true);
+      playSfx("curtainOpen");
+      // 幕が開く音（琴の滑奏）が鳴ったのと同時に、待機画面BGMを鳴らし始める
+      // （それより前は無音のまま）。
+      playBgm("waiting");
+    }, OPEN_DELAY_MS);
     return () => clearTimeout(openTimer);
   }, []);
 
@@ -57,8 +66,8 @@ export default function CurtainOverlay({ onAnimationComplete }: CurtainOverlayPr
         style={{
           pointerEvents: open ? "none" : "auto",
           background: `
-            radial-gradient(120% 100% at 100% 50%, rgba(255,140,120,0.35) 0%, rgba(139,0,0,0) 55%),
-            linear-gradient(100deg, #380000 0%, #7a0000 35%, #8B0000 60%, #5c0000 85%, #4A0000 100%)
+            radial-gradient(120% 100% at 100% 50%, rgba(255,59,91,0.4) 0%, rgba(13,10,26,0) 55%),
+            linear-gradient(100deg, #1a0509 0%, #4a0012 35%, #7a0020 60%, #4a0012 85%, #1a0509 100%)
           `,
           boxShadow:
             "inset 22px 0 35px -18px rgba(0,0,0,0.75), inset -22px 0 35px -18px rgba(0,0,0,0.75)",
@@ -84,8 +93,8 @@ export default function CurtainOverlay({ onAnimationComplete }: CurtainOverlayPr
         style={{
           pointerEvents: open ? "none" : "auto",
           background: `
-            radial-gradient(120% 100% at 0% 50%, rgba(255,140,120,0.35) 0%, rgba(139,0,0,0) 55%),
-            linear-gradient(260deg, #380000 0%, #7a0000 35%, #8B0000 60%, #5c0000 85%, #4A0000 100%)
+            radial-gradient(120% 100% at 0% 50%, rgba(255,59,91,0.4) 0%, rgba(13,10,26,0) 55%),
+            linear-gradient(260deg, #1a0509 0%, #4a0012 35%, #7a0020 60%, #4a0012 85%, #1a0509 100%)
           `,
           boxShadow:
             "inset 22px 0 35px -18px rgba(0,0,0,0.75), inset -22px 0 35px -18px rgba(0,0,0,0.75)",
@@ -115,7 +124,7 @@ function CurtainTassel({ side }: { side: "left" | "right" }) {
     >
       <svg width="28" height="72" viewBox="0 0 28 72" fill="none" xmlns="http://www.w3.org/2000/svg">
         {/* 吊り紐 */}
-        <line x1="14" y1="0" x2="14" y2="16" stroke="#e8b84c" strokeWidth="2" />
+        <line x1="14" y1="0" x2="14" y2="16" stroke="#ffcf4a" strokeWidth="2" />
         {/* 房の玉(結び目) */}
         <ellipse cx="14" cy="25" rx="10" ry="10" fill="url(#tasselKnotGradient)" stroke="#a8761f" strokeWidth="1" />
         {/* 房糸(フリンジ) */}
@@ -126,15 +135,15 @@ function CurtainTassel({ side }: { side: "left" | "right" }) {
             y1="34"
             x2={5 + i * 3}
             y2="70"
-            stroke="#e8b84c"
+            stroke="#ffcf4a"
             strokeWidth="1.6"
             strokeLinecap="round"
           />
         ))}
         <defs>
           <radialGradient id="tasselKnotGradient" cx="35%" cy="35%" r="70%">
-            <stop offset="0%" stopColor="#fbe38a" />
-            <stop offset="60%" stopColor="#e8b84c" />
+            <stop offset="0%" stopColor="#fff1c2" />
+            <stop offset="60%" stopColor="#ffcf4a" />
             <stop offset="100%" stopColor="#a8761f" />
           </radialGradient>
         </defs>

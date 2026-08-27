@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { getRankByMeter } from "@/data/collectionData";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
@@ -24,6 +25,13 @@ export default function AppHeader() {
   const pathname = usePathname();
   const user = useUserStore((s) => s.user);
   const rank = getRankByMeter(user.masteryMeter);
+  const authUser = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.loading);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const signOut = useAuthStore((s) => s.signOut);
+  const xScreenName =
+    (authUser?.user_metadata?.user_name as string | undefined) ??
+    (authUser?.user_metadata?.full_name as string | undefined);
 
   return (
     <header className="sticky top-0 z-40 border-b border-dojo-dark-brown/20 bg-dojo-tatami-cream/95 backdrop-blur">
@@ -33,15 +41,37 @@ export default function AppHeader() {
             href="/"
             className="font-brush text-lg text-dojo-dark-brown sm:text-xl"
           >
-            大喜利道場
+            爆笑スタジアム
           </Link>
-          <div className="flex items-center gap-2 rounded-full border border-dojo-dark-brown/30 bg-dojo-light-brown px-3 py-1.5 text-right">
-            <span className="font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
-              {rank.label}・{user.displayName}
-            </span>
-            <span className="font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
-              {user.points.toLocaleString()}pt
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-dojo-dark-brown/30 bg-dojo-light-brown px-3 py-1.5 text-right">
+              <span className="font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
+                {rank.label}・{user.displayName}
+              </span>
+              <span className="font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
+                {user.points.toLocaleString()}pt
+              </span>
+            </div>
+            {!authLoading && (
+              authUser ? (
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="shrink-0 rounded-full border border-dojo-dark-brown/30 px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-light-brown sm:text-xs"
+                  title={xScreenName ? `@${xScreenName}` : undefined}
+                >
+                  ログアウト
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => signInWithX()}
+                  className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
+                >
+                  Xでログイン
+                </button>
+              )
+            )}
           </div>
         </div>
         {/*

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { MAX_ANSWERS_PER_PLAYER } from "@/data/liveDemoData";
 
-// ホームの「大喜利道場」タイトルを押すと出るチュートリアル/説明モーダル。
+// ホームの「爆笑スタジアム」タイトルを押すと出るチュートリアル/説明モーダル。
 // 仕様書.md §0・§1の要点を、初めて触る人向けに噛み砕いて紹介する。
 const STEPS: { emoji: string; title: string; body: string }[] = [
   {
@@ -65,7 +65,7 @@ export default function TutorialModal({
                   遊び方
                 </p>
                 <h2 className="mt-1 font-brush text-2xl text-dojo-dark-brown sm:text-3xl">
-                  大喜利道場とは
+                  爆笑スタジアムとは
                 </h2>
               </div>
               <button

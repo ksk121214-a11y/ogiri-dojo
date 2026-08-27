@@ -23,6 +23,7 @@ export default function JudgingCard({
   isJudge,
   myScore,
   onScore,
+  disabled = false,
 }: {
   authorName: string;
   answerBody: string;
@@ -30,6 +31,7 @@ export default function JudgingCard({
   isJudge: boolean;
   myScore: 0 | 1 | 2 | 3 | null;
   onScore?: (points: 0 | 1 | 2 | 3) => void;
+  disabled?: boolean;
 }) {
   return (
     <motion.div
@@ -37,17 +39,17 @@ export default function JudgingCard({
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: -12 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      className="flex w-full max-w-xl flex-col items-center rounded-2xl border border-dojo-curtain-gold/70 bg-dojo-backstage-navy p-3 text-center shadow-[0_0_45px_rgba(255,138,61,0.3)] sm:p-5"
+      className="flex w-full max-w-xl flex-col items-center rounded-2xl border-2 border-[#3b5bff] bg-white p-3 text-center shadow-[0_0_45px_rgba(59,91,255,0.4)] sm:p-5"
     >
-      <p className="font-sans text-[11px] tracking-widest text-dojo-spotlight-orange-light">
+      <p className="font-sans text-[11px] tracking-widest text-[#3b5bff]">
         審査中
       </p>
 
-      <div className="mt-2 w-full min-h-0 overflow-y-auto rounded-xl bg-dojo-stage-dark/60 px-4 py-3">
-        <p className="font-sans text-sm text-dojo-curtain-gold">
+      <div className="mt-2 w-full min-h-0 overflow-y-auto rounded-xl bg-[#eef1ff] px-4 py-3">
+        <p className="font-sans text-sm text-[#3b5bff]">
           {authorName}
         </p>
-        <p className="mt-1.5 font-sans text-xl font-bold leading-snug text-dojo-washi-white sm:text-2xl">
+        <p className="mt-1.5 font-sans text-xl font-bold leading-snug text-[#1a1a3a] sm:text-2xl">
           {answerBody}
         </p>
       </div>
@@ -58,6 +60,8 @@ export default function JudgingCard({
           totalMs={DEMO_TIMING.judgeMs}
           size={60}
           label="採点"
+          palette="neon2"
+          darkText
         />
       </div>
 
@@ -68,9 +72,10 @@ export default function JudgingCard({
               key={btn.points}
               type="button"
               onClick={() => onScore?.(btn.points)}
-              className={`flex h-12 w-12 items-center justify-center rounded-full text-2xl font-bold transition sm:h-16 sm:w-16 sm:text-3xl ${btn.className} ${
+              disabled={disabled}
+              className={`flex h-12 w-12 items-center justify-center rounded-full text-2xl font-bold transition disabled:cursor-not-allowed disabled:opacity-30 sm:h-16 sm:w-16 sm:text-3xl ${btn.className} ${
                 myScore === btn.points
-                  ? "ring-4 ring-dojo-washi-white scale-110"
+                  ? "ring-4 ring-[#3b5bff] scale-110"
                   : "opacity-80 hover:opacity-100"
               }`}
             >
@@ -79,7 +84,7 @@ export default function JudgingCard({
           ))}
         </div>
       ) : (
-        <p className="mt-2 font-sans text-xs text-dojo-gray-purple sm:mt-3">
+        <p className="mt-2 font-sans text-xs text-[#6b6b90] sm:mt-3">
           客席が採点しています……
         </p>
       )}

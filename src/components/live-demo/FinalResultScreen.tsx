@@ -9,6 +9,7 @@ import ReportButton from "@/components/app/ReportButton";
 import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
 import { getBestAnswer, getOverallRanking, getParticipantName } from "@/lib/liveDemoSelectors";
+import { playSfx } from "@/lib/sfx";
 import { useLiveDemoStore } from "@/store/useLiveDemoStore";
 import { useUserStore } from "@/store/useUserStore";
 import MasteryGauge from "./MasteryGauge";
@@ -28,6 +29,11 @@ export default function FinalResultScreen() {
     if (step >= 4) return;
     const t = setTimeout(() => setStep((s) => s + 1), 2000);
     return () => clearTimeout(t);
+  }, [step]);
+
+  // 3位→2位→1位と切り替わるたびに発表音を鳴らす（step0=ベストアンサーは対象外）。
+  useEffect(() => {
+    if (step >= 1) playSfx("rankReveal");
   }, [step]);
 
   const bestAnswer = getBestAnswer(state);
@@ -75,11 +81,7 @@ export default function FinalResultScreen() {
   }, []);
 
   const rankLabel = ["1位", "2位", "3位"];
-  const rankColor = [
-    "text-dojo-curtain-gold",
-    "text-dojo-gold-foil",
-    "text-dojo-spotlight-orange-light",
-  ];
+  const rankColor = ["text-[#ffcf4a]", "text-[#c8d4ff]", "text-[#ff8f4a]"];
   // 順位別の表彰ボーナス（§5.4）を1〜3位発表カードにその場で明記する（第5ラウンドフィードバック）。
   const rankBonusPoints = [
     BONUS_BY_RANK.first,
@@ -89,10 +91,10 @@ export default function FinalResultScreen() {
 
   return (
     <ScreenShell>
-      <p className="font-sans text-xs tracking-widest text-dojo-gray-purple">
+      <p className="font-sans text-xs tracking-widest text-white/60">
         最終結果
       </p>
-      <h2 className="mt-2 font-brush text-3xl text-dojo-curtain-gold sm:text-4xl">
+      <h2 className="mt-2 font-sans text-3xl font-black text-[#ffcf4a] sm:text-4xl">
         表彰式
       </h2>
 
@@ -104,14 +106,14 @@ export default function FinalResultScreen() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0 }}
-              className="relative w-full rounded-2xl border border-dojo-cheer-pink/60 bg-dojo-backstage-navy p-6 shadow-[0_0_40px_rgba(255,111,165,0.3)]"
+              className="relative w-full rounded-2xl border border-[#ff3b5b]/70 bg-white/5 p-6 shadow-[0_0_40px_rgba(255,59,91,0.25)]"
             >
               {bestAnswer.participantId !== MY_PARTICIPANT_ID && (
                 <div className="absolute right-4 top-4">
                   <ReportButton />
                 </div>
               )}
-              <p className="font-sans text-xs tracking-widest text-dojo-cheer-pink">
+              <p className="font-sans text-xs tracking-widest text-[#ff3b5b]">
                 本日のベストアンサー
               </p>
               <div className="mt-3 flex items-center gap-2">
@@ -126,14 +128,14 @@ export default function FinalResultScreen() {
                     size={24}
                   />
                 )}
-                <p className="font-sans text-xs text-dojo-curtain-gold">
+                <p className="font-sans text-xs text-[#ffcf4a]">
                   {getParticipantName(state, bestAnswer.participantId)}
                 </p>
               </div>
-              <p className="mt-2 font-sans text-xl font-bold leading-relaxed text-dojo-washi-white">
+              <p className="mt-2 font-sans text-xl font-bold leading-relaxed text-white">
                 {bestAnswer.body}
               </p>
-              <p className="mt-3 font-sans text-sm font-bold text-dojo-spotlight-orange-light">
+              <p className="mt-3 font-sans text-sm font-bold text-[#ff8f4a]">
                 {bestAnswer.scoreTotal}点
               </p>
             </motion.div>
@@ -146,7 +148,7 @@ export default function FinalResultScreen() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ type: "spring", stiffness: 200, damping: 16 }}
-              className="relative w-full rounded-2xl border border-dojo-curtain-gold/70 bg-dojo-backstage-navy p-8 text-center shadow-[0_0_50px_rgba(232,184,76,0.35)]"
+              className="relative w-full rounded-2xl border border-[#3b5bff]/70 bg-white/5 p-8 text-center shadow-[0_0_50px_rgba(59,91,255,0.35)]"
             >
               {top3[3 - step].participant.id !== MY_PARTICIPANT_ID && (
                 <div className="absolute right-4 top-4">
@@ -154,7 +156,7 @@ export default function FinalResultScreen() {
                 </div>
               )}
               <p
-                className={`font-brush text-4xl ${rankColor[3 - step]}`}
+                className={`font-sans text-4xl font-black ${rankColor[3 - step]}`}
               >
                 {rankLabel[3 - step]}
               </p>
@@ -170,17 +172,17 @@ export default function FinalResultScreen() {
                     size={32}
                   />
                 )}
-                <p className="font-sans text-lg font-bold text-dojo-washi-white">
+                <p className="font-sans text-lg font-bold text-white">
                   {top3[3 - step].participant.displayName}
                   {top3[3 - step].participant.id === MY_PARTICIPANT_ID
                     ? "（あなた）"
                     : ""}
                 </p>
               </div>
-              <p className="mt-1 font-sans text-sm text-dojo-spotlight-orange-light">
+              <p className="mt-1 font-sans text-sm text-[#ff8f4a]">
                 {top3[3 - step].total}点
               </p>
-              <p className="mt-2 font-sans text-sm font-bold text-dojo-curtain-gold">
+              <p className="mt-2 font-sans text-sm font-bold text-[#ffcf4a]">
                 表彰ボーナス +{rankBonusPoints[3 - step]}pt
               </p>
             </motion.div>
@@ -193,9 +195,9 @@ export default function FinalResultScreen() {
               animate={{ opacity: 1 }}
               className="w-full"
             >
-              <p className="font-sans text-sm text-dojo-washi-white/80">
+              <p className="font-sans text-sm text-white/80">
                 あなたの総合順位：
-                <span className="font-bold text-dojo-curtain-gold">
+                <span className="font-bold text-[#ffcf4a]">
                   {myRank}位
                 </span>
                 （{ranking.length}人中）
@@ -210,9 +212,7 @@ export default function FinalResultScreen() {
                     <div
                       key={r.participant.id}
                       className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                        isMe
-                          ? "border-dojo-curtain-gold bg-dojo-backstage-navy"
-                          : "border-dojo-gray-purple/20 bg-dojo-backstage-navy/50"
+                        isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
                       }`}
                     >
                       <span className="flex min-w-0 items-center gap-2">
@@ -232,7 +232,7 @@ export default function FinalResultScreen() {
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="tabular-nums text-dojo-spotlight-orange-light">
+                        <span className="tabular-nums text-[#ff8f4a]">
                           {r.total}点
                         </span>
                         {!isMe && <ReportButton size={16} />}
@@ -251,17 +251,17 @@ export default function FinalResultScreen() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className="mt-8 flex w-full max-w-lg flex-col items-center rounded-2xl border border-dojo-curtain-gold/30 bg-dojo-backstage-navy/50 px-6 py-6"
+          className="mt-8 flex w-full max-w-lg flex-col items-center rounded-2xl border border-[#3b5bff]/30 bg-white/[0.03] px-6 py-6"
         >
-          <p className="font-sans text-xs tracking-widest text-dojo-gray-purple">
+          <p className="font-sans text-xs tracking-widest text-white/60">
             熟練度メーター獲得
           </p>
           <div className="mt-4">
             <MasteryGauge baseline={baseline} gained={masteryGain} />
           </div>
-          <p className="mt-4 font-sans text-xs text-dojo-washi-white/80">
+          <p className="mt-4 font-sans text-xs text-white/80">
             獲得ポイント：
-            <span className="font-bold text-dojo-curtain-gold">
+            <span className="font-bold text-[#ffcf4a]">
               +{pointsGain}pt
             </span>
           </p>
@@ -277,14 +277,14 @@ export default function FinalResultScreen() {
           <button
             type="button"
             onClick={closeLive}
-            className="rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+            className="rounded-full bg-[#3b5bff] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#2947e0]"
           >
             閉幕する
           </button>
           <button
             type="button"
             onClick={resetLive}
-            className="rounded-full border border-dojo-gray-purple/40 px-6 py-3 font-sans text-sm text-dojo-washi-white/90 transition hover:border-dojo-curtain-gold hover:text-dojo-curtain-gold"
+            className="rounded-full border border-white/25 px-6 py-3 font-sans text-sm text-white/80 transition hover:border-[#3b5bff] hover:text-[#7ab2ff]"
           >
             もう一度体験する
           </button>

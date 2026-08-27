@@ -1,12 +1,10 @@
 import type { NextConfig } from "next";
 
-const repoName = "ogiri-dojo";
-
 const nextConfig: NextConfig = {
-  output: "export",
-  basePath: `/${repoName}`,
   trailingSlash: true,
-  images: { unoptimized: true },
+  // 開発サーバーをスマホ実機からLAN経由（IPアドレス）で確認できるようにする設定。
+  // next devにのみ影響し、本番ビルドには影響しない。
+  allowedDevOrigins: ["192.168.10.13"],
 };
 
 export default nextConfig;

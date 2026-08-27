@@ -16,9 +16,33 @@ export const DEMO_TIMING = {
   groupResultMs: 3_400, // 実仕様: 組結果20〜40秒
   laughEffectMs: 1_100, // デザイン方針§4.4: 0.8〜1.2秒で収束
   revealDelayMs: 1_500, // 送信後・前の審査サイクル終了後に「一呼吸」置いてから回答を表示するまでの間（2026-07-14追加、同日700ms→1500msに延長）
+  // 採点確定（評価が全員終わった or 時間切れ）後の一連の流れは、必ずこの順で一件ずつ進む：
+  // ①回答フリップを一定時間見せる(revealGraceMs) → ②フリップが消える → ③少し間を置く
+  // (ballPopPauseMs) → ④採点ボードの玉が「パァン」と弾けて消える(ScoringPhysicsBoardの
+  // POP_DURATION_MSと同じ長さ。下のBALL_POP_ANIM_MS参照) → ⑤回答席に点数がデジタル表示される
+  // → ⑥点数をscoreDisplayMsの間見せる → ⑦少し間を置く(gateTailMs) → ⑧次の人が送信できるようになる。
+  // 点数が見えている間（⑤〜⑥）は他の人も送信できないようにするため、store側の
+  // revealGateUntilはこの一連の合計（下のREVEAL_SEQUENCE_MS）ぶん確保する。
+  revealGraceMs: 2_200, // ①回答フリップ・採点ボードを閉じるまでの表示猶予
+  ballPopPauseMs: 1_700, // ③フリップが消えてから、玉が弾け始めるまでの間（2026-08-18改訂：1100ms→1700msに延長）
+  scoreDisplayMs: 3_200, // ⑥回答席に点数を見せておく時間（2026-08-18改訂：3800ms→3200msに短縮）
+  gateTailMs: 400, // ⑦点数が消えたあと、次の人が送信できるようになるまでの最後の一呼吸
   earlyConfirmDelayMs: 350, // 全審査員の投票が揃った瞬間に即座に締め切ると、最後に押した人の採点ボタンの光る演出が
   // 描画される前にカードが消えてしまうため、締切確定までにこの猶予を挟む（2026-07-14追加）
 } as const;
+
+// ScoringPhysicsBoard.tsxのPOP_DURATION_MSと同じ値（④の長さ）。このファイルはコンポーネントに
+// 依存しない純粋なデータファイルにしておきたいため直接importはせず、値をここに複製している。
+// ScoringPhysicsBoard.tsx側の値を変えたら、必ずこちらも合わせて変更すること。
+const BALL_POP_ANIM_MS = 320;
+
+// ③〜④が終わり、⑤(回答席への点数表示)を始めるまでの、確定(resolved)からの経過時間。
+export const SCORE_REVEAL_DELAY_MS =
+  DEMO_TIMING.revealGraceMs + DEMO_TIMING.ballPopPauseMs + BALL_POP_ANIM_MS;
+
+// ①〜⑦の一連の流れ全体の長さ（確定(resolved)から、次の人が送信できるようになるまで）。
+// store側のrevealGateUntilはこの値を使う。
+export const REVEAL_SEQUENCE_MS = SCORE_REVEAL_DELAY_MS + DEMO_TIMING.scoreDisplayMs + DEMO_TIMING.gateTailMs;
 
 // テスト操作者（自分）の参加者ID
 export const MY_PARTICIPANT_ID = "p-me";
@@ -79,7 +103,5 @@ export const TSUKKOMI_TEMPLATES = [
   "なんでやねん",
   "そうはならんやろ",
   "ちょっと待って",
-  "うまい!",
-  "座布団一枚!",
   "それは無理あるて",
 ] as const;

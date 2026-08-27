@@ -1,4 +1,4 @@
-// 「大喜利道場」ライブ体験モックのローカル状態管理（Zustand）。
+// 「爆笑スタジアム」ライブ体験モックのローカル状態管理（Zustand）。
 // 本来はSupabase Realtimeでサーバ基準のライブ状態を同期する想定（仕様書 §1.4・§13）だが、
 // このモックでは1台のブラウザ内でステートマシンとボットの挙動をすべてシミュレートする。
 // 画面側は必ずこのストアの操作関数経由で状態を変更する（大喜利育成のuseGameStoreと同様の方針）。
@@ -9,6 +9,8 @@ import {
   DEMO_TIMING,
   MAX_ANSWERS_PER_PLAYER,
   MY_PARTICIPANT_ID,
+  REVEAL_SEQUENCE_MS,
+  TSUKKOMI_TEMPLATES,
 } from "@/data/liveDemoData";
 import {
   buildParticipantsAndGroups,
@@ -49,6 +51,12 @@ export interface TsukkomiEvent {
   text: string;
 }
 
+// ツッコミ・爆笑・拍手ボタンの連打制限（1秒に1回まで）。ボタン自体の見た目は
+// 変えず、裏で黙って間引く。ボタンはUIから常にsendTsukkomiを直接呼ぶだけなので、
+// ここ1箇所でガードすれば全ボタンに効く。
+const TSUKKOMI_COOLDOWN_MS = 1_000;
+let lastTsukkomiSentAt = 0;
+
 export interface LiveDemoState {
   status: "idle" | "running";
   phase: LivePhase;
@@ -71,6 +79,10 @@ export interface LiveDemoState {
   judging: JudgingState | null;
   revealPending: RevealPending | null; // 送信直後・前の審査サイクル終了直後の「一呼吸」（§1.1改訂）
   myPendingScore: 0 | 1 | 2 | 3 | null;
+  // 採点確定直後、次の回答の「一呼吸」を始めてよくなる時刻。複数件が送信キューに
+  // 溜まっていても、直前の回答フリップ・採点ボードの表示が閉じきるまで次に進ませない
+  // （§1.1改訂：一件ずつ順番に進む演出のため）。
+  revealGateUntil: number;
 
   laughEventSeq: number; // 発生のたびに+1、演出コンポーネントの再トリガーに使う
   lastLaughAnswerId: string | null;
@@ -112,6 +124,7 @@ const IDLE_STATE = {
   judging: null,
   revealPending: null,
   myPendingScore: null,
+  revealGateUntil: 0,
   laughEventSeq: 0,
   lastLaughAnswerId: null,
   tsukkomiSeq: 0,
@@ -129,6 +142,9 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     if (state.judging !== null) return;
     if (state.revealPending !== null) return;
     if (state.submissionQueue.length === 0) return;
+    // 直前の回答フリップ・採点ボードがまだ表示猶予中（画面側のuseJudgingDisplayの
+    // 猶予と同じ長さ）は、キューに次が残っていても一呼吸を始めない。
+    if (now < state.revealGateUntil) return;
 
     const [item, ...rest] = state.submissionQueue;
     set({
@@ -189,10 +205,30 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     const botJudges = state.participants.filter(
       (p) => !stageGroup.memberIds.includes(p.id) && !p.isTestUser,
     );
+    // 何回かに1回、ボット審査員全員が満点(3点)をつける「パーフェクト回」にする。
+    // 玉が理論上の満点まで積み上がり、ScoringPhysicsBoard側の金色に染まって弾ける
+    // 特別演出を実際に確認できるようにするための抽選（2026-08-18：動作確認のため一旦80%に引き上げ）。
+    const isPerfectRound = Math.random() < 0.8;
     for (const judge of botJudges) {
       const delay = randomDelay(400, DEMO_TIMING.judgeMs - 600);
       setTimeout(() => {
-        get().scoreAnswer(judge.id, answer.id, randomBotScore());
+        get().scoreAnswer(judge.id, answer.id, isPerfectRound ? 3 : randomBotScore());
+      }, delay);
+    }
+
+    // 客席のボットもたまにツッコミ/爆笑/拍手ボタンを押したかのように送る
+    // （見た目の賑やかし用のみ。誰が送ったかは表示に使わないため参加者は問わない）。
+    if (botJudges.length > 0 && Math.random() < 0.35) {
+      const delay = randomDelay(400, DEMO_TIMING.judgeMs - 200);
+      setTimeout(() => {
+        const roll = Math.random();
+        const [kind, text]: ["stamp" | "clap", string] =
+          roll < 1 / 3
+            ? ["stamp", TSUKKOMI_TEMPLATES[Math.floor(Math.random() * TSUKKOMI_TEMPLATES.length)]]
+            : roll < 2 / 3
+              ? ["stamp", "爆笑"]
+              : ["clap", "👏"];
+        get().sendTsukkomi(kind, text);
       }, delay);
     }
   }
@@ -221,6 +257,9 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       answers,
       judging: null,
       myPendingScore: null,
+      // 「フリップが消える→間を置いて玉が消える→点数が出る→点数を見せる→間を置く」の
+      // 一連の流れ全体(REVEAL_SEQUENCE_MS)が終わるまで、次の人は送信できない。
+      revealGateUntil: now + REVEAL_SEQUENCE_MS,
       ...(laughTriggered
         ? {
             lastLaughAnswerId: judging.answerId,
@@ -229,7 +268,8 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
         : {}),
     });
 
-    // キューに次の送信が残っていれば続けて審査サイクルへ
+    // キューに次の送信が残っていても、revealGateUntilを過ぎるまではprocessQueue自身が
+    // 進めない（直前の回答フリップ・採点ボードの表示が閉じきるのを待つ）。
     processQueue(now);
   }
 
@@ -314,6 +354,21 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
 
     const remainingMs = Math.max(0, state.answeringRemainingMs - dt);
 
+    if (remainingMs <= 0) {
+      // 持ち時間が0になったら強制終了。それ以降はボットの新規回答をキューへ積まず、
+      // 溜まっている未表示ぶんも打ち切る（そうしないと、タイマー表示が0になった後も
+      // キューに残っていた分が一件ずつ表示され続けてしまう）。tickAnsweringは
+      // judging・revealPending・revealGateUntilがすべて空いている時にしか呼ばれないため
+      // （tick関数側のガード）、ここで打ち切っても演出の途中を割り込むことはない。
+      set({
+        answeringRemainingMs: 0,
+        botAnswerSchedule: [],
+        submissionQueue: [],
+      });
+      set({ phase: "group_result", phaseEndsAt: now + DEMO_TIMING.groupResultMs });
+      return;
+    }
+
     // しきい値を過ぎたボット回答者を送信キューへ積む
     const ready = state.botAnswerSchedule.filter(
       (ev) => ev.targetRemainingMs >= remainingMs,
@@ -346,6 +401,9 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     processQueue(now);
 
     const after = get();
+    // remainingMs<=0のケースは上のガードで打ち切り済みなので、ここに来る時点では常に
+    // remainingMs > 0。「全員が回答回数を使い切った」場合のみ、時間が余っていても
+    // 早めにgroup_resultへ進める。
     const allExhausted = stageGroup.memberIds.every(
       (id) => (after.answerCounts[id] ?? 0) >= MAX_ANSWERS_PER_PLAYER,
     );
@@ -353,7 +411,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       after.judging === null &&
       after.revealPending === null &&
       after.submissionQueue.length === 0 &&
-      (remainingMs <= 0 || allExhausted)
+      allExhausted
     ) {
       set({ phase: "group_result", phaseEndsAt: now + DEMO_TIMING.groupResultMs });
     }
@@ -412,6 +470,11 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       }
 
       if (state.phase === "answering") {
+        // 採点確定後の演出（フリップが消える→間を置いて玉が消える→点数が出る→
+        // 点数を見せる→間を置く）の最中も、画面のTimerRing同様に持ち時間タイマーを
+        // 止める（busyWithOthersと同じ条件）。これを止めないと、この演出中にも
+        // 持ち時間が実際には減り続けてしまい、演出の途中で強制終了がかかる恐れがある。
+        if (now < state.revealGateUntil) return;
         tickAnswering(now, dt);
         return;
       }
@@ -507,6 +570,9 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     },
 
     sendTsukkomi: (kind, text) => {
+      const now = Date.now();
+      if (now - lastTsukkomiSentAt < TSUKKOMI_COOLDOWN_MS) return;
+      lastTsukkomiSentAt = now;
       const state = get();
       const id = state.tsukkomiSeq + 1;
       set({

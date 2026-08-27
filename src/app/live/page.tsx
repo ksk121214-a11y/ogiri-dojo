@@ -1,0 +1,247 @@
+"use client";
+
+import { AnimatePresence } from "framer-motion";
+import { useEffect, useState } from "react";
+
+import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
+import InterludeScreen from "@/components/live-demo/InterludeScreen";
+import SoundToggle from "@/components/live-demo/SoundToggle";
+import AudienceAnsweringView from "@/components/live-room/AudienceAnsweringView";
+import FinalResultView from "@/components/live-room/FinalResultView";
+import GroupResultView from "@/components/live-room/GroupResultView";
+import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
+import OpeningView from "@/components/live-room/OpeningView";
+import StageAnsweringView from "@/components/live-room/StageAnsweringView";
+import TopicRevealView from "@/components/live-room/TopicRevealView";
+import { playBgm, stopBgm } from "@/lib/bgm";
+import { useTickingNow } from "@/lib/useTickingNow";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useProfileStore } from "@/store/useProfileStore";
+
+const PHASE_LABEL: Record<string, string> = {
+  scheduled: "開演準備中",
+  interlude: "幕間",
+  opening: "開幕（参加登録受付中）",
+  topic_reveal: "お題発表",
+  answering: "回答受付中",
+  group_result: "組結果発表",
+  final_result: "最終結果発表",
+  closed: "終了",
+};
+
+// 実バックエンド版ライブの参加者用ページ。
+// topic_reveal/answeringフェーズは舞台・客席の没入型フルスクリーン画面(StageAnsweringView等)に
+// 完全に切り替わる（/live-demoの状態遷移と同じ構成）。それ以外のフェーズは簡易な縦スクロール表示。
+export default function LivePage() {
+  const authUser = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.loading);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const profile = useProfileStore((s) => s.profile);
+
+  const live = useLiveFollowerStore((s) => s.live);
+  const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
+  const currentTurn = useLiveFollowerStore((s) => s.currentTurn);
+  const currentTopic = useLiveFollowerStore((s) => s.currentTopic);
+  const groupResult = useLiveFollowerStore((s) => s.groupResult);
+  const finalResult = useLiveFollowerStore((s) => s.finalResult);
+  const liveLoading = useLiveFollowerStore((s) => s.loading);
+  const followerError = useLiveFollowerStore((s) => s.error);
+  const subscribe = useLiveFollowerStore((s) => s.subscribe);
+  const joinLive = useLiveFollowerStore((s) => s.joinLive);
+
+  const now = useTickingNow();
+  const [joining, setJoining] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = subscribe();
+    return unsubscribe;
+  }, [subscribe]);
+
+  // BGM：待機画面開始のタイミングだけはCurtainOverlay.tsx側で「幕が開く音（琴の滑奏）」と
+  // 同時に鳴らす（liveがまだ無い・interlude前は無音のまま）。ここではその後のフェーズ切り替え
+  // だけを扱う（src/app/live-demo/page.tsx参照）。openingはinterludeで既に鳴り始めている
+  // 待機画面BGMの続きなので明示的な指定は不要。
+  const currentPhase = live?.current_phase ?? null;
+  useEffect(() => {
+    if (currentPhase === "topic_reveal") {
+      playBgm("entrance");
+    } else if (currentPhase === "answering") {
+      playBgm("live");
+    } else if (currentPhase === "group_result" || currentPhase === "final_result") {
+      playBgm("waiting");
+    } else if (currentPhase === "closed") {
+      stopBgm();
+    }
+  }, [currentPhase]);
+
+  const remainingSec =
+    live?.answering_paused && live.answering_remaining_ms != null
+      ? Math.ceil(live.answering_remaining_ms / 1000)
+      : live?.phase_deadline
+        ? Math.max(0, Math.ceil((new Date(live.phase_deadline).getTime() - now) / 1000))
+        : null;
+
+  if (authLoading) return <CenterMessage>読み込み中…</CenterMessage>;
+
+  if (!authUser) {
+    return (
+      <CenterMessage>
+        <p className="mb-4">参加するにはXログインが必要です。</p>
+        <button
+          type="button"
+          onClick={() => signInWithX()}
+          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
+        >
+          Xでログイン
+        </button>
+      </CenterMessage>
+    );
+  }
+
+  const isMyGroupOnStage =
+    !!myParticipant && !!currentTurn && myParticipant.group_id === currentTurn.group_id;
+
+  const showImmersive =
+    !!live &&
+    (live.current_phase === "interlude" ||
+      live.current_phase === "opening" ||
+      (!!myParticipant &&
+        (live.current_phase === "topic_reveal" || live.current_phase === "answering")));
+
+  if (showImmersive && live) {
+    return (
+      <main className="relative h-dvh w-full overflow-hidden bg-dojo-stage-dark">
+        <DisplayNameSetupModal />
+        <AnimatePresence mode="wait">
+          {live.current_phase === "interlude" ? (
+            <InterludeScreen key="interlude" />
+          ) : live.current_phase === "opening" ? (
+            <OpeningView key="opening" />
+          ) : live.current_phase === "topic_reveal" ? (
+            <TopicRevealView key="topic_reveal" />
+          ) : isMyGroupOnStage ? (
+            <StageAnsweringView key="stage" />
+          ) : (
+            <AudienceAnsweringView key="audience" />
+          )}
+        </AnimatePresence>
+        <LaughEffectOverlay />
+        <SoundToggle />
+      </main>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
+      <DisplayNameSetupModal />
+      <SoundToggle />
+      <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
+        爆笑スタジアムライブ
+      </p>
+      <h1 className="font-brush text-2xl text-dojo-dark-brown">
+        {profile?.displayName ?? "..."}
+      </h1>
+
+      {liveLoading ? (
+        <p className="font-sans text-sm text-dojo-dark-brown">状態を確認中…</p>
+      ) : !live ? (
+        <p className="font-sans text-sm text-dojo-dark-brown">
+          まだライブは開演していません。司会の開始をお待ちください。
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col items-center gap-1">
+            <p className="font-brush text-xl text-dojo-curtain-red">
+              {PHASE_LABEL[live.current_phase] ?? live.current_phase}
+            </p>
+            {remainingSec !== null && (
+              <p className="font-sans text-sm tabular-nums text-dojo-dark-brown">
+                残り{remainingSec}秒
+                {live.answering_paused && "（審査中は一時停止）"}
+              </p>
+            )}
+          </div>
+
+          {!myParticipant && live.current_phase !== "closed" && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={joining}
+                onClick={async () => {
+                  setJoining(true);
+                  await joinLive("player");
+                  setJoining(false);
+                }}
+                className="rounded-full bg-dojo-curtain-red px-5 py-3 font-sans text-sm font-bold text-dojo-washi-white disabled:opacity-50"
+              >
+                {joining ? "参加処理中…" : "プレイヤーとして参加する"}
+              </button>
+              <button
+                type="button"
+                disabled={joining}
+                onClick={async () => {
+                  setJoining(true);
+                  await joinLive("audience");
+                  setJoining(false);
+                }}
+                className="rounded-full border border-dojo-dark-brown/30 px-5 py-3 font-sans text-sm font-bold text-dojo-dark-brown disabled:opacity-50"
+              >
+                {joining ? "参加処理中…" : "観客として参加する"}
+              </button>
+            </div>
+          )}
+          {!myParticipant && followerError && (
+            <p className="font-sans text-xs text-dojo-deep-crimson">{followerError}</p>
+          )}
+
+          {myParticipant && (
+            <p className="font-sans text-xs text-dojo-dark-brown">
+              {myParticipant.group_id
+                ? `組分け済み・${myParticipant.role === "player" ? "演者" : "見学"}`
+                : `組分け待ち・${myParticipant.preferred_role === "player" ? "演者希望" : "見学希望"}`}
+            </p>
+          )}
+
+          {/* デバッグ表示：自分の組と現在の出番の組が一致しているかその場で確認できるように */}
+          <p className="font-sans text-[10px] text-dojo-gray-purple">
+            debug: myGroup={myParticipant?.group_id?.slice(0, 8) ?? "-"} /
+            turnGroup={currentTurn?.group_id?.slice(0, 8) ?? "-"} / turnStatus=
+            {currentTurn?.status ?? "-"} / onStage={String(isMyGroupOnStage)}
+          </p>
+
+          {currentTopic &&
+            live.current_phase !== "group_result" &&
+            live.current_phase !== "final_result" && (
+              <div className="w-full rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/60 p-4">
+                <p className="font-sans text-xs text-dojo-dark-brown">お題</p>
+                <p className="mt-1 font-sans text-base font-bold text-dojo-ink">
+                  {currentTopic.body}
+                </p>
+              </div>
+            )}
+
+          {live.current_phase === "group_result" && groupResult && (
+            <GroupResultView data={groupResult} myParticipantId={myParticipant?.id ?? null} />
+          )}
+
+          {live.current_phase === "final_result" && finalResult && (
+            <FinalResultView data={finalResult} myParticipantId={myParticipant?.id ?? null} />
+          )}
+
+          {followerError && (
+            <p className="font-sans text-xs text-dojo-deep-crimson">{followerError}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CenterMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-svh w-full flex-col items-center justify-center px-4 text-center font-sans text-sm text-dojo-dark-brown">
+      {children}
+    </div>
+  );
+}

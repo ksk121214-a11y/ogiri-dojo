@@ -10,10 +10,12 @@ import GroupResultScreen from "@/components/live-demo/GroupResultScreen";
 import InterludeScreen from "@/components/live-demo/InterludeScreen";
 import LaughEffectOverlay from "@/components/live-demo/LaughEffectOverlay";
 import OpeningScreen from "@/components/live-demo/OpeningScreen";
+import SoundToggle from "@/components/live-demo/SoundToggle";
 import StageScreen from "@/components/live-demo/StageScreen";
 import StartScreen from "@/components/live-demo/StartScreen";
 import TopicRevealScreen from "@/components/live-demo/TopicRevealScreen";
 import { isMyGroupOnStage } from "@/lib/liveDemoSelectors";
+import { playBgm, stopBgm } from "@/lib/bgm";
 import { useLiveDemoStore } from "@/store/useLiveDemoStore";
 
 // ライブ体験モック（/live-demo）：ダミーデータ・ローカル状態管理のみで進行するステートマシンのお試し実装。
@@ -34,6 +36,24 @@ export default function LiveDemoPage() {
     }, 150);
     return () => clearInterval(id);
   }, [status, tick]);
+
+  // BGM：待機画面開始のタイミングだけはCurtainOverlay.tsx側で「幕が開く音（琴の滑奏）」と
+  // 同時に鳴らす（それより前は無音のまま）。ここではその後のフェーズ切り替えだけを扱う。
+  // 出囃子(お題発表)→ライブ中(回答中のみ)→待機画面(組結果・最終結果)→閉幕したら完全停止。
+  // openingはinterludeで既に鳴り始めている待機画面BGMの続きなので明示的な指定は不要
+  // （何も指定しなければ直前の曲が鳴り続ける）。playBgm自体が「既に同じ曲なら何もしない」
+  // ため、複数フェーズが同じ曲を共有していても曲が途切れず流れ続ける。
+  useEffect(() => {
+    if (phase === "topic_reveal") {
+      playBgm("entrance");
+    } else if (phase === "answering") {
+      playBgm("live");
+    } else if (phase === "group_result" || phase === "final_result") {
+      playBgm("waiting");
+    } else if (phase === "closed") {
+      stopBgm();
+    }
+  }, [phase]);
 
   // 客席のボット観客たちが、サイクル外でランダムに拍手する演出（純演出・スコア非加算 §4.4）。
   // 舞台・客席のどちらの画面を見ていても同じ客席の熱量が伝わるよう、画面に依存せずここで発生させる（§9）。
@@ -84,6 +104,7 @@ export default function LiveDemoPage() {
     <main className="relative h-dvh w-full overflow-hidden bg-dojo-stage-dark">
       <AnimatePresence mode="wait">{content}</AnimatePresence>
       <LaughEffectOverlay />
+      <SoundToggle />
     </main>
   );
 }

@@ -45,7 +45,7 @@ export default function Home() {
             onClick={() => setTutorialOpen(true)}
             className="font-brush text-5xl leading-relaxed text-dojo-dark-brown transition hover:text-dojo-curtain-red sm:text-7xl"
           >
-            大喜利道場
+            爆笑スタジアム
           </button>
           <p className="font-sans text-sm text-dojo-ink">
             決まった時間に、みんなで集まる大喜利ライブ。
@@ -358,7 +358,7 @@ function MyPageView({ onBack }: { onBack: () => void }) {
 }
 
 // マイページと寄合帳（SNS）のフォロー中/フォロワーをつなぐセクション。
-// 「マイページは大喜利道場と同じでリンクしている」の方針通り、SnsAuthorBadgeと同じ
+// 「マイページは爆笑スタジアムと同じでリンクしている」の方針通り、SnsAuthorBadgeと同じ
 // useUserStore由来の自分の情報と、useSnsStoreのフォロー状態を組み合わせて表示する。
 function SnsFollowSummary() {
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);

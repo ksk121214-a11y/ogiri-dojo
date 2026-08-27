@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
 import { DEMO_TIMING } from "@/data/liveDemoData";
+import { playSfx } from "@/lib/sfx";
 import { useLiveDemoStore } from "@/store/useLiveDemoStore";
 
 const STAMP_WORDS = ["ドッ", "ウケた!", "座布団3枚!"];
@@ -29,6 +30,10 @@ export default function LaughEffectOverlay() {
     return () => clearTimeout(t);
   }, [visible, laughEventSeq]);
 
+  useEffect(() => {
+    if (laughEventSeq !== 0) playSfx("bigLaugh");
+  }, [laughEventSeq]);
+
   const confetti = Array.from({ length: 24 }, (_, i) => i);
 
   return (
@@ -48,7 +53,7 @@ export default function LaughEffectOverlay() {
             className="absolute inset-0"
             style={{
               background:
-                "radial-gradient(circle at center, rgba(255,217,142,0.9), rgba(255,138,61,0.4) 45%, transparent 75%)",
+                "radial-gradient(circle at center, rgba(122,178,255,0.9), rgba(59,91,255,0.4) 45%, transparent 75%)",
             }}
           />
           {confetti.map((i) => (
@@ -67,7 +72,7 @@ export default function LaughEffectOverlay() {
                 delay: (i % 6) * 0.03,
               }}
               className={`absolute h-2.5 w-2.5 ${
-                i % 2 === 0 ? "bg-dojo-curtain-gold" : "bg-dojo-cheer-pink"
+                i % 2 === 0 ? "bg-[#3b5bff]" : "bg-[#ff3b5b]"
               }`}
               style={{ borderRadius: i % 3 === 0 ? "9999px" : "2px" }}
             />
@@ -77,7 +82,7 @@ export default function LaughEffectOverlay() {
             animate={{ opacity: 1, scale: 1.15 }}
             exit={{ opacity: 0, scale: 1.4 }}
             transition={{ type: "spring", stiffness: 260, damping: 12 }}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 font-brush text-6xl text-dojo-curtain-gold drop-shadow-[0_0_25px_rgba(255,138,61,0.9)]"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap font-sans text-5xl font-black text-[#7ab2ff] drop-shadow-[0_0_25px_rgba(59,91,255,0.9)] sm:text-6xl"
           >
             {word}
           </motion.p>

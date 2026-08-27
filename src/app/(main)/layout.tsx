@@ -1,4 +1,5 @@
 import AppHeader from "@/components/app/AppHeader";
+import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 
 // ホーム/ガチャ/ショップ/ランキング/マイページ共通のレイアウト（簡易ナビゲーション付き）。
 // ライブ体験（/live-demo）はフルスクリーン演出のためこのグループの外に置く。
@@ -13,6 +14,7 @@ export default function MainLayout({
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
         {children}
       </main>
+      <DisplayNameSetupModal />
     </div>
   );
 }
