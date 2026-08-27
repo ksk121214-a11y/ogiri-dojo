@@ -26,10 +26,10 @@ export default function StadiumHeader() {
 
   return (
     <header className={`${styles.grainDark} border-b border-[var(--paper)]/70`}>
-      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-3 px-4 py-2 sm:px-5">
+      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-3 px-4 py-2">
         <Link
           href="/"
-          className="shrink-0 font-sans text-lg font-bold tracking-tight text-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+          className={`${styles.titleTexture} shrink-0 font-sans text-lg font-black tracking-tight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
         >
           爆笑スタジアム
         </Link>

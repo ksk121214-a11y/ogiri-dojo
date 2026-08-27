@@ -16,7 +16,7 @@ export default function StadiumAppShell({
   return (
     <div className={`${styles.shell} ${styles.grainDark} flex min-h-screen flex-col`}>
       <StadiumHeader />
-      <main className={`${styles.content} mx-auto w-full max-w-[480px] flex-1 px-4 pt-3 pb-20 sm:px-5`}>
+      <main className={`${styles.content} mx-auto w-full max-w-[480px] flex-1 px-4 pt-3 pb-20`}>
         <div className="flex flex-col gap-3">{children}</div>
       </main>
       {bottomNav}

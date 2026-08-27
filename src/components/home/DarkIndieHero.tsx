@@ -8,13 +8,13 @@ import styles from "./StadiumHome.module.css";
 // .halftone）を右側に重ねている。マイク側に視線が集まるよう左側にタイトル用の余白を確保。
 export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void }) {
   return (
-    <section className={`${styles.heroPanel} ${styles.grainRaised} relative rounded-2xl px-5 py-4 sm:px-6 sm:py-6`}>
+    <section className={`${styles.heroPanel} ${styles.grainDark} relative px-5 py-4`}>
       <div className={styles.halftone} aria-hidden />
       <div className={styles.heroOverlay} aria-hidden />
       <div
         role="img"
         aria-label="スポットライトに照らされたマイクスタンドのイラスト"
-        className="pointer-events-none absolute inset-y-0 right-0 z-0 flex w-[40%] items-end justify-center opacity-95 sm:w-[36%]"
+        className="pointer-events-none absolute inset-y-0 right-0 z-0 flex w-[40%] items-end justify-center opacity-95"
       >
         <svg viewBox="0 0 100 170" className="h-full w-full" fill="none" aria-hidden>
           <line x1="50" y1="160" x2="50" y2="46" stroke="var(--muted-on-dark)" strokeWidth="4" />
@@ -42,14 +42,16 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           単語の途中で折り返ってしまうため、max-widthを掛けずwhitespace-nowrapで
           1行ずつ（爆笑／スタジアム）を強制する。パネルはoverflow:hiddenなので、
           仮にマイク側と少し重なっても画面外にはみ出すことはない。
+          styles.titleTextureで文字の塗りをtitle-ivory-ink-texture-512.pngにしている
+          （background-clip:textのため、ここでは通常のcolorユーティリティは付けない）。
         */}
-        <h1 className="whitespace-nowrap font-sans text-[2.4rem] leading-[0.95] font-black tracking-tight text-[var(--text-on-dark)] sm:text-6xl">
+        <h1 className={`${styles.titleTexture} whitespace-nowrap font-sans text-[2.4rem] leading-[0.95] font-black tracking-tight`}>
           爆笑
           <br />
           スタジアム
         </h1>
-        <div className="flex max-w-[62%] flex-col items-start gap-2 sm:max-w-[58%]">
-          <p className="text-xl font-bold text-[var(--accent)] sm:text-2xl">— 大喜利ライブ —</p>
+        <div className="flex max-w-[62%] flex-col items-start gap-2">
+          <p className="text-xl font-bold text-[var(--accent)]">— 大喜利ライブ —</p>
           <p className="text-sm leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>

@@ -15,9 +15,9 @@
   --ink: #171513;
   --text-on-dark: #f1e9d9;
   --muted-on-dark: #aaa297;
-  /* 2026-08-28改訂：もう少し濃く赤みの強いオレンジにしたいとの要望で微調整。 */
-  --accent: #cf3a1c;
-  --accent-dark: #a52c14;
+  /* 2026-08-28改訂：赤寄りだったのを、もう少しオレンジ寄りの色味に調整。 */
+  --accent: #ce631c;
+  --accent-dark: #a94e16;
   --border-dark: #312f2b;
 
   position: relative;
@@ -64,6 +64,21 @@
   background-size: 170px 170px;
 }
 
+/*
+ * タイトル文字（ヘッダーの小さい「爆笑スタジアム」／ヒーローの大きい「爆笑スタジアム」）専用。
+ * background-clip:textで、文字の形の中だけにtitle-ivory-ink-texture-512.png（生成り色＋
+ * インクのかすれ）を敷き詰めて見せる。colorはtransparentにして背景を透かす必要があるため、
+ * このクラスを使う要素にはtext-[var(--...)]など他のcolorユーティリティを付けないこと。
+ */
+.titleTexture {
+  background-image: url("/images/textures/title-ivory-ink-texture-512.webp");
+  background-repeat: repeat;
+  background-size: 240px 240px;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 .grainPaper {
   background-color: var(--paper);
   background-image: url("/images/textures/ivory-paper-512.webp");
@@ -96,13 +111,15 @@
 
 /* ヒーローの白黒ハーフトーン（写真の代わりに、実在しない素材をでっち上げないためドット柄の
    質感パネルとしてCSS/SVGだけで表現）。 */
+/*
+ * ヒーロー部分は「カードとして枠取りしない」要望のため、border・角丸・.shellとは違う色の
+ * 背景（旧--bg-raised）を持たせず、ページ本体の黒背景(--bg)がそのまま続いているように見せる。
+ * overflow:hiddenだけは、内部の絶対配置レイヤー（ドット柄・オーバーレイ・マイク）を
+ * このセクションの矩形内に収めるために残す（見た目上の枠線・カード感とは無関係）。
+ */
 .heroPanel {
   position: relative;
   overflow: hidden;
-  /* .grainRaisedと組み合わせるため、shorthandのbackgroundではなくlonghandで指定
-     （理由は.shellのコメント参照）。 */
-  background-color: var(--bg-raised);
-  border: 1px solid var(--border-dark);
 }
 
 .halftone {

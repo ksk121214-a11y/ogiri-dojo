@@ -44,15 +44,15 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
 
         <div className="flex flex-col gap-1 px-5 pt-5 pb-4">
           <p className="text-sm font-bold text-[var(--ink)]/60">{live.year}年</p>
-          <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)] sm:text-6xl">
+          <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)]">
             {live.month}
-            <span className="mx-0.5 text-2xl font-bold sm:text-3xl">月</span>
+            <span className="mx-0.5 text-2xl font-bold">月</span>
             {live.day}
-            <span className="mx-0.5 text-2xl font-bold sm:text-3xl">日</span>
-            <span className="ml-1 text-xl font-bold sm:text-2xl">（{live.weekday}）</span>
+            <span className="mx-0.5 text-2xl font-bold">日</span>
+            <span className="ml-1 text-xl font-bold">（{live.weekday}）</span>
           </p>
-          <p className="mt-1 text-3xl font-black text-[var(--accent)] sm:text-4xl">
-            {live.time} <span className="text-xl font-bold sm:text-2xl">開演</span>
+          <p className="mt-1 text-3xl font-black text-[var(--accent)]">
+            {live.time} <span className="text-xl font-bold">開演</span>
           </p>
           {/* 前回の文字拡大で1行に収まらず折り返っていたため、この行だけ一段階小さくして1行に戻す。 */}
           <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-xs font-bold text-[var(--ink)]">
