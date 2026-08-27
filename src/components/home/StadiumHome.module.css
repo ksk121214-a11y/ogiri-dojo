@@ -22,8 +22,57 @@
 
   position: relative;
   isolation: isolate;
-  background: var(--bg);
+  /* .grainDarkと組み合わせて使うため、background-imageも一緒にリセットしてしまう
+     shorthandのbackgroundではなくbackground-colorのlonghandで指定する
+     （CSSの記述順に依存せず確実にgrainDark側のbackground-imageを残すため）。 */
+  background-color: var(--bg);
   color: var(--text-on-dark);
+}
+
+/*
+ * 表面の質感（活版印刷／コピー用紙風）。実素材（dark-grain-512.webp / ivory-paper-512.webp、
+ * どちらもコントラストを強めたグレースケール化済み）を、各面本来の色（background-color）の上に
+ * background-blend-modeで重ねる。文字は要素の背景の上に乗るだけなので可読性は変わらない。
+ * ・暗い面（黒／赤オレンジ）は"overlay"：中間調を基準に暗部はより暗く、明るい粒はより明るく
+ *   浮かせ、インクのムラ・紙のホコリっぽい質感を出す。
+ * ・生成り紙面は"multiply"：紙のベース色はほぼ保ったまま、繊維の濃い部分だけを
+ *   ほんのり暗く沈める（掛け算のため白に近い部分はほとんど変化しない）。
+ * Tailwindのbg-[var(--color)]と併用すると背景色の指定がバッティングするため、
+ * このクラスを使う要素からはbg-[var(--color)]を外し、色指定はこちらに一本化する。
+ */
+.grainDark {
+  background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
+}
+
+.grainRaised {
+  background-color: var(--bg-raised);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
+}
+
+.grainAccent {
+  background-color: var(--accent);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 170px 170px;
+}
+
+.grainPaper {
+  background-color: var(--paper);
+  background-image: url("/images/textures/ivory-paper-512.webp");
+  /* multiplyだと紙全体が均一に沈んで灰色っぽく見えたため、soft-lightに変更。
+     素材の明るい部分（大半）は生成り色をほぼ保ったまま、濃い繊維の粒だけが
+     ほんのり沈んで見える。 */
+  background-blend-mode: soft-light;
+  background-repeat: repeat;
+  background-size: 260px 260px;
 }
 
 /* 黒い紙の繊維・コピー機のノイズを疑似要素で重ねる。本文やボタンの文字には掛からないよう
@@ -50,7 +99,9 @@
 .heroPanel {
   position: relative;
   overflow: hidden;
-  background: var(--bg-raised);
+  /* .grainRaisedと組み合わせるため、shorthandのbackgroundではなくlonghandで指定
+     （理由は.shellのコメント参照）。 */
+  background-color: var(--bg-raised);
   border: 1px solid var(--border-dark);
 }
 
@@ -85,7 +136,8 @@
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 104px;
-  background: var(--paper);
+  /* background-color/imageは.grainPaper側で指定するため、ここではshorthandの
+     backgroundは使わない（shorthandはbackground-imageも一緒にリセットしてしまうため）。 */
   color: var(--ink);
   border-radius: 20px;
 }

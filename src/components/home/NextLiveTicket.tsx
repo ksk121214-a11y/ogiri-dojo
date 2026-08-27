@@ -34,11 +34,11 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
     // 「次回ライブ」タグは内側の.ticket（切り欠き演出のためoverflow:hiddenが掛かっている）の
     // 外側に置く。.ticketの子にすると上にはみ出した分がクリップされ半分隠れてしまうため。
     <div className="relative">
-      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--accent)] px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)] shadow-none">
+      <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)] shadow-none`}>
         次回ライブ
       </span>
 
-      <div className={styles.ticket}>
+      <div className={`${styles.ticket} ${styles.grainPaper}`}>
         <div className={styles.notchTop} aria-hidden />
         <div className={styles.notchBottom} aria-hidden />
 
@@ -66,7 +66,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           「大きく広げた縦棒バーコード」と「OGIRI LIVE＋星」を横並びにする
           （以前は縦一列にすべて積んでいたが、画像のように横に並べる形へ変更）。
         */}
-        <div className={`${styles.stubDivider} flex flex-col items-center gap-3 bg-[var(--accent)] px-2 py-3 text-[var(--ink)]`}>
+        <div className={`${styles.stubDivider} ${styles.grainAccent} flex flex-col items-center gap-3 px-2 py-3 text-[var(--ink)]`}>
           <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
             {live.ticketNo}
           </span>

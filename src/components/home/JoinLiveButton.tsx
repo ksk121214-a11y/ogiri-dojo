@@ -11,7 +11,7 @@ export default function JoinLiveButton() {
   return (
     <Link
       href="/live"
-      className={`${styles.pressable} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-5 font-sans text-lg font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)]`}
+      className={`${styles.pressable} ${styles.grainAccent} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl px-5 font-sans text-lg font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)]`}
     >
       <TicketGlyph />
       参加する

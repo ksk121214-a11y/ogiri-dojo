@@ -8,6 +8,8 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
+import styles from "./StadiumHome.module.css";
+
 // ホーム専用ヘッダー：地下ライブハウス風の暗いトンマナに合わせた最小構成
 // （タイトル＋ユーザー名／ポイントのみ。ホーム/マイページの切替タブは下部ナビ側にあるため置かない）。
 // ポイントバッジは既存のPointHistoryModal（獲得履歴）を開く動線をそのまま引き継ぐ。
@@ -23,7 +25,7 @@ export default function StadiumHeader() {
   const signOut = useAuthStore((s) => s.signOut);
 
   return (
-    <header className="border-b border-[var(--paper)]/70 bg-[var(--bg)]">
+    <header className={`${styles.grainDark} border-b border-[var(--paper)]/70`}>
       <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-3 px-4 py-2 sm:px-5">
         <Link
           href="/"

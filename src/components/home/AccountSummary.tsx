@@ -5,6 +5,8 @@ import { getRankByMeter } from "@/data/collectionData";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
+import styles from "./StadiumHome.module.css";
+
 // 生成り色の横長カード：アイコン＋ログイン状態／名前／段位＋ポイント残高。
 // アイコンは大喜利ライブと同じ線画（MyIconAvatar、マイページで変更した色がそのまま反映される）。
 export default function AccountSummary() {
@@ -14,7 +16,7 @@ export default function AccountSummary() {
   const rank = getRankByMeter(user.masteryMeter);
 
   return (
-    <section className="flex items-center gap-3 rounded-2xl bg-[var(--paper)] px-4 py-3.5 text-[var(--ink)]">
+    <section className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
       {/*
         MyIconAvatarの通常表示は寄合帳等の畳生成りテーマに合わせたdojo-curtain-gold(金色)の
         縁取りが付く。このホーム画面の配色（チャコール×生成り×赤オレンジ）から浮くため、

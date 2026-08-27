@@ -80,7 +80,7 @@ export default function BottomNavigation({ onHowToPlay }: { onHowToPlay: () => v
 
   return (
     <nav
-      className={`${styles.pressable} fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-dark)] bg-[var(--bg)]`}
+      className={`${styles.pressable} ${styles.grainDark} fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-dark)]`}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       aria-label="下部ナビゲーション"
     >

@@ -8,7 +8,7 @@ import styles from "./StadiumHome.module.css";
 // .halftone）を右側に重ねている。マイク側に視線が集まるよう左側にタイトル用の余白を確保。
 export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void }) {
   return (
-    <section className={`${styles.heroPanel} relative rounded-2xl px-5 py-4 sm:px-6 sm:py-6`}>
+    <section className={`${styles.heroPanel} ${styles.grainRaised} relative rounded-2xl px-5 py-4 sm:px-6 sm:py-6`}>
       <div className={styles.halftone} aria-hidden />
       <div className={styles.heroOverlay} aria-hidden />
       <div
@@ -34,7 +34,7 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
       </div>
 
       <div className="relative z-10 flex flex-col items-start gap-2">
-        <span className="rounded-sm bg-[var(--accent)] px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)]">
+        <span className={`${styles.grainAccent} rounded-sm px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)]`}>
           ONLINE OGIRI LIVE
         </span>
         {/*

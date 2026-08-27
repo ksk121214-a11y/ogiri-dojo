@@ -14,7 +14,7 @@ export default function StadiumAppShell({
   bottomNav: ReactNode;
 }) {
   return (
-    <div className={`${styles.shell} flex min-h-screen flex-col`}>
+    <div className={`${styles.shell} ${styles.grainDark} flex min-h-screen flex-col`}>
       <StadiumHeader />
       <main className={`${styles.content} mx-auto w-full max-w-[480px] flex-1 px-4 pt-3 pb-20 sm:px-5`}>
         <div className="flex flex-col gap-3">{children}</div>
