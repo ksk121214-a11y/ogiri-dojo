@@ -1,0 +1,115 @@
+/*
+ * ホーム画面（地下ライブハウス／ZINE風）専用のスコープドCSS。
+ * 他画面のdojo-*トークン（畳生成りテーマ）とは独立させるため、
+ * ここでしか使わない色はCSS変数として.shellにローカル定義し、
+ * Tailwindのアービトラリー値（例: text-[var(--accent)]）から参照する。
+ * CSS Modulesを使う理由はNext.js公式ドキュメント（app/getting-started/css）が
+ * 「コンポーネント固有のスコープドスタイルにはCSS Modulesを」と案内しているため。
+ */
+
+.shell {
+  --bg: #171717;
+  --bg-raised: #20201e;
+  --paper: #f1e9d9;
+  --paper-muted: #ddd4c4;
+  --ink: #171513;
+  --text-on-dark: #f1e9d9;
+  --muted-on-dark: #aaa297;
+  --accent: #e44724;
+  --accent-dark: #bd3218;
+  --border-dark: #312f2b;
+
+  position: relative;
+  isolation: isolate;
+  background: var(--bg);
+  color: var(--text-on-dark);
+}
+
+/* 黒い紙の繊維・コピー機のノイズを疑似要素で重ねる。本文やボタンの文字には掛からないよう
+   .shell自体（背景専用の最背面レイヤー）にだけ適用し、子要素のテキストは影響を受けない。 */
+.shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.05;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+}
+
+/* ヒーローの白黒ハーフトーン（写真の代わりに、実在しない素材をでっち上げないためドット柄の
+   質感パネルとしてCSS/SVGだけで表現）。 */
+.heroPanel {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-dark);
+}
+
+.halftone {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='2.4' fill='%23f1e9d9' fill-opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 16px 16px;
+  -webkit-mask-image: linear-gradient(to left, black, transparent 70%);
+  mask-image: linear-gradient(to left, black, transparent 70%);
+}
+
+/* チケット風カード：CSS Gridで「本券／半券」の2カラムに分ける */
+.ticket {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 20px;
+}
+
+/* 本券と半券の境界の丸い切り欠き（チケットの背景色＝ページの背景色で円を描き、食い込ませる） */
+.notchTop,
+.notchBottom {
+  position: absolute;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--bg);
+  right: 96px;
+  transform: translateX(50%);
+}
+.notchTop {
+  top: -10px;
+}
+.notchBottom {
+  bottom: -10px;
+}
+
+.stubDivider {
+  position: relative;
+  border-left: 2px dashed rgba(23, 21, 19, 0.3);
+}
+
+/* バーコード：画像を使わずCSSの縦棒だけで表現する */
+.barcodeBar {
+  flex: none;
+  background: var(--ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pressable {
+    transition: transform 120ms ease, background-color 150ms ease, opacity 150ms ease;
+  }
+  .pressable:active {
+    transform: scale(0.98);
+  }
+}

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
 import "./globals.css";
 
@@ -23,6 +23,12 @@ const orbitron = Orbitron({
 export const metadata: Metadata = {
   title: "爆笑スタジアム",
   description: "決まった時間にみんなで集まるオンライン大喜利ライブ「爆笑スタジアム」",
+};
+
+// ホームの下部固定ナビでenv(safe-area-inset-bottom)を効かせるにはviewport-fit=coverが必要
+// （iOS Safariの仕様。無いとセーフエリア変数が常に0扱いになる）。
+export const viewport: Viewport = {
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
