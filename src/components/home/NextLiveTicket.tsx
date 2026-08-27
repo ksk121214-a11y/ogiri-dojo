@@ -35,7 +35,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
     // 「次回ライブ」タグは内側の.ticket（切り欠き演出のためoverflow:hiddenが掛かっている）の
     // 外側に置く。.ticketの子にすると上にはみ出した分がクリップされ半分隠れてしまうため。
     <div className="relative">
-      <span className={`${styles.grainAccent2} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
+      <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
         次回ライブ
       </span>
 
@@ -68,12 +68,20 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           「大きく広げた縦棒バーコード」と「OGIRI LIVE＋星」を横並びにする
           （以前は縦一列にすべて積んでいたが、画像のように横に並べる形へ変更）。
         */}
-        <div className={`${styles.stubDivider} ${styles.grainAccent2} flex flex-col items-center gap-1.5 px-2 py-1.5 text-[var(--ink)]`}>
-          <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
+        {/*
+          チケット番号・バーコード＋OGIRI LIVEの行、どちらもabsoluteにしてこの列の
+          通常のフローから完全に外す。これにより、
+          ①チケットの縦幅は左カラム（日付・時刻の情報）の高さだけで決まるようになり
+            （半券側の中身に引っ張られて無駄に伸びない）、
+          ②バーコード側はtop/left 50%＋translateで、その「チケットの縦幅」そのものの
+            真ん中に正確に来る（チケット番号の分だけ上に寄る、ということが起きない）。
+        */}
+        <div className={`${styles.stubDivider} ${styles.grainAccent} relative px-2 py-1.5 text-[var(--ink)]`}>
+          <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
-          <div className="flex items-center justify-center gap-2">
+          <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2">
             {/*
               枠のサイズ(46×150)は維持しつつ、中身を縦棒(幅が違う棒を横に並べる)から
               横棒(高さが違う棒を縦に積む)に変更。各棒はflexGrowでパターンの数値に
@@ -98,11 +106,11 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
               「OGIRI LIVE」が収まりきらず2列に折り返ってしまうため、この一角だけは
               高さを固定せず自然な高さのまま中央揃えにする（行全体はitems-center）。
             */}
-            <div className="flex flex-col items-center justify-center gap-2">
-              <span className="[writing-mode:vertical-rl] text-sm font-bold tracking-widest">
+            <div className="flex flex-col items-center justify-center gap-1">
+              <span className="[writing-mode:vertical-rl] text-xs leading-none font-bold tracking-normal">
                 OGIRI LIVE
               </span>
-              <span className="flex flex-col items-center gap-1 text-base leading-none" aria-hidden>
+              <span className="flex flex-col items-center gap-0.5 text-xs leading-none" aria-hidden>
                 <span>★</span>
                 <span>★</span>
               </span>

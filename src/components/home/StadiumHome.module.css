@@ -15,13 +15,10 @@
   --ink: #171513;
   --text-on-dark: #f1e9d9;
   --muted-on-dark: #aaa297;
-  /* --accentはヘッダー/ヒーロー/下部ナビなど全体で使う赤（元の色に戻した）。
-     --accent-2はチケットと参加するボタンだけに使うオレンジ寄りの色。 */
-  --accent: #cf3a1c;
-  --accent-dark: #a52c14;
-  /* 2026-08-28再々改訂：「もう少しだけオレンジに」の要望でさらに一段調整。 */
-  --accent-2: #ce7b1c;
-  --accent-2-dark: #a2601c;
+  /* 2026-08-28: 赤とオレンジ(--accent-2)に分かれていたアクセント色を、添付の
+     テラコッタ寄りの赤オレンジ1色に統一した（--accent-2は廃止）。 */
+  --accent: #bf4a2a;
+  --accent-dark: #96391f;
   --border-dark: #312f2b;
 
   position: relative;
@@ -62,15 +59,6 @@
 
 .grainAccent {
   background-color: var(--accent);
-  background-image: url("/images/textures/dark-grain-512.webp");
-  background-blend-mode: overlay;
-  background-repeat: repeat;
-  background-size: 170px 170px;
-}
-
-/* チケット・参加するボタン専用のオレンジ寄りアクセント面（--accent-2）。他はすべて.grainAccent(赤)。 */
-.grainAccent2 {
-  background-color: var(--accent-2);
   background-image: url("/images/textures/dark-grain-512.webp");
   background-blend-mode: overlay;
   background-repeat: repeat;
