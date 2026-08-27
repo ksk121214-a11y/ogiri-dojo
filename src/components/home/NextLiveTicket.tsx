@@ -50,20 +50,25 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         </div>
 
         {/*
-          バーコードは縦棒ではなく「横棒を縦に積んだ」ラダー状に変更。
-          コンテナをflex-colにし、各バーは幅いっぱい・高さだけ可変にする。
+          参考画像（実物の半券イメージ）に合わせ、バーコードは縦棒が並ぶ通常のバーコード風に戻し、
+          色は生成り色ではなく黒に統一（チケット番号の枠・「OGIRI LIVE」・星も含めて黒で統一）。
         */}
-        <div className={`${styles.stubDivider} flex flex-col items-center gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--paper)]`}>
-          <span className="shrink-0 rounded-sm border border-[var(--paper)]/60 px-1.5 py-0.5 text-xs font-bold tabular-nums">
+        <div className={`${styles.stubDivider} flex flex-col items-center gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--ink)]`}>
+          <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
-          <div className="flex w-full flex-1 flex-col items-stretch justify-center gap-[2px]" aria-hidden>
+          {/*
+            バーの高さはalign-items:stretchで親要素の高さいっぱいに伸ばす想定だが、
+            親(flex-1)の高さ自体がバー側のstretchに依存する循環になり実際には0近くまで
+            潰れてしまうため、min-h-16で最低限の高さを与えて循環を断ち切る。
+          */}
+          <div className="flex w-full min-h-14 flex-1 items-stretch justify-center gap-[2px]" aria-hidden>
             {BARCODE_PATTERN.map((w, i) => (
               <span
                 key={i}
                 className={styles.barcodeBar}
-                style={{ height: 1 + w * 0.6, width: "100%", background: "var(--paper)" }}
+                style={{ width: 1 + w * 0.6, background: "var(--ink)" }}
               />
             ))}
           </div>
