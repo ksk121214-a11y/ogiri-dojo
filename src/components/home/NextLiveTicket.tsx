@@ -3,7 +3,16 @@ import styles from "./StadiumHome.module.css";
 
 // 決め打ちのバーコード風の縦棒パターン（Math.randomはSSR/CSRの表示差異を招くため使わず、
 // 見た目だけのランダム風の固定配列にしている）。
-const BARCODE_PATTERN = [2, 1, 3, 1, 1, 2, 4, 1, 2, 1, 1, 3, 2, 1, 4, 1, 2, 2, 1, 3];
+// 90度回転して使う前提で、本数を減らし線を少し太くしてある。
+const BARCODE_PATTERN = [3, 1, 4, 2, 1, 3, 2, 4, 1, 3, 2, 1];
+const BARCODE_BAR_GAP = 2;
+const barcodeBarThickness = (w: number) => 2 + w * 0.9;
+// 回転前の見た目（=回転後は縦に積み上がる方向の長さ）。線の合計幅＋隙間から算出する。
+const BARCODE_TOTAL_THICKNESS =
+  BARCODE_PATTERN.reduce((sum, w) => sum + barcodeBarThickness(w), 0) +
+  BARCODE_BAR_GAP * (BARCODE_PATTERN.length - 1);
+// 回転前の各線の長さ（=回転後は横方向の長さ）。「短くして」の要望で以前より短くしてある。
+const BARCODE_BAR_LENGTH = 38;
 
 export interface NextLiveInfo {
   ticketNo: string;
@@ -53,24 +62,38 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           参考画像（実物の半券イメージ）に合わせ、バーコードは縦棒が並ぶ通常のバーコード風に戻し、
           色は生成り色ではなく黒に統一（チケット番号の枠・「OGIRI LIVE」・星も含めて黒で統一）。
         */}
-        <div className={`${styles.stubDivider} flex flex-col items-center gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--ink)]`}>
+        <div className={`${styles.stubDivider} flex flex-col items-center justify-center gap-2 bg-[var(--accent)] px-2 py-3 text-[var(--ink)]`}>
           <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
           {/*
-            バーの高さはalign-items:stretchで親要素の高さいっぱいに伸ばす想定だが、
-            親(flex-1)の高さ自体がバー側のstretchに依存する循環になり実際には0近くまで
-            潰れてしまうため、min-h-16で最低限の高さを与えて循環を断ち切る。
+            見た目としては横棒を縦に積んだバーコードだが、実装は「縦棒バーコードをそのまま
+            90度回転」で作る（線の太さ・パターンは元の縦棒バーコードと共通のロジックのまま）。
+            外側の箱は回転後の見た目サイズ（幅=線の長さ／高さ=線の合計太さ）で確保しておく。
           */}
-          <div className="flex w-full min-h-14 flex-1 items-stretch justify-center gap-[2px]" aria-hidden>
-            {BARCODE_PATTERN.map((w, i) => (
-              <span
-                key={i}
-                className={styles.barcodeBar}
-                style={{ width: 1 + w * 0.6, background: "var(--ink)" }}
-              />
-            ))}
+          <div
+            className="flex shrink-0 items-center justify-center"
+            style={{ width: BARCODE_BAR_LENGTH, height: BARCODE_TOTAL_THICKNESS }}
+          >
+            <div
+              className="flex items-stretch"
+              style={{
+                width: BARCODE_TOTAL_THICKNESS,
+                height: BARCODE_BAR_LENGTH,
+                gap: BARCODE_BAR_GAP,
+                transform: "rotate(90deg)",
+              }}
+              aria-hidden
+            >
+              {BARCODE_PATTERN.map((w, i) => (
+                <span
+                  key={i}
+                  className={styles.barcodeBar}
+                  style={{ width: barcodeBarThickness(w), background: "var(--ink)" }}
+                />
+              ))}
+            </div>
           </div>
 
           <span className="shrink-0 [writing-mode:vertical-rl] text-xs font-bold tracking-widest">
