@@ -19,50 +19,60 @@ export interface NextLiveInfo {
 // 画像は一切使わずCSS（丸い切り欠き・破線・バーコード）だけで表現する。
 export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
   return (
-    <div className={`${styles.ticket} relative`}>
-      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--accent)] px-2 py-0.5 text-[10px] font-bold tracking-widest text-[var(--paper)] shadow-none">
+    // 「次回ライブ」タグは内側の.ticket（切り欠き演出のためoverflow:hiddenが掛かっている）の
+    // 外側に置く。.ticketの子にすると上にはみ出した分がクリップされ半分隠れてしまうため。
+    <div className="relative">
+      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--accent)] px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)] shadow-none">
         次回ライブ
       </span>
-      <div className={styles.notchTop} aria-hidden />
-      <div className={styles.notchBottom} aria-hidden />
 
-      <div className="flex flex-col gap-1 px-5 pt-6 pb-5">
-        <p className="text-xs font-bold text-[var(--ink)]/60">{live.year}年</p>
-        <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)] sm:text-6xl">
-          {live.month}
-          <span className="mx-0.5 text-xl font-bold sm:text-2xl">月</span>
-          {live.day}
-          <span className="mx-0.5 text-xl font-bold sm:text-2xl">日</span>
-          <span className="ml-1 text-lg font-bold sm:text-xl">（{live.weekday}）</span>
-        </p>
-        <p className="mt-1 text-2xl font-black text-[var(--accent)] sm:text-3xl">
-          {live.time} <span className="text-lg font-bold sm:text-xl">開演</span>
-        </p>
-        <p className="mt-1 flex items-center gap-1 text-xs font-bold text-[var(--ink)]">
-          <ClockGlyph />
-          受付 {live.reception}
-        </p>
-      </div>
+      <div className={styles.ticket}>
+        <div className={styles.notchTop} aria-hidden />
+        <div className={styles.notchBottom} aria-hidden />
 
-      <div className={`${styles.stubDivider} flex flex-col items-center justify-between gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--paper)]`}>
-        <span className="rounded-sm border border-[var(--paper)]/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
-          {live.ticketNo}
-        </span>
-
-        <div className="flex h-16 items-end gap-[2px]" aria-hidden>
-          {BARCODE_PATTERN.map((w, i) => (
-            <span
-              key={i}
-              className={styles.barcodeBar}
-              style={{ width: 1 + w * 0.6, height: "100%", background: "var(--paper)" }}
-            />
-          ))}
+        <div className="flex flex-col gap-1 px-5 pt-5 pb-4">
+          <p className="text-sm font-bold text-[var(--ink)]/60">{live.year}年</p>
+          <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)] sm:text-6xl">
+            {live.month}
+            <span className="mx-0.5 text-2xl font-bold sm:text-3xl">月</span>
+            {live.day}
+            <span className="mx-0.5 text-2xl font-bold sm:text-3xl">日</span>
+            <span className="ml-1 text-xl font-bold sm:text-2xl">（{live.weekday}）</span>
+          </p>
+          <p className="mt-1 text-3xl font-black text-[var(--accent)] sm:text-4xl">
+            {live.time} <span className="text-xl font-bold sm:text-2xl">開演</span>
+          </p>
+          <p className="mt-1 flex items-center gap-1 text-sm font-bold text-[var(--ink)]">
+            <ClockGlyph />
+            受付 {live.reception}
+          </p>
         </div>
 
-        <span className="[writing-mode:vertical-rl] text-[10px] font-bold tracking-widest">
-          OGIRI LIVE
-        </span>
-        <span className="text-xs" aria-hidden>★ ★</span>
+        {/*
+          バーコードはflex-1で縦方向に伸ばし、チケット番号・「OGIRI LIVE」の縦書き・星の
+          間を埋めるように配置する。バー自体は縦棒だが、以前は高さを64pxに固定していたため
+          横長の帯に見えていた。左カラムの高さいっぱいに伸ばして「縦長」の帯にする。
+        */}
+        <div className={`${styles.stubDivider} flex flex-col items-center gap-2 bg-[var(--accent)] px-2 py-4 text-[var(--paper)]`}>
+          <span className="shrink-0 rounded-sm border border-[var(--paper)]/60 px-1.5 py-0.5 text-xs font-bold tabular-nums">
+            {live.ticketNo}
+          </span>
+
+          <div className="flex w-full flex-1 items-stretch justify-center gap-[2px]" aria-hidden>
+            {BARCODE_PATTERN.map((w, i) => (
+              <span
+                key={i}
+                className={styles.barcodeBar}
+                style={{ width: 1 + w * 0.6, background: "var(--paper)" }}
+              />
+            ))}
+          </div>
+
+          <span className="shrink-0 [writing-mode:vertical-rl] text-xs font-bold tracking-widest">
+            OGIRI LIVE
+          </span>
+          <span className="shrink-0 text-sm" aria-hidden>★ ★</span>
+        </div>
       </div>
     </div>
   );

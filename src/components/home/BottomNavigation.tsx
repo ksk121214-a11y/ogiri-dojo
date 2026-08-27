@@ -6,7 +6,7 @@ import styles from "./StadiumHome.module.css";
 
 function HomeIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
       <path
         d="M4 11.5 12 4l8 7.5M6 10v9h4v-5h4v5h4v-9"
         stroke={active ? "var(--accent)" : "var(--text-on-dark)"}
@@ -19,25 +19,24 @@ function HomeIcon({ active }: { active: boolean }) {
 }
 
 function CalendarIcon({ active }: { active: boolean }) {
+  const color = active ? "var(--accent)" : "var(--text-on-dark)";
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
-      <rect
-        x="4"
-        y="5.5"
-        width="16"
-        height="14"
-        rx="1.5"
-        stroke={active ? "var(--accent)" : "var(--text-on-dark)"}
-        strokeWidth={active ? 2.2 : 1.8}
-      />
-      <path d="M4 9.5h16M8 4v3M16 4v3" stroke={active ? "var(--accent)" : "var(--text-on-dark)"} strokeWidth="1.8" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+      <rect x="4" y="5.5" width="16" height="14" rx="1.5" stroke={color} strokeWidth={active ? 2.2 : 1.8} />
+      <path d="M4 9.5h16M8 4v3M16 4v3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+      {/* 日付を表す点。丸カレンダーの中身が空だと「単なる四角」に見えるため追加。 */}
+      <circle cx="8" cy="13.3" r="1" fill={color} />
+      <circle cx="12" cy="13.3" r="1" fill={color} />
+      <circle cx="16" cy="13.3" r="1" fill={color} />
+      <circle cx="8" cy="16.8" r="1" fill={color} />
+      <circle cx="12" cy="16.8" r="1" fill={color} />
     </svg>
   );
 }
 
 function BookIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
       <path
         d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"
         stroke={active ? "var(--accent)" : "var(--text-on-dark)"}
@@ -56,7 +55,7 @@ function BookIcon({ active }: { active: boolean }) {
 
 function PersonIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
       <circle cx="12" cy="8" r="3.4" stroke={active ? "var(--accent)" : "var(--text-on-dark)"} strokeWidth={active ? 2.2 : 1.8} />
       <path
         d="M5 20c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5"
@@ -74,7 +73,7 @@ function PersonIcon({ active }: { active: boolean }) {
 // 選択中(ホーム)は色だけでなくaria-current="page"と線幅の太さでも区別する。
 export default function BottomNavigation({ onHowToPlay }: { onHowToPlay: () => void }) {
   const itemClass =
-    "flex flex-1 flex-col items-center gap-1 py-2 text-[10px] font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
+    "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
 
   return (
     <nav

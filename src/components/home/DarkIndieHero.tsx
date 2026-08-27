@@ -8,7 +8,7 @@ import styles from "./StadiumHome.module.css";
 // .halftone）を右側に重ねている。マイク側に視線が集まるよう左側にタイトル用の余白を確保。
 export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void }) {
   return (
-    <section className={`${styles.heroPanel} relative rounded-2xl px-5 py-7 sm:px-6 sm:py-8`}>
+    <section className={`${styles.heroPanel} relative rounded-2xl px-5 py-4 sm:px-6 sm:py-6`}>
       <div className={styles.halftone} aria-hidden />
       <div className={styles.heroOverlay} aria-hidden />
       <div
@@ -33,8 +33,8 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
         </svg>
       </div>
 
-      <div className="relative z-10 flex flex-col items-start gap-3">
-        <span className="rounded-sm bg-[var(--accent)] px-2 py-0.5 text-[10px] font-bold tracking-widest text-[var(--paper)]">
+      <div className="relative z-10 flex flex-col items-start gap-2">
+        <span className="rounded-sm bg-[var(--accent)] px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)]">
           ONLINE OGIRI LIVE
         </span>
         {/*
@@ -43,20 +43,20 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           1行ずつ（爆笑／スタジアム）を強制する。パネルはoverflow:hiddenなので、
           仮にマイク側と少し重なっても画面外にはみ出すことはない。
         */}
-        <h1 className="whitespace-nowrap font-sans text-[2.3rem] leading-[0.95] font-black tracking-tight text-[var(--text-on-dark)] sm:text-6xl">
+        <h1 className="whitespace-nowrap font-sans text-[2.4rem] leading-[0.95] font-black tracking-tight text-[var(--text-on-dark)] sm:text-6xl">
           爆笑
           <br />
           スタジアム
         </h1>
-        <div className="flex max-w-[62%] flex-col items-start gap-3 sm:max-w-[58%]">
-          <p className="text-lg font-bold text-[var(--accent)] sm:text-xl">— 大喜利ライブ —</p>
-          <p className="text-xs leading-relaxed text-[var(--text-on-dark)] sm:text-sm">
+        <div className="flex max-w-[62%] flex-col items-start gap-2 sm:max-w-[58%]">
+          <p className="text-xl font-bold text-[var(--accent)] sm:text-2xl">— 大喜利ライブ —</p>
+          <p className="text-sm leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>
           <button
             type="button"
             onClick={onHowToPlay}
-            className={`${styles.pressable} mt-1 flex items-center gap-1.5 rounded-md border border-[var(--text-on-dark)]/70 px-4 py-2 text-xs font-bold text-[var(--text-on-dark)] transition hover:bg-[var(--text-on-dark)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
+            className={`${styles.pressable} mt-1 flex items-center gap-1.5 rounded-md border border-[var(--text-on-dark)]/70 px-4 py-2 text-sm font-bold text-[var(--text-on-dark)] transition hover:bg-[var(--text-on-dark)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
           >
             <PlayGlyph />
             遊び方を見る
