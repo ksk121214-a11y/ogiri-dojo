@@ -27,17 +27,17 @@ export default function AccountSummary() {
         <MyIconAvatar size={38} bare />
       </span>
       <div className="min-w-0 flex-1">
-        <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[var(--ink)]/70">
+        <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-1.5 py-0.5 text-xs font-bold tracking-widest text-[var(--ink)]/70">
           ログイン中
         </span>
-        <p className="mt-1 truncate text-base font-bold">{displayName}</p>
-        <p className="text-sm font-bold text-[var(--ink)]/70">段位：{rank.label}</p>
+        <p className="mt-1 truncate text-lg font-bold">{displayName}</p>
+        <p className="text-base font-bold text-[var(--ink)]/70">段位：{rank.label}</p>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-xs text-[var(--ink)]/60">ポイント残高</p>
-        <p className="text-2xl font-black tabular-nums text-[var(--accent)]">
+        <p className="text-sm text-[var(--ink)]/60">ポイント残高</p>
+        <p className="text-3xl font-black tabular-nums text-[var(--accent)]">
           {user.points.toLocaleString()}
-          <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/60">pt</span>
+          <span className="ml-0.5 text-base font-normal text-[var(--ink)]/60">pt</span>
         </p>
       </div>
     </section>

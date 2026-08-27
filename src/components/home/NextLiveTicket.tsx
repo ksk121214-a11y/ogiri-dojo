@@ -11,8 +11,8 @@ const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
 ];
 const BARCODE_BAR_GAP = 1;
-// 「広げて」の要望で、以前より縦にしっかり伸ばした高さにする。
-const BARCODE_HEIGHT = 150;
+// 「広げて」の要望で一度150にしたが、「チケットを少しだけ縦幅狭くして」の要望で少し詰めた。
+const BARCODE_HEIGHT = 128;
 // 「サイズ感はそのまま、縦線→横線に」の要望で、枠の縦横サイズ自体は変えず
 // （旧・縦棒バーコードの実測サイズ≒幅46px×高さ150px）、中の線の向きだけ横に変える。
 const BARCODE_WIDTH = 46;
@@ -34,7 +34,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
     // 「次回ライブ」タグは内側の.ticket（切り欠き演出のためoverflow:hiddenが掛かっている）の
     // 外側に置く。.ticketの子にすると上にはみ出した分がクリップされ半分隠れてしまうため。
     <div className="relative">
-      <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-xs font-bold tracking-widest text-[var(--paper)] shadow-none`}>
+      <span className={`${styles.grainAccent2} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
         次回ライブ
       </span>
 
@@ -42,20 +42,21 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         <div className={styles.notchTop} aria-hidden />
         <div className={styles.notchBottom} aria-hidden />
 
-        <div className="flex flex-col gap-1 px-5 pt-5 pb-4">
-          <p className="text-sm font-bold text-[var(--ink)]/60">{live.year}年</p>
-          <p className="text-[2.75rem] font-black leading-none tracking-tight text-[var(--ink)]">
+        {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
+        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+          <p className="text-base font-bold text-[var(--ink)]/60">{live.year}年</p>
+          <p className="whitespace-nowrap text-5xl font-black leading-none tracking-tight text-[var(--ink)]">
             {live.month}
-            <span className="mx-0.5 text-2xl font-bold">月</span>
+            <span className="text-xl font-bold">月</span>
             {live.day}
-            <span className="mx-0.5 text-2xl font-bold">日</span>
-            <span className="ml-1 text-xl font-bold">（{live.weekday}）</span>
+            <span className="text-xl font-bold">日</span>
+            <span className="ml-0.5 text-base font-bold">（{live.weekday}）</span>
           </p>
-          <p className="mt-1 text-3xl font-black text-[var(--accent)]">
-            {live.time} <span className="text-xl font-bold">開演</span>
+          <p className="mt-0.5 text-4xl font-black text-[var(--accent-2)]">
+            {live.time} <span className="text-2xl font-bold">開演</span>
           </p>
           {/* 前回の文字拡大で1行に収まらず折り返っていたため、この行だけ一段階小さくして1行に戻す。 */}
-          <p className="mt-1 flex items-center gap-1 whitespace-nowrap text-xs font-bold text-[var(--ink)]">
+          <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap text-sm font-bold text-[var(--ink)]">
             <ClockGlyph />
             受付 {live.reception}
           </p>
@@ -66,8 +67,8 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           「大きく広げた縦棒バーコード」と「OGIRI LIVE＋星」を横並びにする
           （以前は縦一列にすべて積んでいたが、画像のように横に並べる形へ変更）。
         */}
-        <div className={`${styles.stubDivider} ${styles.grainAccent} flex flex-col items-center gap-3 px-2 py-3 text-[var(--ink)]`}>
-          <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
+        <div className={`${styles.stubDivider} ${styles.grainAccent2} flex flex-col items-center gap-2 px-2 py-2 text-[var(--ink)]`}>
+          <span className="shrink-0 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
             {live.ticketNo}
           </span>
 
@@ -92,10 +93,10 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
             </div>
 
             <div className="flex flex-col items-center justify-between" style={{ height: BARCODE_HEIGHT }}>
-              <span className="[writing-mode:vertical-rl] text-xs font-bold tracking-widest">
+              <span className="[writing-mode:vertical-rl] text-sm font-bold tracking-widest">
                 OGIRI LIVE
               </span>
-              <span className="flex flex-col items-center gap-1 text-sm leading-none" aria-hidden>
+              <span className="flex flex-col items-center gap-1 text-base leading-none" aria-hidden>
                 <span>★</span>
                 <span>★</span>
               </span>

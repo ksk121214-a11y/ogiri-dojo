@@ -76,7 +76,7 @@ function PersonIcon({ active }: { active: boolean }) {
 // 選択中(ホーム)は色だけでなくaria-current="page"と線幅の太さでも区別する。
 export default function BottomNavigation({ onHowToPlay }: { onHowToPlay: () => void }) {
   const itemClass =
-    "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
+    "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-xs font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
 
   return (
     <nav

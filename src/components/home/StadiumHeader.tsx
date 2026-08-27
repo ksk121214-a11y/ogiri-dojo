@@ -29,7 +29,7 @@ export default function StadiumHeader() {
       <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-3 px-4 py-2">
         <Link
           href="/"
-          className={`${styles.titleTexture} shrink-0 font-sans text-lg font-black tracking-tight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
+          className={`${styles.titleTexture} shrink-0 font-sans text-xl font-black tracking-tight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
         >
           爆笑スタジアム
         </Link>
@@ -41,12 +41,12 @@ export default function StadiumHeader() {
             className="flex min-w-0 items-center gap-1.5 rounded-full px-1 py-1 font-sans focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             aria-haspopup="dialog"
           >
-            <span className="min-w-0 truncate text-xs text-[var(--muted-on-dark)]">
+            <span className="min-w-0 truncate text-sm text-[var(--muted-on-dark)]">
               {displayName}
             </span>
-            <span className="shrink-0 text-base font-bold tabular-nums text-[var(--accent)]">
+            <span className="shrink-0 text-lg font-bold tabular-nums text-[var(--accent)]">
               {user.points.toLocaleString()}
-              <span className="ml-0.5 text-xs font-normal text-[var(--muted-on-dark)]">pt</span>
+              <span className="ml-0.5 text-sm font-normal text-[var(--muted-on-dark)]">pt</span>
             </span>
           </button>
 
