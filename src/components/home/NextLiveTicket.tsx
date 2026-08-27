@@ -8,9 +8,11 @@ import styles from "./StadiumHome.module.css";
 // バーコード自体の横幅は60px前後に収まるよう本数・太さを調整している。
 const BARCODE_PATTERN = [2, 1, 3, 1, 4, 2, 1, 3, 1, 2, 4, 1, 2];
 const BARCODE_BAR_GAP = 1.5;
-const barcodeBarWidth = (w: number) => 1 + w * 0.55;
 // 「広げて」の要望で、以前より縦にしっかり伸ばした高さにする。
 const BARCODE_HEIGHT = 150;
+// 「サイズ感はそのまま、縦線→横線に」の要望で、枠の縦横サイズ自体は変えず
+// （旧・縦棒バーコードの実測サイズ≒幅46px×高さ150px）、中の線の向きだけ横に変える。
+const BARCODE_WIDTH = 46;
 
 export interface NextLiveInfo {
   ticketNo: string;
@@ -67,12 +69,21 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           </span>
 
           <div className="flex items-stretch justify-center gap-2">
-            <div className="flex items-stretch" style={{ height: BARCODE_HEIGHT, gap: BARCODE_BAR_GAP }} aria-hidden>
+            {/*
+              枠のサイズ(46×150)は維持しつつ、中身を縦棒(幅が違う棒を横に並べる)から
+              横棒(高さが違う棒を縦に積む)に変更。各棒はflexGrowでパターンの数値に
+              比例した高さになるようにし、合計がちょうど枠の高さに収まるようにする。
+            */}
+            <div
+              className="flex flex-col items-stretch"
+              style={{ width: BARCODE_WIDTH, height: BARCODE_HEIGHT, gap: BARCODE_BAR_GAP }}
+              aria-hidden
+            >
               {BARCODE_PATTERN.map((w, i) => (
                 <span
                   key={i}
                   className={styles.barcodeBar}
-                  style={{ width: barcodeBarWidth(w), background: "var(--ink)" }}
+                  style={{ flexGrow: w, flexBasis: 0, background: "var(--ink)" }}
                 />
               ))}
             </div>
