@@ -40,12 +40,10 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
         次回ライブ
       </span>
 
-      {/*
-        本券／半券の境界の丸い切り欠きは、以前は背景色（--bg）で塗った円を重ねる
-        「見せかけ」だったが、.ticket自体にmask-imageで本物の穴を開ける方式に変えたため
-        （StadiumHome.module.cssの.ticket参照）、ここにあった専用のdivは不要になった。
-      */}
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
+        <div className={styles.notchTop} aria-hidden />
+        <div className={styles.notchBottom} aria-hidden />
+
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
         <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
           <p className="text-base font-bold text-[var(--ink)]/60">{live.year}年</p>
@@ -84,7 +82,11 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
             {live.ticketNo}
           </span>
 
-          <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2">
+          {/* 「バーコードを少しだけ下げて」の要望で、真ん中(50%)から少しだけ下にずらしている。 */}
+          <div
+            className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2"
+            style={{ top: "calc(50% + 10px)" }}
+          >
             {/*
               枠のサイズ(46×150)は維持しつつ、中身を縦棒(幅が違う棒を横に並べる)から
               横棒(高さが違う棒を縦に積む)に変更。各棒はflexGrowでパターンの数値に
