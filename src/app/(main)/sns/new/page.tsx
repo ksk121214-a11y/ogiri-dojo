@@ -1,29 +1,44 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
+import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { useSnsStore } from "@/store/useSnsStore";
+import { useTicketStore } from "@/store/useTicketStore";
 
 const MAX_LENGTH = 60;
 
 // お題投稿フォーム。投稿後は寄合帳トップ（新着順の先頭に表示される）に戻る。
 // 2026-08-28: マイページ経由（「お題を投稿する」バナー）で来ることがほとんどのため、
 // 見た目もマイページと同じ地下ライブハウス風（StadiumPageShell）に統一した。
+// 2026-08-29: 投稿には寄合券を1枚消費するようにした（§useTicketStore）。
+// 0枚のときは投稿ボタン自体を押せなくし、フォームの上に回復までの目安時間を表示する。
 export default function SnsNewTopicPage() {
   const router = useRouter();
   const addTopic = useSnsStore((s) => s.addTopic);
   const [body, setBody] = useState("");
 
+  const ticketCount = useTicketStore((s) => s.count);
+  const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
+  const recalculateTickets = useTicketStore((s) => s.recalculate);
+  const consumeTicket = useTicketStore((s) => s.consume);
+
+  useEffect(() => {
+    recalculateTickets();
+  }, [recalculateTickets]);
+
   const overLimit = body.length > MAX_LENGTH;
+  const noTicket = ticketCount <= 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = body.trim();
     if (!trimmed || overLimit) return;
+    if (!consumeTicket()) return;
     // 静的サイト公開(GitHub Pages)では新規投稿のIDに対応する詳細ページが
     // 事前生成されておらず直接遷移すると404になるため、投稿後は寄合帳トップに戻す。
     addTopic(trimmed);
@@ -71,12 +86,18 @@ export default function SnsNewTopicPage() {
             {body.length} / {MAX_LENGTH}
           </span>
         </div>
+        {noTicket && (
+          <p className="font-sans text-xs font-bold text-[var(--accent)]">
+            寄合券が0枚のため投稿できません。
+            {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
+          </p>
+        )}
         <button
           type="submit"
-          disabled={!body.trim() || overLimit}
+          disabled={!body.trim() || overLimit || noTicket}
           className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} w-full rounded-xl px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
         >
-          投稿する
+          投稿する（寄合券を1枚使う）
         </button>
       </form>
     </StadiumPageShell>

@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
 import SnsBackButton from "@/components/sns/SnsBackButton";
+import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { isLocallyCreated } from "@/lib/staticContent";
 import { useSnsStore } from "@/store/useSnsStore";
+import { useTicketStore } from "@/store/useTicketStore";
 
 const MAX_LENGTH = 80;
 
@@ -16,6 +18,7 @@ const MAX_LENGTH = 80;
 // static export対応のため、useParamsではなくpage.tsx（generateStaticParams）からtopicIdを受け取る。
 // 2026-08-28: マイページの寄合帳から来ることがほとんどのため、見た目もマイページと同じ
 // 地下ライブハウス風（StadiumPageShell）に統一した。
+// 2026-08-29: 回答にも寄合券を1枚消費するようにした（§useTicketStore）。
 export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
@@ -25,6 +28,15 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   const toggleLike = useSnsStore((s) => s.toggleLike);
 
   const [body, setBody] = useState("");
+
+  const ticketCount = useTicketStore((s) => s.count);
+  const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
+  const recalculateTickets = useTicketStore((s) => s.recalculate);
+  const consumeTicket = useTicketStore((s) => s.consume);
+
+  useEffect(() => {
+    recalculateTickets();
+  }, [recalculateTickets]);
 
   const topic = topics.find((t) => t.id === topicId);
 
@@ -61,11 +73,13 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   }
 
   const overLimit = body.length > MAX_LENGTH;
+  const noTicket = ticketCount <= 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = body.trim();
     if (!trimmed || overLimit) return;
+    if (!consumeTicket()) return;
     addAnswer(topic.id, trimmed);
     setBody("");
   };
@@ -109,6 +123,12 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
           }`}
         />
+        {noTicket && (
+          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+            寄合券が0枚のため回答できません。
+            {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
+          </p>
+        )}
         <div className="flex items-center justify-between gap-2">
           <span
             className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
@@ -117,7 +137,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           </span>
           <button
             type="submit"
-            disabled={!body.trim() || overLimit}
+            disabled={!body.trim() || overLimit || noTicket}
             className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
           >
             回答する
