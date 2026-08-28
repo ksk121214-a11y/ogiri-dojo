@@ -37,10 +37,11 @@ export default function MyProfileTicket({
     <div className={`${styles.profileCard} ${styles.grainPaper}`}>
       <div className={`${styles.notchTop} ${styles.notchKraft}`} style={NOTCH_STYLE} aria-hidden />
       <div className={`${styles.notchBottom} ${styles.notchKraft}`} style={NOTCH_STYLE} aria-hidden />
+      <div className={styles.scallopRight} aria-hidden />
 
       <div className="flex flex-col gap-3 px-5 py-5">
         <div className="flex items-start gap-3.5">
-          <span className="flex shrink-0 items-center justify-center rounded-full border-4 border-[var(--accent)] p-1.5">
+          <span className="flex shrink-0 items-center justify-center">
             <MyIconAvatar size={56} bare />
           </span>
           <div className="flex min-w-0 flex-col gap-1.5 pt-1">
@@ -116,16 +117,18 @@ function OgiriStamp() {
       aria-hidden
     >
       <defs>
-        <path id="ogiriStampArc" d="M 10,53 A 40,40 0 1 1 90,53" fill="none" />
+        {/* 文字が外側の円からはみ出さないよう、外側(r=40)と内側(r=32)の輪の間の
+            中間半径(r=34)に円弧を置き、「OGIRI LIVE」を完全に円の中に収める。 */}
+        <path id="ogiriStampArc" d="M 17,58 A 34,34 0 1 1 83,58" fill="none" />
       </defs>
       <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="2.2" />
       <circle cx="50" cy="50" r="32" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <text fill="currentColor" fontSize="10.5" fontWeight={700} letterSpacing="1.5">
+      <text fill="currentColor" fontSize="8.5" fontWeight={700} letterSpacing="1">
         <textPath href="#ogiriStampArc" xlinkHref="#ogiriStampArc" startOffset="50%" textAnchor="middle">
           OGIRI LIVE
         </textPath>
       </text>
-      <text x="50" y="65" textAnchor="middle" fontSize="13" fontWeight={700} fill="currentColor">
+      <text x="50" y="63" textAnchor="middle" fontSize="12" fontWeight={700} fill="currentColor">
         ★ ★ ★
       </text>
     </svg>

@@ -228,18 +228,43 @@
 
 /*
  * マイページ（背景が茶色いクラフト紙）に乗るチケット用。
- * 2026-08-28: 当初は.notchDarkと同じ「背後の質感がそのまま見える」方式（クラフト紙の色・
- * 画像をそのまま敷く）にしたが、実機で確認すると紙面（--paper）とほぼ同化してしまい
- * 切り欠きがほとんど見えなくなっていた（参考画像は白っぽい丸のくぼみとしてはっきり見える）。
- * そのため方式を変更し、紙よりわずかに明るいオフホワイトの円＋内側の陰影で
- * 「紙に穴が開いてくぼんでいる」ことが常にはっきり見えるようにした
- * （背後の色を透かすのではなく、くぼみそのものを陰影で見せる方式）。
+ * 2026-08-28: 一度は「紙よりわずかに明るいオフホワイトの円」に変更したが、
+ * それだと今度は「本物の背景が透けて見える凹み」に見えなくなってしまうという
+ * フィードバックを受け、ホーム（.notchDark）と同じ考え方＝実際に背後にある
+ * クラフト紙の色・質感をそのまま見せる方式に戻した。ただしinset shadowが濃すぎると
+ * 単なる黒っぽいシミに見えて紙の色そのものが分かりづらくなっていたため、
+ * 影は控えめにしてクラフト紙の色が伝わりやすいようにしている。
  */
 .notchKraft {
-  background-color: #f8f1e1;
-  box-shadow:
-    inset 0 1px 3px rgba(23, 21, 19, 0.45),
-    0 1px 0 rgba(255, 255, 255, 0.6);
+  background-color: var(--bg-kraft);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-size: 200px 200px;
+  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.3);
+}
+.notchTop.notchKraft {
+  background-position: -12px -8px;
+}
+.notchBottom.notchKraft {
+  background-position: -12px -140px;
+}
+
+/*
+ * マイページ演者名チケットの右端（本体の外周）を、スタンプ／コインのふちのような
+ * 半円の連続した切り欠きにする。notchTop/notchBottomと同じ「背景色の円を境界にまたがせ、
+ * .profileCardのoverflow:hiddenで外側半分をクリップする」手法を、repeat-yの背景タイルで
+ * 縦方向に連続させたもの（mask-compositeは使わず単純なbackground-imageの塗りのみ）。
+ */
+.scallopRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -9px;
+  width: 18px;
+  z-index: 3;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 9px 9px, var(--bg-kraft) 8px, transparent 8.5px);
+  background-size: 18px 22px;
+  background-repeat: repeat-y;
 }
 
 /*
