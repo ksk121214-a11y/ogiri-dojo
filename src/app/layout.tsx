@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
 
 import AmbientBgmController from "@/components/app/AmbientBgmController";
+import AudioProvider from "@/components/app/AudioProvider";
 import StadiumSfxController from "@/components/app/StadiumSfxController";
 
 import "./globals.css";
@@ -46,9 +47,11 @@ export default function RootLayout({
       className={`${notoSansJP.variable} ${yujiSyuku.variable} ${orbitron.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <AmbientBgmController />
-        <StadiumSfxController />
-        {children}
+        <AudioProvider>
+          <AmbientBgmController />
+          <StadiumSfxController />
+          {children}
+        </AudioProvider>
       </body>
     </html>
   );

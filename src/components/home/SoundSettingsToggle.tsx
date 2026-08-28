@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { useAudioState } from "@/components/app/AudioProvider";
+import * as audioManager from "@/lib/audio/audioManager";
 import { setBgmMuted, useBgmMuted } from "@/lib/bgm";
 import { setSfxMuted, useSfxMuted } from "@/lib/sfx";
 
@@ -10,11 +12,33 @@ import styles from "./StadiumHome.module.css";
 // ヘッダーの表示名の横に置く音量アイコン。タップするとBGM／SEを個別にON/OFFできる
 // 小さなポップオーバーを開く（ミュート状態自体は既存のbgm.ts/sfx.tsのlocalStorage永続化を
 // そのまま利用するため、ライブ画面（/live・/live-demo）のSoundToggleと設定を共有する）。
+// 2026-08-29: ブラウザの自動再生制限でBGMが再生できなかった場合、AudioProvider経由の
+// needsAudioResumeを見てアイコンに「！」バッジを出し、メニュー内に「BGMを再開」ボタンを
+// 表示するようにした。OFF→ONへの切り替えはそのクリックイベントの冒頭でAudioContextの
+// resumeを呼び、モバイルの自動再生制限をそのユーザー操作で突破する。
 export default function SoundSettingsToggle() {
   const [open, setOpen] = useState(false);
   const bgmMuted = useBgmMuted();
   const sfxMuted = useSfxMuted();
+  const { needsAudioResume, bgmLoading } = useAudioState();
   const allMuted = bgmMuted && sfxMuted;
+
+  const handleToggleBgm = () => {
+    const turningOn = bgmMuted;
+    // 要件：OFF→ONのクリックイベントの冒頭でAudioContextをresumeする。
+    if (turningOn) audioManager.resumeAudioContext();
+    setBgmMuted(!bgmMuted);
+  };
+
+  const handleToggleSfx = () => {
+    const turningOn = sfxMuted;
+    if (turningOn) audioManager.resumeAudioContext();
+    setSfxMuted(!sfxMuted);
+  };
+
+  const handleResumeBgm = () => {
+    audioManager.retryCurrentBgm();
+  };
 
   return (
     <div className="relative shrink-0">
@@ -24,9 +48,17 @@ export default function SoundSettingsToggle() {
         aria-label="音の設定を開く"
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--muted-on-dark)] transition hover:text-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+        className="relative flex h-6 w-6 items-center justify-center rounded-full text-[var(--muted-on-dark)] transition hover:text-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
         <SpeakerIcon muted={allMuted} />
+        {needsAudioResume && (
+          <span
+            className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-[var(--accent)] text-[8px] font-black leading-none text-white"
+            aria-hidden
+          >
+            !
+          </span>
+        )}
       </button>
 
       {open && (
@@ -36,10 +68,24 @@ export default function SoundSettingsToggle() {
           <div
             role="dialog"
             aria-label="音の設定"
-            className={`${styles.grainDark} absolute top-full right-0 z-50 mt-2 flex w-32 flex-col gap-1 rounded-xl border border-[var(--border-dark)] p-2 shadow-xl`}
+            className={`${styles.grainDark} absolute top-full right-0 z-50 mt-2 flex w-36 flex-col gap-1 rounded-xl border border-[var(--border-dark)] p-2 shadow-xl`}
           >
-            <SoundRow label="BGM" muted={bgmMuted} onToggle={() => setBgmMuted(!bgmMuted)} />
-            <SoundRow label="SE" muted={sfxMuted} onToggle={() => setSfxMuted(!sfxMuted)} />
+            <SoundRow label="BGM" muted={bgmMuted} onToggle={handleToggleBgm} />
+            <SoundRow label="SE" muted={sfxMuted} onToggle={handleToggleSfx} />
+            {bgmLoading && (
+              <p className="px-2 py-1 font-sans text-[10px] text-[var(--muted-on-dark)]">
+                BGM準備中…
+              </p>
+            )}
+            {needsAudioResume && (
+              <button
+                type="button"
+                onClick={handleResumeBgm}
+                className="rounded-lg bg-[var(--accent)] px-2 py-1.5 font-sans text-[11px] font-bold text-white transition hover:opacity-90"
+              >
+                BGMを再開
+              </button>
+            )}
           </div>
         </>
       )}

@@ -14,6 +14,7 @@ import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
 import OpeningView from "@/components/live-room/OpeningView";
 import StageAnsweringView from "@/components/live-room/StageAnsweringView";
 import TopicRevealView from "@/components/live-room/TopicRevealView";
+import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -63,20 +64,33 @@ export default function LivePage() {
   // 同時に鳴らす（liveがまだ無い・interlude前は無音のまま）。ここではその後のフェーズ切り替え
   // だけを扱う（src/app/live-demo/page.tsx参照）。openingはinterludeで既に鳴り始めている
   // 待機画面BGMの続きなので明示的な指定は不要。
+  // 2026-08-29: 「ライブ中のリロード後、経過時間に対応する位置からBGMを再開する」対応として、
+  // サーバー基準のphase_deadline（フェーズ終了予定時刻）とフェーズの所要時間（定数）から
+  // 経過時間を逆算し、playBgmのstartAtMsに渡す（曲を初めて切り替える瞬間だけ効く。
+  // 同じ曲が既に鳴っている間はaudioManager側でシークしない＝再生位置は巻き戻らない）。
   const currentPhase = live?.current_phase ?? null;
+  const phaseDeadline = live?.phase_deadline ?? null;
   useEffect(() => {
+    const elapsedMsOf = (durationMs: number): number => {
+      if (!phaseDeadline) return 0;
+      const remainingMs = new Date(phaseDeadline).getTime() - Date.now();
+      return Math.max(0, durationMs - remainingMs);
+    };
+
     if (currentPhase === "topic_reveal") {
-      playBgm("entrance");
+      playBgm("entrance", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.topicRevealMs) });
     } else if (currentPhase === "answering") {
-      playBgm("live");
-    } else if (currentPhase === "group_result" || currentPhase === "final_result") {
+      playBgm("live", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.answerMs) });
+    } else if (currentPhase === "group_result") {
+      playBgm("waiting", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.groupResultMs) });
+    } else if (currentPhase === "final_result") {
       playBgm("waiting");
     } else if (currentPhase === "closed" || currentPhase === null) {
       // closedはもちろん、購読が切れてliveそのものが取得できなくなった場合も
       // 「絶対に音が止まる」ことを優先し、念のため止めておく。
       stopBgm();
     }
-  }, [currentPhase]);
+  }, [currentPhase, phaseDeadline]);
 
   // ページ離脱時（ホームに戻る・他ページへ遷移等）は必ずBGMを止める。
   // closedフェーズに到達しないままアンマウントされるケースの保険（「終了しても音が鳴り続ける」対策）。
