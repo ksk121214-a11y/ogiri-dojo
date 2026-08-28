@@ -271,6 +271,30 @@
   mask-repeat: repeat-y;
 }
 
+/*
+ * 2026-08-29: マイページの寄合券スタンプ欄（半券を5分割した各セルの区切り）用に、
+ * .scallopDividerを90度回転させた横向き版を追加。縦長楕円が縦に並ぶ.scallopDividerに対し、
+ * こちらは横長楕円が横に並ぶ（ellipseの縦横を入れ替え、repeat-y→repeat-xにしただけ）。
+ * セルの上端をまたぐ位置（top:0; transform:translateY(-50%)）に置くことで、
+ * 隣接するセルとのちょうど境目に線が来るようにする。
+ */
+.scallopDividerHorizontal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  z-index: 3;
+  pointer-events: none;
+  transform: translateY(-50%);
+  -webkit-mask-image: radial-gradient(ellipse 6px 3px at 6.5px 5px, white 90%, transparent 100%);
+  mask-image: radial-gradient(ellipse 6px 3px at 6.5px 5px, white 90%, transparent 100%);
+  -webkit-mask-size: 13px 10px;
+  mask-size: 13px 10px;
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+}
+
 /* 境界線の上端・下端だけの単発の丸い切り欠き（.scallopDividerと中心の縦線を揃える）。 */
 .scallopCapTop,
 .scallopCapBottom {
@@ -393,19 +417,31 @@
 
 /*
  * マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋丸い切り欠き」の
- * チケット言語を流用し、半券側にOGIRI LIVEのスタンプ風グラフィックを置く。
- * 半券の幅は92px固定（NextLiveTicketの104pxよりやや狭い、スタンプ1つだけを置くため）。
+ * チケット言語を流用し、半券側には寄合券（寄合帳への投稿・回答で消費するスタミナ的リソース）の
+ * 残り枚数を表す5分割のスタンプ欄を置く。半券の幅は92px固定
+ * （NextLiveTicketの104pxよりやや狭い、スタンプ1つだけを置くため）。
+ * 2026-08-29: 「寄合券を使うとスタンプが消えるのではなく、そのチケットの部分ごと消える
+ * ように」の要望で、本体と半券を（ライブ予定ページの.tornTicketRow／.tornTicketMainと
+ * 同じ考え方で）別々の独立したカードに分離。半券側は消費済みのセルにだけ背景を持たせず、
+ * ページ本体の背景（クラフト紙）がそのまま透けて見えるようにしている。
  */
-.profileCard {
+.profileCardRow {
   position: relative;
-  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 92px;
+}
+.profileCardMain {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px 0 0 20px;
   color: var(--ink);
-  border-radius: 20px;
-  /* 2026-08-28: 「カードが背景から浮いて見えるように」の要望でドロップシャドウを付けたが、
-     このシャドウが上下・右端の切り欠き（本物の背景を見せている部分）にも被って暗くなり、
-     「背景が見えている」感じを損なってしまうとの指摘を受けて撤去した。 */
+}
+.profileCardStub {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 20px 20px 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* バーコード：画像を使わずCSSの縦棒だけで表現する */
