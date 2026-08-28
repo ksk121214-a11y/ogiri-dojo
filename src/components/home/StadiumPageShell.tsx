@@ -14,7 +14,7 @@ export default function StadiumPageShell({
   contentTheme = "kraft",
 }: {
   children: ReactNode;
-  contentTheme?: "dark" | "kraft";
+  contentTheme?: "dark" | "kraft" | "concrete";
 }) {
   return (
     <StadiumAppShell contentTheme={contentTheme} bottomNav={<BottomNavigation />}>

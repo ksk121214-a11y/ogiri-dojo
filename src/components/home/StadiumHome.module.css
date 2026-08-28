@@ -30,6 +30,8 @@
   /* マイページ専用：茶色いクラフト紙の背景（ホームの--bgに対する第3の面色）。
      ivory-paper（チケット券面）とは別の、コンテンツ全体の背景として使う。 */
   --bg-kraft: #b58f5c;
+  /* 遊び方ページ専用：明るいコンクリートの背景（第4の面色）。 */
+  --bg-concrete: #d4cec4;
 
   position: relative;
   isolation: isolate;
@@ -114,6 +116,15 @@
   /* 2026-08-28: 320pxだとスマホ画面内でタイルの継ぎ目（明暗のムラ）が目立ち、
      参考画像のような均一な紙面に見えなかったため、元画像に近い480pxまで広げて
      繰り返し回数を減らし、まだら感を抑えている。 */
+  background-size: 480px 480px;
+}
+
+/* 遊び方ページ専用の背景：明るいコンクリート（実素材、ogiri-light-concrete-seamless.png）。
+   warm-kraft同様、色付きの写真ベースの実素材なのでblend-modeは使わずそのまま敷き詰める。 */
+.grainConcrete {
+  background-color: var(--bg-concrete);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-repeat: repeat;
   background-size: 480px 480px;
 }
 
@@ -272,6 +283,43 @@
   mask-size: 18px 22px;
   -webkit-mask-repeat: repeat-y;
   mask-repeat: repeat-y;
+}
+
+/*
+ * 遊び方ページの手順カード。参考画像の「左右がスタンプのふちのようにギザギザした
+ * チケット」を、.scallopRightと同じ「単一レイヤーのmask-image」手法の疑似要素
+ * （::before/::after）で左右両端に再現する。JSXに余計なdivを増やさずに済むよう
+ * CSS側だけで完結させている。
+ */
+.stepTicket {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+}
+.stepTicket::before,
+.stepTicket::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 3;
+  pointer-events: none;
+  background-color: var(--bg-concrete);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-size: 90px 90px;
+  -webkit-mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
+  mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
+  -webkit-mask-size: 18px 22px;
+  mask-size: 18px 22px;
+  -webkit-mask-repeat: repeat-y;
+  mask-repeat: repeat-y;
+}
+.stepTicket::before {
+  left: -9px;
+}
+.stepTicket::after {
+  right: -9px;
 }
 
 /*

@@ -10,6 +10,7 @@ import styles from "@/components/home/StadiumHome.module.css";
 // 2026-08-28: マイページも「ヘッダー・下部ナビはホームと共通、本文の背景だけ茶色いクラフト紙」に
 // したいという要望のため、本文の背景面をcontentThemeで切り替えられるようにした
 // （ヘッダー・下部ナビ自身はそれぞれ.grainDarkを個別に持っているため、ここでの切り替えの影響を受けない）。
+// 2026-08-28（追記）：遊び方ページ用に、明るいコンクリートの背景（"concrete"）を追加。
 export default function StadiumAppShell({
   children,
   bottomNav,
@@ -17,9 +18,14 @@ export default function StadiumAppShell({
 }: {
   children: ReactNode;
   bottomNav: ReactNode;
-  contentTheme?: "dark" | "kraft";
+  contentTheme?: "dark" | "kraft" | "concrete";
 }) {
-  const surfaceClass = contentTheme === "kraft" ? styles.grainKraft : styles.grainDark;
+  const surfaceClass =
+    contentTheme === "kraft"
+      ? styles.grainKraft
+      : contentTheme === "concrete"
+        ? styles.grainConcrete
+        : styles.grainDark;
   return (
     <div className={`${styles.shell} ${surfaceClass} flex min-h-screen flex-col`}>
       <StadiumHeader />
