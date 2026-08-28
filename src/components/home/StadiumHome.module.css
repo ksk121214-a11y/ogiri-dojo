@@ -8,22 +8,24 @@
  */
 
 .shell {
-  /* 2026-08-28: 「背景の黒いテクスチャをほんの少しだけ薄く」の要望でごく僅かに明るく調整。 */
-  --bg: #1c1c1c;
-  --bg-raised: #24231f;
+  /* 2026-08-28: 「背景の黒いテクスチャをほんの少しだけ薄く」→さらに「もう少しだけ薄く」の
+     要望で、2段階に分けてごく僅かに明るく調整。 */
+  --bg: #202020;
+  --bg-raised: #282723;
   --paper: #f1e9d9;
   --paper-muted: #ddd4c4;
   --ink: #171513;
   --text-on-dark: #f1e9d9;
   --muted-on-dark: #aaa297;
-  /* 2026-08-28: 「色を#C8250Cで統一」の要望でアクセントカラーを変更。 */
-  --accent: #c8250c;
-  --accent-dark: #901b09;
+  /* 2026-08-28: 「色を#C8250Cで統一」→「#C8320Cに」の要望でアクセントカラーを変更。 */
+  --accent: #c8320c;
+  --accent-dark: #902409;
   /* .grainDark等と同じくbackground-blend-mode:overlayをフル強度のまま使うため、
      overlayの計算式から「暗く沈む分」を逆算し、意図的に明るく振った色を下地にすることで、
      質感を100%効かせたまま平均的な見た目の色を--accent（文字色）に近づけている。
-     --accentを変更するたびに、この値も--accentに合わせて計算し直す必要がある。 */
-  --accent-textured-base: #e08435;
+     --accentを変更するたびに、この値も--accentに合わせて計算し直す必要がある
+     （このg≈0.113の逆算式はscratchpad/accent-base-solve.pyを参照）。 */
+  --accent-textured-base: #e08b35;
   --border-dark: #312f2b;
 
   position: relative;
