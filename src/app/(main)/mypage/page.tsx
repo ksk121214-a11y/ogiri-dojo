@@ -43,7 +43,7 @@ export default function MyPage() {
           </p>
         </div>
 
-        <SnsFeedSection />
+        <SnsFeedSection variant="stadium" />
       </StadiumAppShell>
 
       <MyStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />

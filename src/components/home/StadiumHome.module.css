@@ -242,6 +242,37 @@
     0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
+/*
+ * マイページ「お題を投稿する」バナー用の、ちぎれたチケットの端のようなジグザグ縁。
+ * mask-imageを3枚重ねる定番手法：左上／右上を起点に斜めグラデーションのタイルを
+ * repeat-yで縦に繰り返して左右の縁だけをノコギリ状にし、中央は矩形のまま残す
+ * （mask-compositeは使わず複数レイヤーの既定の合成＝addのみに頼っているため、
+ * NextLiveTicketの切り欠きで問題になったmask-composite: subtractより対応状況が広い）。
+ */
+.tornBanner {
+  --tooth: 14px;
+  -webkit-mask-image:
+    linear-gradient(-45deg, transparent calc(var(--tooth) / 2), black 0),
+    linear-gradient(45deg, transparent calc(var(--tooth) / 2), black 0),
+    linear-gradient(black, black);
+  mask-image:
+    linear-gradient(-45deg, transparent calc(var(--tooth) / 2), black 0),
+    linear-gradient(45deg, transparent calc(var(--tooth) / 2), black 0),
+    linear-gradient(black, black);
+  -webkit-mask-size:
+    var(--tooth) var(--tooth),
+    var(--tooth) var(--tooth),
+    calc(100% - var(--tooth)) 100%;
+  mask-size:
+    var(--tooth) var(--tooth),
+    var(--tooth) var(--tooth),
+    calc(100% - var(--tooth)) 100%;
+  -webkit-mask-position: top left, top right, center;
+  mask-position: top left, top right, center;
+  -webkit-mask-repeat: repeat-y, repeat-y, no-repeat;
+  mask-repeat: repeat-y, repeat-y, no-repeat;
+}
+
 .stubDivider {
   position: relative;
   border-left: 2px dashed rgba(23, 21, 19, 0.3);
