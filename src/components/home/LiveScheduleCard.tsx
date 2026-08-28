@@ -1,0 +1,178 @@
+import Link from "next/link";
+
+import { ClockGlyph, HistoryClockGlyph } from "./icons";
+import type { LiveScheduleDate, LiveTicketInfo } from "@/data/liveScheduleData";
+import styles from "./StadiumHome.module.css";
+
+// ライブ予定ページ（/live-schedule）専用の3種類のチケットカード。
+// 「前回」は本券のみ（左右がスタンプのふちのようなギザギザ縁の.stepTicket）、
+// 「今回」「次回」は本券＋半券（NextLiveTicketと同じ.ticket＋丸い切り欠き）に
+// バーコード＋OGIRI LIVEのスタンプ風グラフィックを添える。
+// 背景がホーム（黒）ではなく明るいコンクリートのため、切り欠きの質感は
+// .notchConcreteを使い、ページの背景色と馴染むようにしている。
+// ホームのNextLiveTicketとは見た目の要件が違う（インラインのアクションボタンを
+// チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
+// 分岐だらけにするのではなく専用コンポーネントとして分離した。
+
+const BARCODE_PATTERN = [
+  2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
+];
+const BARCODE_HEIGHT = 76;
+const BARCODE_WIDTH = 38;
+
+function DateLine({ date, timeTone }: { date: LiveScheduleDate; timeTone: "accent" | "ink" }) {
+  return (
+    <>
+      <p className="text-sm font-bold text-[var(--ink)]/60">{date.year}年</p>
+      <p className="whitespace-nowrap text-3xl font-black leading-none tracking-tight text-[var(--ink)]">
+        {date.month}
+        <span className="text-base font-bold">月</span>
+        {date.day}
+        <span className="text-base font-bold">日</span>
+        <span className="ml-0.5 text-sm font-bold">（{date.weekday}）</span>
+      </p>
+      <p
+        className={`mt-0.5 text-2xl font-black ${
+          timeTone === "accent" ? "text-[var(--accent)]" : "text-[var(--ink)]"
+        }`}
+      >
+        {date.time}
+      </p>
+    </>
+  );
+}
+
+// 半券（バーコード＋チケット番号＋OGIRI LIVE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
+function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: string }) {
+  return (
+    <div className={`${styles.stubDivider} ${stubClass} relative px-2 py-1.5 text-[var(--ink)]`}>
+      <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
+        {ticketNo}
+      </span>
+      <div
+        className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5"
+        style={{ top: "calc(50% + 8px)" }}
+      >
+        <div
+          className="flex flex-col items-stretch"
+          style={{ width: BARCODE_WIDTH, height: BARCODE_HEIGHT, gap: 1 }}
+          aria-hidden
+        >
+          {BARCODE_PATTERN.map((w, i) => (
+            <span
+              key={i}
+              className={styles.barcodeBar}
+              style={{ flexGrow: w, flexBasis: 0, background: "var(--ink)" }}
+            />
+          ))}
+        </div>
+        <div className="flex flex-col items-center justify-center gap-1">
+          <span className="[writing-mode:vertical-rl] text-[11px] leading-none font-bold tracking-normal">
+            OGIRI LIVE
+          </span>
+          <span className="flex flex-col items-center gap-0.5 text-[11px] leading-none" aria-hidden>
+            <span>★</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
+  return (
+    <div className={`${styles.stepTicket} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}>
+      <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
+        <HistoryClockGlyph />
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/60">
+          前回のライブ
+        </span>
+        <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
+          {date.year}年{date.month}月{date.day}日（{date.weekday}）
+        </p>
+        <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <span className="rounded-sm bg-[var(--ink)]/12 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+          終了
+        </span>
+        {/* 結果を見る先の画面はまだ無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
+        <span className="cursor-not-allowed whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/35">
+          結果を見る ›
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function CurrentLiveCard({
+  live,
+  reception,
+}: {
+  live: LiveTicketInfo;
+  reception: string;
+}) {
+  return (
+    <div className="relative">
+      <span
+        className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}
+      >
+        今回のライブ
+      </span>
+
+      <div className={`${styles.ticket} ${styles.grainPaper}`}>
+        <div className={`${styles.notchTop} ${styles.notchConcrete}`} aria-hidden />
+        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} aria-hidden />
+
+        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+          <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
+          <DateLine date={live} timeTone="accent" />
+          <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
+            <ClockGlyph />
+            受付 {reception}
+          </p>
+          <Link
+            href="/live"
+            className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+          >
+            参加する
+          </Link>
+        </div>
+
+        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainAccent} />
+      </div>
+    </div>
+  );
+}
+
+export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
+  return (
+    <div className="relative">
+      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--ink)] px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none">
+        次回のライブ
+      </span>
+
+      <div className={`${styles.ticket} ${styles.grainPaper}`}>
+        <div className={`${styles.notchTop} ${styles.notchConcrete}`} aria-hidden />
+        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} aria-hidden />
+
+        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+          <DateLine date={live} timeTone="ink" />
+          <div className="mt-2 flex items-center gap-2">
+            <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+              開催予定
+            </span>
+            {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
+            <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
+              詳細を見る ›
+            </span>
+          </div>
+        </div>
+
+        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDark} />
+      </div>
+    </div>
+  );
+}

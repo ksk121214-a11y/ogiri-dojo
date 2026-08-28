@@ -72,17 +72,19 @@ function PersonIcon({ active }: { active: boolean }) {
 }
 
 // 下部固定ナビゲーション。ホーム／次回ライブ／遊び方／マイページの4つ。
-// 「次回ライブ」はホームのチケットカードへのページ内スクロール（#next-live）。
 // 2026-08-28: マイページでも同じ下部ナビを使う要望のため、選択中タブは固定（ホーム）ではなく
-// usePathnameで現在地から判定するようにした。「次回ライブ」はどのページからでもホームの
-// チケットカード位置へ飛べるよう href を "/#next-live" にしている。
+// usePathnameで現在地から判定するようにした。
 // 2026-08-28（追記）：「遊び方」はモーダル（TutorialModal）を開く方式から、ホーム／マイページと
 // 同じ「専用ページへ遷移し、選択中はアイコンが赤くなる」方式に変更した。
+// 2026-08-28（さらに追記）：「次回ライブ」も、ホームのチケットカードへのページ内スクロール
+// （#next-live）から、前回／今回／次回のライブとカレンダーをまとめた専用ページ
+// （/live-schedule）へ遷移する方式に変更した。
 export default function BottomNavigation() {
   const pathname = usePathname();
   const isHome = pathname === "/";
   const isMyPage = pathname.startsWith("/mypage");
   const isHowToPlay = pathname.startsWith("/how-to-play");
+  const isLiveSchedule = pathname.startsWith("/live-schedule");
 
   const itemClass =
     "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-xs font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
@@ -102,8 +104,12 @@ export default function BottomNavigation() {
           <HomeIcon active={isHome} />
           ホーム
         </Link>
-        <Link href="/#next-live" className={`${itemClass} text-[var(--text-on-dark)]`}>
-          <CalendarIcon active={false} />
+        <Link
+          href="/live-schedule"
+          aria-current={isLiveSchedule ? "page" : undefined}
+          className={`${itemClass} ${isLiveSchedule ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+        >
+          <CalendarIcon active={isLiveSchedule} />
           次回ライブ
         </Link>
         <Link

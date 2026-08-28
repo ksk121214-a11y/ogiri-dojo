@@ -256,6 +256,20 @@
   background-position: -4px -70px;
 }
 
+/* ライブ予定ページ（背景が明るいコンクリート）に乗るチケット用。考え方は.notchKraftと同じ。 */
+.notchConcrete {
+  background-color: var(--bg-concrete);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-size: 90px 90px;
+  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.2);
+}
+.notchTop.notchConcrete {
+  background-position: -4px -2px;
+}
+.notchBottom.notchConcrete {
+  background-position: -4px -70px;
+}
+
 /*
  * マイページ演者名チケットの右端（本体の外周）を、スタンプ／コインのふちのような
  * 半円の連続した切り欠きにする。

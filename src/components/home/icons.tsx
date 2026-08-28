@@ -160,3 +160,45 @@ export function TrophyGlyph({ className }: { className?: string }) {
     </svg>
   );
 }
+
+// ライブ予定ページ「前回のライブ」用。時計＋反時計回りの矢印で「過去」を表す。
+export function HistoryClockGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" className={className} fill="none" aria-hidden>
+      <path
+        d="M4 11a8 8 0 1 1 2.3 5.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M4 6.5V11h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 7.5v4.2l3 1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ライブ予定ページ「開催通知」トグル用。
+export function BellGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" className={className} fill="none" aria-hidden>
+      <path
+        d="M12 3.5c-2.5 0-4.2 1.9-4.2 4.4v3.1c0 .9-.3 1.8-.9 2.5l-.9 1.1h12l-.9-1.1c-.6-.7-.9-1.6-.9-2.5V7.9c0-2.5-1.7-4.4-4.2-4.4Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M10 17.5a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ライブ予定ページ「カレンダーに追加」用。
+export function CalendarAddGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" className={className} fill="none" aria-hidden>
+      <rect x="3.5" y="5.5" width="17" height="15" rx="1.8" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 9.5h17M7.5 3v3M16.5 3v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M12 12.5v5M9.5 15h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}

@@ -21,6 +21,8 @@ import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 // Stadium側に誤って含まれてしまうため、"/sns/"ちょうど（トップ自身）は明示的に除外する。
 // 2026-08-28（追記）：下部ナビ「遊び方」をモーダルから専用ページ（/how-to-play）に
 // 変更したため、こちらもStadium側に追加。
+// 2026-08-28（さらに追記）：下部ナビ「次回ライブ」もホーム内ページ内スクロールから
+// 専用ページ（/live-schedule）に変更したため、こちらもStadium側に追加。
 export default function MainLayout({
   children,
 }: {
@@ -35,6 +37,7 @@ export default function MainLayout({
     pathname === "/" ||
     pathname.startsWith("/mypage") ||
     pathname.startsWith("/how-to-play") ||
+    pathname.startsWith("/live-schedule") ||
     isSnsSubPage;
 
   if (isStadiumPage) {
