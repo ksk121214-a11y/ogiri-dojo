@@ -212,112 +212,54 @@
 }
 
 /*
- * 本券と半券の境界の丸い切り欠き。mask-composite（subtract）で.ticket自体に
- * 本物の穴を開ける方式を試したが、環境によって効かずノッチが消えてしまう
- * リスクがあったため、確実に動くdiv＋背景色の方式に戻した。
- * ただし単色（--bg）だと実際の背景の質感と合わずに見えていたため、
- * 「そのチケットが乗っているページ本体の背景」と同じ質感を持たせ、
- * さらに内側にほんの少しinset shadowを入れて「本当に凹んでいる」ような
- * 陰影を付けている（タイル位置が周囲と厳密には連続しないが、ランダムな
- * 粒状の質感なので継ぎ目はほぼ分からない）。
- * 2026-08-28: マイページ（背景が茶色いクラフト紙）にも同じチケット意匠を使うことになったため、
- * 背景の質感（色・画像）だけを.notchDark／.notchKraftの2種類に分け、
- * 位置・形状はこのベースクラスに共通化した。
+ * 本券と半券（または、そこが切り取られたチケットの断面）の境界を、連続した丸い
+ * 切り欠き（穴）の列で表す。以前は上下2箇所だけの丸い切り欠き＋間を点線でつなぐ
+ * 方式だったが、「今回のライブの白と赤の境目のように、縦にずらっと穴が並んだ感じに
+ * してほしい」との要望で、マイページの演者名チケット右端（.scallopRight）と同じ
+ * 「単一レイヤーのmask-image」手法（複数レイヤーの合成=mask-compositeを使わないため
+ * 環境依存の消失リスクが低い）を、内部の境界線用に一般化した。
+ * --scallop-rightで境界線の位置（半券の幅に応じてずらす量）を、
+ * .scallopDark/.scallopKraft/.scallopConcreteで「そのチケットが乗っている
+ * ページ本体の背景」と同じ質感を指定する。
  */
-.notchTop,
-.notchBottom {
-  position: absolute;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
-  border-radius: 9999px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-  /* --notch-right未指定時はNextLiveTicket（104px幅の半券）に合わせた96pxを既定値にする。
-     マイページの演者名チケット（92px幅の半券）はコンポーネント側でこの変数を上書きする。 */
-  right: var(--notch-right, 96px);
-  transform: translateX(50%);
-}
-.notchTop {
-  top: -10px;
-}
-.notchBottom {
-  bottom: -10px;
-}
-
-/* ホーム（背景が黒＋dark-grain）に乗るチケット用。 */
-.notchDark {
-  background-color: var(--bg);
-  background-image: url("/images/textures/dark-grain-512.webp");
-  background-blend-mode: overlay;
-  background-size: 120px 120px;
-}
-.notchTop.notchDark {
-  background-position: -8px -4px;
-}
-.notchBottom.notchDark {
-  background-position: -8px -96px;
-}
-
-/*
- * マイページ（背景が茶色いクラフト紙）に乗るチケット用。
- * 2026-08-28: 「本物の背景が見えるように」との指摘を受け、クラフト紙のテクスチャ画像を
- * タイルを小さく（90px）してこの20px程度の円の中でも粒の濃淡がちゃんと見えるようにし、
- * 影も紙の色・質感が伝わる程度まで弱めた（濃すぎると単なる黒いシミに見えてしまうため）。
- */
-.notchKraft {
-  background-color: var(--bg-kraft);
-  background-image: url("/images/textures/warm-kraft-paper-512.webp");
-  background-size: 90px 90px;
-  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.25);
-}
-.notchTop.notchKraft {
-  background-position: -4px -2px;
-}
-.notchBottom.notchKraft {
-  background-position: -4px -70px;
-}
-
-/* ライブ予定ページ（背景が明るいコンクリート）に乗るチケット用。考え方は.notchKraftと同じ。 */
-.notchConcrete {
-  background-color: var(--bg-concrete);
-  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
-  background-size: 90px 90px;
-  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.2);
-}
-.notchTop.notchConcrete {
-  background-position: -4px -2px;
-}
-.notchBottom.notchConcrete {
-  background-position: -4px -70px;
-}
-
-/*
- * マイページ演者名チケットの右端（本体の外周）を、スタンプ／コインのふちのような
- * 半円の連続した切り欠きにする。
- * 2026-08-28: 当初はradial-gradientそのものを背景色として塗る方式にしていたが、
- * 単色のシミのように見えて「本物の背景」らしく見えないという指摘を受け、
- * .tornBannerと同じ「mask-imageは1枚だけ（複数レイヤーの合成=mask-compositeを使わない）」
- * 手法に変更。実際のクラフト紙テクスチャ画像を背景に敷き、その上からradial-gradientの
- * mask-image（1枚だけなのでcomposite指定は不要＝環境依存の消失リスクが小さい）を
- * repeat-yでタイル状に繰り返し、円の形にくり抜いて見せている。
- */
-.scallopRight {
+.scallopDivider {
   position: absolute;
   top: 0;
   bottom: 0;
-  right: -9px;
   width: 18px;
   z-index: 3;
   pointer-events: none;
-  background-color: var(--bg-kraft);
-  background-image: url("/images/textures/warm-kraft-paper-512.webp");
-  background-size: 90px 90px;
+  /* 既定値-9pxは「区切り線ではなく、そのカード自体の外周」に使う場合
+     （マイページの演者名チケットの右端など）の値。半券との内部境界に使う場合は
+     半券の幅に応じてコンポーネント側で上書きする（詳しくは各コンポーネントのコメント）。 */
+  right: var(--scallop-right, -9px);
   -webkit-mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
   mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
   -webkit-mask-size: 18px 22px;
   mask-size: 18px 22px;
   -webkit-mask-repeat: repeat-y;
   mask-repeat: repeat-y;
+}
+
+/* ホーム（背景が黒＋dark-grain）に乗るチケット用。 */
+.scallopDark {
+  background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-size: 90px 90px;
+}
+
+/* マイページ（背景が茶色いクラフト紙）に乗るチケット用。 */
+.scallopKraft {
+  background-color: var(--bg-kraft);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-size: 90px 90px;
+}
+
+/* ライブ予定ページ（背景が明るいコンクリート）に乗るチケット用。 */
+.scallopConcrete {
+  background-color: var(--bg-concrete);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-size: 90px 90px;
 }
 
 /*
@@ -388,12 +330,10 @@
   mask-repeat: repeat-y, repeat-y, no-repeat;
 }
 
-.stubDivider {
-  position: relative;
-  /* 2026-08-28: 「点線が見づらいので濃くして」の要望で0.3→0.65に濃くした
-     （白い本券と赤い半券の境目で薄すぎて見えにくかったため）。 */
-  border-left: 2px dashed rgba(23, 21, 19, 0.65);
-}
+/* 2026-08-28: 境界線の表現を点線→.scallopDivider（連続した丸い切り欠き）に
+   変更したため、このクラスからborder-leftは撤去した（position:relativeも
+   各コンポーネント側で既にTailwindのrelativeを併用しており不要なため、
+   クラス自体を削除しJSX側からも参照を外している）。 */
 
 /*
  * マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋丸い切り欠き」の

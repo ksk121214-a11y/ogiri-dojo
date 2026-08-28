@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import { ClockGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
 
@@ -29,6 +31,11 @@ export interface NextLiveInfo {
   reception: string;
 }
 
+// 本券(104px幅の半券を除いた側)と半券の境界線の位置。
+// .scallopDividerの--scallop-rightは「半券の幅-9px」で境界線のちょうど真上に円の中心が来る
+// （半券幅104pxのため 104-9=95px）。
+const SCALLOP_STYLE = { "--scallop-right": "95px" } as CSSProperties;
+
 // 次回ライブ告知のチケット風カード。CSS Gridで「本券／半券」の2カラムに分け、
 // 画像は一切使わずCSS（丸い切り欠き・破線・バーコード）だけで表現する。
 export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
@@ -41,8 +48,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
       </span>
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={`${styles.notchTop} ${styles.notchDark}`} aria-hidden />
-        <div className={`${styles.notchBottom} ${styles.notchDark}`} aria-hidden />
+        <div className={`${styles.scallopDivider} ${styles.scallopDark}`} style={SCALLOP_STYLE} aria-hidden />
 
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
         <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
@@ -77,7 +83,7 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
           ②バーコード側はtop/left 50%＋translateで、その「チケットの縦幅」そのものの
             真ん中に正確に来る（チケット番号の分だけ上に寄る、ということが起きない）。
         */}
-        <div className={`${styles.stubDivider} ${styles.grainAccent} relative px-2 py-1.5 text-[var(--ink)]`}>
+        <div className={`${styles.grainAccent} relative px-2 py-1.5 text-[var(--ink)]`}>
           <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
             {live.ticketNo}
           </span>

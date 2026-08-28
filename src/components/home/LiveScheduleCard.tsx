@@ -11,20 +11,19 @@ import styles from "./StadiumHome.module.css";
 // 要望のため、「今回」「次回」と同じ.ticketの2カラムグリッド構造をそのまま使い、
 // 半券側だけ何も貼らずページの背景（コンクリート）を透かして見せている
 // （本券側=.tornTicketMainだけが独立した丸角＋切り欠き付きのカード）。
-// 「今回」「次回」は本券＋半券（丸い切り欠き）にバーコード＋OGIRI LIVEの
-// スタンプ風グラフィックを添える。
+// 「今回」「次回」は本券＋半券に、境界線（連続した丸い切り欠き＝.scallopDivider）と
+// バーコード＋OGIRI LIVEのスタンプ風グラフィックを添える。
 // 背景がホーム（黒）ではなく明るいコンクリートのため、切り欠きの質感は
-// .notchConcreteを使い、ページの背景色と馴染むようにしている。
+// .scallopConcreteを使い、ページの背景色と馴染むようにしている。
 // ホームのNextLiveTicketとは見た目の要件が違う（インラインのアクションボタンを
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
 
-// 「前回」の切り欠きは、.tornTicketMain（=元の1frカラムぶんの幅だけの単独カード）の
-// 右端そのものに来てほしいため、.scallopRight等と同じ考え方で右端に半分だけ
-// はみ出す位置（-8px）を明示的に指定する（NextLiveTicket側の既定値96pxは、
-// 半券がまだ残っている前提で「.ticket全体の右端から104px」を意味する値のため、
-// 半券が無いこちらでは使えない）。
-const TORN_NOTCH_STYLE = { "--notch-right": "-8px" } as CSSProperties;
+// 本券と半券の境界線の位置。半券幅104pxのため 104-9=95px
+// （計算根拠はNextLiveTicket側と同じ。詳しくはStadiumHome.module.cssの.scallopDivider参照）。
+const SCALLOP_STYLE = { "--scallop-right": "95px" } as CSSProperties;
+// 「前回」は半券が無い（=.tornTicketMainという単独カードの右端そのものが境界線）ため、
+// .scallopDividerの既定値（-9px、カード自身の外周用）をそのまま使えばよく、上書き不要。
 
 const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
@@ -57,7 +56,7 @@ function DateLine({ date, timeTone }: { date: LiveScheduleDate; timeTone: "accen
 // 半券（バーコード＋チケット番号＋OGIRI LIVE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
 function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: string }) {
   return (
-    <div className={`${styles.stubDivider} ${stubClass} relative px-2 py-1.5 text-[var(--ink)]`}>
+    <div className={`${stubClass} relative px-2 py-1.5 text-[var(--ink)]`}>
       <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
         {ticketNo}
       </span>
@@ -97,8 +96,7 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
       <div
         className={`${styles.tornTicketMain} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}
       >
-        <div className={`${styles.notchTop} ${styles.notchConcrete}`} style={TORN_NOTCH_STYLE} aria-hidden />
-        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} style={TORN_NOTCH_STYLE} aria-hidden />
+        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} aria-hidden />
 
         <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
           <HistoryClockGlyph />
@@ -144,8 +142,7 @@ export function CurrentLiveCard({
       </span>
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={`${styles.notchTop} ${styles.notchConcrete}`} aria-hidden />
-        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} aria-hidden />
+        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
           <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
@@ -176,8 +173,7 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
       </span>
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={`${styles.notchTop} ${styles.notchConcrete}`} aria-hidden />
-        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} aria-hidden />
+        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
           <DateLine date={live} timeTone="ink" />

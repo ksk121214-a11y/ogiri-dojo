@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
+import SoundSettingsToggle from "./SoundSettingsToggle";
 import styles from "./StadiumHome.module.css";
 
 // ホーム専用ヘッダー：地下ライブハウス風の暗いトンマナに合わせた最小構成
@@ -38,6 +39,8 @@ export default function StadiumHeader() {
           <span className="min-w-0 truncate text-sm text-[var(--muted-on-dark)]">
             {displayName}
           </span>
+
+          <SoundSettingsToggle />
 
           {/*
             参考デザインはタイトル＋名前のみのシンプルな構成のため、
