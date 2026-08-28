@@ -6,7 +6,7 @@ export type LivePhase =
   | "interlude" // 幕間演出（暗転→タイトル）§13
   | "opening" // 組分け発表 §13 / L2
   | "topic_reveal" // お題発表 §1.5
-  | "answering" // 回答（持ち時間90秒、審査サイクルはjudgingで管理）
+  | "answering" // 回答（持ち時間60秒、審査サイクルはjudgingで管理）
   | "group_result" // 組結果発表 L5
   | "final_result" // 最終結果・個人表彰 L6
   | "closed"; // 閉幕

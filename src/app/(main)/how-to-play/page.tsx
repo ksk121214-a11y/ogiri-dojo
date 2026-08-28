@@ -19,13 +19,14 @@ import { MAX_ANSWERS_PER_PLAYER } from "@/data/liveDemoData";
 
 // 遊び方ページ。従来はモーダル（TutorialModal、削除済み）で表示していたが、下部ナビ・
 // ヒーローの「遊び方を見る」から専用ページへ遷移する形に変更した。
-// いただいた参考画像（手順1〜6のチケット風カード＋明るいコンクリート背景）を元にしているが、
-// 文中の数値は実装済みのロジック（src/data/liveDemoData.ts・useLiveDesignPreviewStore2.ts・
-// FinalResultScreen.tsx）に合わせて次の2点だけ補正している：
-// ・「各組の持ち時間」は参考画像では60秒だったが、実装（DEMO_TIMING.answerMs）は90秒のため90秒表記に
-// ・「結果発表で貰えるポイント」は参考画像では「獲得点と同じポイント」だったが、実装
-//   （FinalResultScreen.tsxのrankBonus＋ベストアンサーボーナス）は順位に応じたボーナス方式のため、
-//   その表現に補正
+// いただいた参考画像（手順1〜6のチケット風カード＋明るいコンクリート背景）を元にしている。
+// 「各組の持ち時間」は当初、実装側のレガシーな値（DEMO_TIMING.answerMs、当時90秒）に
+// 合わせて90秒と表記していたが、仕様書.md §1・実バックエンド側のLIVE_ROOM_TIMING.answerMsを
+// 確認したところ現行仕様は60秒（2026-08-27改訂）で、DEMO_TIMING側の更新漏れだったと判明。
+// DEMO_TIMING.answerMsを60秒に修正した上で、表記も60秒に戻した。
+// 「結果発表で貰えるポイント」は、実装（FinalResultScreen.tsxのrankBonus＋ベストアンサー
+// ボーナス）が順位に応じたボーナス方式のため、参考画像の「獲得点と同じポイント」から
+// その表現に補正している。
 export default function HowToPlayPage() {
   return (
     <StadiumPageShell contentTheme="concrete">
@@ -60,7 +61,7 @@ export default function HowToPlayPage() {
           <PeopleTag label="2組" tone="accent" count={2} />
           <PeopleTag label="3組" tone="accent" count={2} />
         </div>
-        <p className="mt-2">各組90秒。5人が回答し、残り10人が審査員。</p>
+        <p className="mt-2">各組60秒。5人が回答し、残り10人が審査員。</p>
       </StepCard>
 
       <StepCard number="5" icon={null} title="回答・採点">
