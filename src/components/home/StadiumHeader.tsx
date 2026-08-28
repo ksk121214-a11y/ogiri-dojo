@@ -1,9 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 
-import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
@@ -11,11 +9,12 @@ import { useUserStore } from "@/store/useUserStore";
 import styles from "./StadiumHome.module.css";
 
 // ホーム専用ヘッダー：地下ライブハウス風の暗いトンマナに合わせた最小構成
-// （タイトル＋ユーザー名／ポイントのみ。ホーム/マイページの切替タブは下部ナビ側にあるため置かない）。
-// ポイントバッジは既存のPointHistoryModal（獲得履歴）を開く動線をそのまま引き継ぐ。
+// （タイトル＋ユーザー名のみ。ホーム/マイページの切替タブは下部ナビ側にあるため置かない）。
+// 2026-08-28: 「上のポイントは消して、ホーム下部のポイント残高を押すと履歴が出るように」の
+// 要望で、ポイント表示と獲得履歴モーダルを開く動線をヘッダーから撤去し、AccountSummary側に
+// 移した（表示名だけは引き続きここに残す）。
 // 既存の認証（useAuthStore）はUIを変えずログイン/ログアウトの小さなリンクとして残す。
 export default function StadiumHeader() {
-  const [historyOpen, setHistoryOpen] = useState(false);
   const user = useUserStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
   const displayName = profile?.displayName ?? user.displayName;
@@ -35,23 +34,12 @@ export default function StadiumHeader() {
         </Link>
 
         <div className="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="flex min-w-0 items-center gap-1.5 rounded-full px-1 py-1 font-sans focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-            aria-haspopup="dialog"
-          >
-            <span className="min-w-0 truncate text-sm text-[var(--muted-on-dark)]">
-              {displayName}
-            </span>
-            <span className="shrink-0 text-lg font-bold tabular-nums text-[var(--accent)]">
-              {user.points.toLocaleString()}
-              <span className="ml-0.5 text-sm font-normal text-[var(--muted-on-dark)]">pt</span>
-            </span>
-          </button>
+          <span className="min-w-0 truncate text-sm text-[var(--muted-on-dark)]">
+            {displayName}
+          </span>
 
           {/*
-            参考デザインはタイトル＋名前・ポイントのみのシンプルな構成のため、
+            参考デザインはタイトル＋名前のみのシンプルな構成のため、
             ログイン/ログアウトは枠付きボタンにせず、控えめな下線リンク程度の
             見た目に留める（機能・処理自体はuseAuthStoreのまま変更しない）。
           */}
@@ -76,8 +64,6 @@ export default function StadiumHeader() {
           )}
         </div>
       </div>
-
-      {historyOpen && <PointHistoryModal onClose={() => setHistoryOpen(false)} />}
     </header>
   );
 }
