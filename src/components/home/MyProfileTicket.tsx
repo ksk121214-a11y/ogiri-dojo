@@ -166,9 +166,12 @@ export default function MyProfileTicket({
 // 「一番上から順に切られていく」の要望どおり、上からMAX_TICKETS-count個を空欄にし、
 // 残り（下側）のcount個だけ紙とスタンプを表示する。回復すると上から順に埋まっていく。
 // 各セルの区切り線は.scallopDividerHorizontal（縦長楕円の.scallopDividerを横向きにしたもの）。
+// 左端には.scallopDividerLeft（本体側の.scallopDividerと同じ座標のleft版）を重ね、
+// 「切り離される半券側の左端がまっすぐ」に見えないよう、両方の紙が嚙み合う見た目にする。
 function TicketStubColumn({ count }: { count: number }) {
   return (
     <div className={styles.profileCardStub}>
+      <div className={`${styles.scallopDividerLeft} ${styles.scallopKraft}`} aria-hidden />
       {Array.from({ length: MAX_TICKETS }).map((_, i) => {
         const filled = i >= MAX_TICKETS - count;
         return (
