@@ -19,11 +19,11 @@ import styles from "./StadiumHome.module.css";
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
 
-// 本券と半券の境界線の位置。半券幅104pxのため 104-9=95px
+// 本券と半券の境界線の位置。半券幅104pxのため 104-7=97px
 // （計算根拠はNextLiveTicket側と同じ。詳しくはStadiumHome.module.cssの.scallopDivider参照）。
-const SCALLOP_STYLE = { "--scallop-right": "95px" } as CSSProperties;
+const SCALLOP_STYLE = { "--scallop-right": "97px" } as CSSProperties;
 // 「前回」は半券が無い（=.tornTicketMainという単独カードの右端そのものが境界線）ため、
-// .scallopDividerの既定値（-9px、カード自身の外周用）をそのまま使えばよく、上書き不要。
+// .scallopDividerの既定値（-7px、カード自身の外周用）をそのまま使えばよく、上書き不要。
 
 const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
@@ -97,6 +97,8 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
         className={`${styles.tornTicketMain} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}
       >
         <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} aria-hidden />
 
         <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
           <HistoryClockGlyph />
@@ -143,6 +145,8 @@ export function CurrentLiveCard({
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
         <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
           <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
@@ -174,6 +178,8 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
         <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
           <DateLine date={live} timeTone="ink" />

@@ -222,23 +222,50 @@
  * .scallopDark/.scallopKraft/.scallopConcreteで「そのチケットが乗っている
  * ページ本体の背景」と同じ質感を指定する。
  */
+/*
+ * 2026-08-28: 「もっと少し小さい楕円形で縦長の円、つなぎめの上下の端は前と同じ感じの
+ * 半円で切れてる感じ」の要望で、円→縦長の小さい楕円に変更し、さらに上下の端だけは
+ * 単発の丸い切り欠き（.scallopCapTop/.scallopCapBottom、以前の.notchTop/.notchBottom
+ * 相当）を別要素として復活させた。どちらも同じ--scallop-right（境界線の位置）を
+ * 基準にし、キャップ側はcalc()で自分の直径ぶんだけ調整するので、値は一箇所
+ * （コンポーネント側の--scallop-right）を合わせるだけで両方が同じ縦線上に揃う。
+ */
 .scallopDivider {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 18px;
+  width: 14px;
   z-index: 3;
   pointer-events: none;
-  /* 既定値-9pxは「区切り線ではなく、そのカード自体の外周」に使う場合
+  /* 既定値-7pxは「区切り線ではなく、そのカード自体の外周」に使う場合
      （マイページの演者名チケットの右端など）の値。半券との内部境界に使う場合は
      半券の幅に応じてコンポーネント側で上書きする（詳しくは各コンポーネントのコメント）。 */
-  right: var(--scallop-right, -9px);
-  -webkit-mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
-  mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
-  -webkit-mask-size: 18px 22px;
-  mask-size: 18px 22px;
+  right: var(--scallop-right, -7px);
+  -webkit-mask-image: radial-gradient(ellipse 5px 7px at 7px 8px, white 90%, transparent 100%);
+  mask-image: radial-gradient(ellipse 5px 7px at 7px 8px, white 90%, transparent 100%);
+  -webkit-mask-size: 14px 16px;
+  mask-size: 14px 16px;
   -webkit-mask-repeat: repeat-y;
   mask-repeat: repeat-y;
+}
+
+/* 境界線の上端・下端だけの単発の丸い切り欠き（.scallopDividerと中心の縦線を揃える）。 */
+.scallopCapTop,
+.scallopCapBottom {
+  position: absolute;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  right: calc(var(--scallop-right, -7px) - 3px);
+  pointer-events: none;
+}
+.scallopCapTop {
+  top: -10px;
+}
+.scallopCapBottom {
+  bottom: -10px;
 }
 
 /* ホーム（背景が黒＋dark-grain）に乗るチケット用。 */

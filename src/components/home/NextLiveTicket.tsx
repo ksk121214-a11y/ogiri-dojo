@@ -32,9 +32,10 @@ export interface NextLiveInfo {
 }
 
 // 本券(104px幅の半券を除いた側)と半券の境界線の位置。
-// .scallopDividerの--scallop-rightは「半券の幅-9px」で境界線のちょうど真上に円の中心が来る
-// （半券幅104pxのため 104-9=95px）。
-const SCALLOP_STYLE = { "--scallop-right": "95px" } as CSSProperties;
+// .scallopDividerの--scallop-rightは「半券の幅-7px」で境界線のちょうど真上に楕円の中心が来る
+// （半券幅104pxのため 104-7=97px）。.scallopCapTop/.scallopCapBottomはこの値を
+// 自動でcalc()調整するので、ここで指定するのはこの1つの値だけでよい。
+const SCALLOP_STYLE = { "--scallop-right": "97px" } as CSSProperties;
 
 // 次回ライブ告知のチケット風カード。CSS Gridで「本券／半券」の2カラムに分け、
 // 画像は一切使わずCSS（丸い切り欠き・破線・バーコード）だけで表現する。
@@ -49,6 +50,8 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
         <div className={`${styles.scallopDivider} ${styles.scallopDark}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopDark}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopDark}`} style={SCALLOP_STYLE} aria-hidden />
 
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
         <div className="flex flex-col gap-0 px-5 pt-3 pb-2">

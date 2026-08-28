@@ -17,8 +17,8 @@ import styles from "./StadiumHome.module.css";
 // マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋連続した
 // 丸い切り欠き」のチケット言語を流用し、半券側にOGIRI LIVEのスタンプ風グラフィックを置く
 // （半券の幅は92pxのため、境界線の位置も.scallopDivider共通の--scallop-rightで
-// 83px＝92-9に合わせている。計算根拠はNextLiveTicket側の104px幅・95pxと同じ考え方）。
-const SCALLOP_STYLE = { "--scallop-right": "83px" } as CSSProperties;
+// 85px＝92-7に合わせている。計算根拠はNextLiveTicket側の104px幅・97pxと同じ考え方）。
+const SCALLOP_STYLE = { "--scallop-right": "85px" } as CSSProperties;
 
 export default function MyProfileTicket({
   onOpenStats,
@@ -36,7 +36,11 @@ export default function MyProfileTicket({
   return (
     <div className={`${styles.profileCard} ${styles.grainPaper}`}>
       <div className={`${styles.scallopDivider} ${styles.scallopKraft}`} style={SCALLOP_STYLE} aria-hidden />
+      <div className={`${styles.scallopCapTop} ${styles.scallopKraft}`} style={SCALLOP_STYLE} aria-hidden />
+      <div className={`${styles.scallopCapBottom} ${styles.scallopKraft}`} style={SCALLOP_STYLE} aria-hidden />
       <div className={`${styles.scallopDivider} ${styles.scallopKraft}`} aria-hidden />
+      <div className={`${styles.scallopCapTop} ${styles.scallopKraft}`} aria-hidden />
+      <div className={`${styles.scallopCapBottom} ${styles.scallopKraft}`} aria-hidden />
 
       <div className="flex flex-col gap-3 px-5 py-5">
         <div className="flex items-start gap-3.5">
