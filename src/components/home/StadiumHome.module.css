@@ -307,7 +307,9 @@
 
 .stubDivider {
   position: relative;
-  border-left: 2px dashed rgba(23, 21, 19, 0.3);
+  /* 2026-08-28: 「点線が見づらいので濃くして」の要望で0.3→0.65に濃くした
+     （白い本券と赤い半券の境目で薄すぎて見えにくかったため）。 */
+  border-left: 2px dashed rgba(23, 21, 19, 0.65);
 }
 
 /*
