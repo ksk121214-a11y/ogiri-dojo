@@ -355,17 +355,26 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     const remainingMs = Math.max(0, state.answeringRemainingMs - dt);
 
     if (remainingMs <= 0) {
-      // 持ち時間が0になったら強制終了。それ以降はボットの新規回答をキューへ積まず、
-      // 溜まっている未表示ぶんも打ち切る（そうしないと、タイマー表示が0になった後も
-      // キューに残っていた分が一件ずつ表示され続けてしまう）。tickAnsweringは
-      // judging・revealPending・revealGateUntilがすべて空いている時にしか呼ばれないため
-      // （tick関数側のガード）、ここで打ち切っても演出の途中を割り込むことはない。
-      set({
-        answeringRemainingMs: 0,
-        botAnswerSchedule: [],
-        submissionQueue: [],
-      });
-      set({ phase: "group_result", phaseEndsAt: now + DEMO_TIMING.groupResultMs });
+      // 2026-08-29:「時間が0秒になっても終わらない」「ギリギリの送信も無視しそう」の
+      // 指摘を受けて仕様を変更した。持ち時間が0になったら、以後はボットの新規回答を
+      // キューへ積まないようにする（botAnswerScheduleを空にする）が、既にキューにある
+      // （＝時間内に投稿された）回答は破棄しない。ギリギリで滑り込んできた送信も、
+      // 通常どおり一呼吸→表示→採点→得点表示まで進めてから次のフェーズへ進む。
+      // tickAnsweringはjudging・revealPending・revealGateUntilがすべて空いている時にしか
+      // 呼ばれないため（tick関数側のガード）、ここでキューを処理しても演出の途中を
+      // 割り込むことはない。キューが尽きるまでは毎tickここを通り、尽きた時点で
+      // 初めてgroup_resultへ進む（＝いつか必ず終わる。ボットの新規追加を止めているため
+      // キューが無限に増え続けることはない）。
+      set({ answeringRemainingMs: 0, botAnswerSchedule: [] });
+      processQueue(now);
+      const after = get();
+      if (
+        after.judging === null &&
+        after.revealPending === null &&
+        after.submissionQueue.length === 0
+      ) {
+        set({ phase: "group_result", phaseEndsAt: now + DEMO_TIMING.groupResultMs });
+      }
       return;
     }
 

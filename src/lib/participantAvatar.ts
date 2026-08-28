@@ -17,9 +17,17 @@ function hashString(input: string): number {
   return Math.abs(h);
 }
 
-export function getParticipantAvatarIconSrc(participantId: string): string {
+function pickParticipantIconPreset(participantId: string) {
   const idx = hashString(`icon:${participantId}`) % AVATAR_ICON_PRESETS.length;
-  return AVATAR_ICON_PRESETS[idx].src;
+  return AVATAR_ICON_PRESETS[idx];
+}
+
+export function getParticipantAvatarIconSrc(participantId: string): string {
+  return pickParticipantIconPreset(participantId).src;
+}
+
+export function getParticipantAvatarSilhouetteSrc(participantId: string): string {
+  return pickParticipantIconPreset(participantId).silhouetteSrc;
 }
 
 export function getParticipantAvatarColor(participantId: string): string {

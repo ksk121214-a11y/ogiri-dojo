@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 
-import { BASE_PATH } from "@/lib/basePath";
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
-import { AVATAR_ICON_PRESETS, getAvatarIconSrc } from "@/lib/avatarIcons";
+import { AVATAR_ICON_PRESETS, getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
+import AvatarGlyph from "@/components/app/AvatarGlyph";
 import styles from "@/components/home/StadiumHome.module.css";
 
 const NAME_MAX_LENGTH = DISPLAY_NAME_MAX_LENGTH;
@@ -92,7 +92,7 @@ export default function MyProfileEditModal({
 
         <div className="flex flex-col items-center gap-3">
           <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--ink)]/20 bg-white">
-            <IconGlyph src={getAvatarIconSrc(icon)} color={color} size={64} />
+            <AvatarGlyph iconSrc={getAvatarIconSrc(icon)} silhouetteSrc={getAvatarSilhouetteSrc(icon)} color={color} size={64} />
           </span>
 
           <div>
@@ -111,7 +111,7 @@ export default function MyProfileEditModal({
                       : "border-[var(--ink)]/15 hover:border-[var(--ink)]/40"
                   }`}
                 >
-                  <IconGlyph src={preset.src} color={color} size={36} />
+                  <AvatarGlyph iconSrc={preset.src} silhouetteSrc={preset.silhouetteSrc} color={color} size={36} />
                 </button>
               ))}
             </div>
@@ -192,29 +192,5 @@ export default function MyProfileEditModal({
         </div>
       </form>
     </div>
-  );
-}
-
-// アイコンプレビュー用の線画グリフ（MyIconAvatarと同じCSS mask手法だが、
-// useUserStoreの確定値ではなくこのモーダル内の選択中の色・絵柄をその場で反映するためのローカル版）。
-function IconGlyph({ src, color, size }: { src: string; color: string; size: number }) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        display: "block",
-        width: size,
-        height: size,
-        backgroundColor: color,
-        WebkitMaskImage: `url(${BASE_PATH}${src})`,
-        maskImage: `url(${BASE_PATH}${src})`,
-        WebkitMaskSize: "contain",
-        maskSize: "contain",
-        WebkitMaskRepeat: "no-repeat",
-        maskRepeat: "no-repeat",
-        WebkitMaskPosition: "center",
-        maskPosition: "center",
-      }}
-    />
   );
 }

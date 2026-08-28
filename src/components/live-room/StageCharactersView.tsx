@@ -3,37 +3,18 @@
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 
-import { getAvatarIconSrc } from "@/lib/avatarIcons";
+import AvatarGlyph from "@/components/app/AvatarGlyph";
+import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { BASE_PATH } from "@/lib/basePath";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
-import { getParticipantAvatarColor, getParticipantAvatarIconSrc } from "@/lib/participantAvatar";
+import {
+  getParticipantAvatarColor,
+  getParticipantAvatarIconSrc,
+  getParticipantAvatarSilhouetteSrc,
+} from "@/lib/participantAvatar";
 import { useUserStore } from "@/store/useUserStore";
 
 const EMPTY_SCORE_REVEALS: Record<string, number> = {};
-
-// 自分・他の参加者（ボット含む）のアイコン線画を、mask-imageで指定色に塗って表示する。
-// 2026-08-29:「アイコンをまるで囲わないでそのままアイコンの感じで」の要望で、
-// 以前あった「線画の下に敷く白い円」は撤去した（新しいアイコン素材は円の縁取りごと
-// 絵柄に含まれているため、下敷きが無くても素の見た目のまま表示される）。
-function AvatarGlyph({ iconSrc, color }: { iconSrc: string; color: string }) {
-  return (
-    <span
-      aria-hidden
-      className="absolute inset-0"
-      style={{
-        backgroundColor: color,
-        WebkitMaskImage: `url(${BASE_PATH}${iconSrc})`,
-        maskImage: `url(${BASE_PATH}${iconSrc})`,
-        WebkitMaskSize: "contain",
-        maskSize: "contain",
-        WebkitMaskRepeat: "no-repeat",
-        maskRepeat: "no-repeat",
-        WebkitMaskPosition: "center",
-        maskPosition: "center",
-      }}
-    />
-  );
-}
 
 // 中央の「舞台」ビジュアルエリア：組の回答者を横並びに配置し、
 // 審査サイクルに乗っている1人だけスポットライトを浴びて前に出る。
@@ -73,6 +54,7 @@ export default function StageCharactersView({
   const myAvatarColor = useUserStore((s) => s.user.avatarColor);
   const myAvatarIcon = useUserStore((s) => s.user.avatarIcon);
   const myIconSrc = getAvatarIconSrc(myAvatarIcon);
+  const mySilhouetteSrc = getAvatarSilhouetteSrc(myAvatarIcon);
 
   return (
     <div
@@ -89,6 +71,7 @@ export default function StageCharactersView({
         const scoreRevealValue = scoreReveals[member.id];
         const showScore = scoreRevealValue !== undefined;
         const iconSrc = isMe ? myIconSrc : getParticipantAvatarIconSrc(member.id);
+        const silhouetteSrc = isMe ? mySilhouetteSrc : getParticipantAvatarSilhouetteSrc(member.id);
         const iconColor = isMe ? myAvatarColor : getParticipantAvatarColor(member.id);
         return (
           <motion.div
@@ -100,7 +83,7 @@ export default function StageCharactersView({
           >
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">
-                <AvatarGlyph iconSrc={iconSrc} color={iconColor} />
+                <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fill />
               </div>
             ) : (
               <>
@@ -176,7 +159,7 @@ export default function StageCharactersView({
                         : undefined
                     }
                   >
-                    <AvatarGlyph iconSrc={iconSrc} color={iconColor} />
+                    <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fill />
                   </div>
                 </div>
               </>

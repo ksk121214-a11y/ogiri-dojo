@@ -34,12 +34,13 @@ export const BGM_PATHS = {
 export type BgmName = keyof typeof BGM_PATHS;
 
 // 2026-08-29: 「bgmが全体的にデカすぎる、特にライブ中は結構下げて」の要望で全体を
-// 引き下げた（waiting/entrance/home: 0.13→0.08、live: 0.06→0.025とさらに大きく下げる）。
+// 引き下げた（waiting/entrance/home: 0.13→0.08→0.05、live: 0.06→0.025→0.012と
+// 特に大きく下げる）。
 const BGM_VOLUME: Record<BgmName, number> = {
-  waiting: 0.08,
-  entrance: 0.08,
-  live: 0.025,
-  home: 0.08,
+  waiting: 0.05,
+  entrance: 0.05,
+  live: 0.012,
+  home: 0.05,
 };
 const FADE_MS = 700;
 
@@ -209,29 +210,48 @@ export function resumeAudioContext(): void {
   unlockAllBgm();
 }
 
-// 2026-08-29: 「ライブで場面転換するたびに毎回『BGMを再開』を押さないといけない」対策。
-// iOS Safari等は「各<audio>要素は個別にユーザー操作の文脈で一度再生されないと
-// 自動再生がブロックされ続ける」傾向があるため、BGM確認モーダルのON・音声設定の
-// BGM/SEオン、いずれかのユーザー操作の中で、今後使う可能性のある全てのBGM
-// （waiting/entrance/live/home）を無音のままこっそり一度再生→即一時停止しておく。
-// これにより、後でフェーズ切り替え等ユーザー操作を伴わないタイミングでplay()を
-// 呼んでも、そのブラウザ・オリジンでは既に許可された実績があるとみなされ
-// ブロックされにくくなる。失敗しても致命的ではなく、通常のneedsAudioResume経由の
-// 再試行フローに任せる。
+// 2026-08-29: 「場面転換のたびにBGMを再開が必要になる」対策の核心部分。
+// 4曲ぶんのHTMLAudioElementをここで使い回す（bgmElements）ようにし、
+// 「ユーザー操作の中で一度再生に成功した、まさにそのインスタンス」を
+// 曲の切り替え時にもそのまま使い続ける。iOS Safari等は「新しく作った
+// <audio>要素は個別に一度ユーザー操作の文脈で再生されないと自動再生が
+// ブロックされ続ける」傾向があるため、切り替えのたびにnew Audio()していた
+// 以前の実装では、事前アンロックが効かず毎回ブロックされていた。
+const bgmElements = new Map<BgmName, HTMLAudioElement>();
+
+function getOrCreateBgmElement(name: BgmName): HTMLAudioElement {
+  let audio = bgmElements.get(name);
+  if (!audio) {
+    audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
+    audio.loop = true;
+    audio.volume = 0;
+    audio.preload = "auto";
+    bgmElements.set(name, audio);
+  }
+  return audio;
+}
+
+// BGM確認モーダルのON・音声設定のBGM/SEオン、いずれかのユーザー操作の中で、
+// 今後使う可能性のある全てのBGM（waiting/entrance/live/home）を無音のまま
+// こっそり一度再生→即一時停止しておく。これにより、後でフェーズ切り替え等
+// ユーザー操作を伴わないタイミングでactivateBgmが同じインスタンスのplay()を
+// 呼んでも、既に許可された実績があるとみなされブロックされにくくなる。
+// 失敗しても致命的ではなく、通常のneedsAudioResume経由の再試行フローに任せる。
 const unlockedBgmNames = new Set<BgmName>();
 
 function unlockBgmElement(name: BgmName): void {
   if (typeof window === "undefined" || unlockedBgmNames.has(name)) return;
   unlockedBgmNames.add(name);
-  const audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
-  audio.volume = 0;
-  audio.muted = true;
+  const audio = getOrCreateBgmElement(name);
+  if (currentBgm?.name === name && !currentBgm.audio.paused) return; // 既に本再生中なら触らない
   const result = audio.play();
   if (result && typeof result.then === "function") {
     result
       .then(() => {
-        audio.pause();
-        audio.currentTime = 0;
+        if (currentBgm?.name !== name) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
       })
       .catch(() => {
         // アンロックできなくても致命的ではない（unlockedBgmNamesから外し、
@@ -386,37 +406,51 @@ function activateBgm(name: BgmName, startAtMs?: number) {
     return;
   }
   const prev = currentBgm;
-  const audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
-  audio.loop = true;
-  audio.volume = 0;
-  audio.preload = "auto";
+  // 2026-08-29: 曲ごとに使い回すAudio要素（unlockAllBgmで事前アンロック済みの、
+  // まさにそのインスタンス）を取得する。切り替えのたびにnew Audio()すると
+  // アンロック実績が引き継がれず「毎回BGMを再開が必要」になってしまうため。
+  const audio = getOrCreateBgmElement(name);
 
   setState({ currentBgmTrack: name, bgmLoading: true });
 
   const clearLoading = () => setState({ bgmLoading: false });
-  audio.addEventListener("canplaythrough", clearLoading, { once: true });
-  audio.addEventListener("error", clearLoading, { once: true });
+  if (audio.readyState >= 3) {
+    // 事前アンロック等で既にロード済みなら、イベントを待たず即座に解除する。
+    clearLoading();
+  } else {
+    audio.addEventListener("canplaythrough", clearLoading, { once: true });
+    audio.addEventListener("error", clearLoading, { once: true });
+  }
 
   // ライブ中のリロード後、経過時間に対応する位置から再開するための指定。
   // durationが判明してから設定しないとブラウザによってはseekが無視されるため
   // loadedmetadataを待つ（ループ再生のため経過時間を曲の長さで割った余りを使う）。
+  const seekTo = (ms: number) => {
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      audio.currentTime = (ms / 1000) % audio.duration;
+    }
+  };
   if (startAtMs != null && startAtMs > 0) {
-    audio.addEventListener(
-      "loadedmetadata",
-      () => {
-        if (Number.isFinite(audio.duration) && audio.duration > 0) {
-          audio.currentTime = (startAtMs / 1000) % audio.duration;
-        }
-      },
-      { once: true },
-    );
+    if (audio.readyState >= 1) {
+      seekTo(startAtMs);
+    } else {
+      audio.addEventListener("loadedmetadata", () => seekTo(startAtMs), { once: true });
+    }
+  } else {
+    // 使い回すインスタンスは前回停止した位置が残っているため、指定が無ければ
+    // 必ず頭から鳴らす（同じ曲に戻ってきた時に中途半端な位置から始まらないように）。
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // まだメタデータが読めていない場合は無視してよい（0を指すのが既定のため）。
+    }
   }
 
   currentBgm = { name, audio };
   attemptPlay(audio);
   fadeAudio(audio, 0, BGM_VOLUME[name], FADE_MS);
 
-  if (prev) {
+  if (prev && prev.audio !== audio) {
     fadeAudio(prev.audio, prev.audio.volume, 0, FADE_MS, () => {
       prev.audio.pause();
     });
