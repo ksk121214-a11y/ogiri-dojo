@@ -32,10 +32,10 @@ export interface NextLiveInfo {
 }
 
 // 本券(104px幅の半券を除いた側)と半券の境界線の位置。
-// .scallopDividerの--scallop-rightは「半券の幅-6px」で境界線のちょうど真上に楕円の中心が来る
-// （半券幅104pxのため 104-6=98px）。.scallopCapTop/.scallopCapBottomはこの値を
+// .scallopDividerの--scallop-rightは「半券の幅-5px」で境界線のちょうど真上に楕円の中心が来る
+// （半券幅104pxのため 104-5=99px）。.scallopCapTop/.scallopCapBottomはこの値を
 // 自動でcalc()調整するので、ここで指定するのはこの1つの値だけでよい。
-const SCALLOP_STYLE = { "--scallop-right": "98px" } as CSSProperties;
+const SCALLOP_STYLE = { "--scallop-right": "99px" } as CSSProperties;
 
 // 次回ライブ告知のチケット風カード。CSS Gridで「本券／半券」の2カラムに分け、
 // 画像は一切使わずCSS（丸い切り欠き・破線・バーコード）だけで表現する。

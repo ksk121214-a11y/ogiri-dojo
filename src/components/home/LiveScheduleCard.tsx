@@ -19,11 +19,11 @@ import styles from "./StadiumHome.module.css";
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
 
-// 本券と半券の境界線の位置。半券幅104pxのため 104-6=98px
+// 本券と半券の境界線の位置。半券幅104pxのため 104-5=99px
 // （計算根拠はNextLiveTicket側と同じ。詳しくはStadiumHome.module.cssの.scallopDivider参照）。
-const SCALLOP_STYLE = { "--scallop-right": "98px" } as CSSProperties;
+const SCALLOP_STYLE = { "--scallop-right": "99px" } as CSSProperties;
 // 「前回」は半券が無い（=.tornTicketMainという単独カードの右端そのものが境界線）ため、
-// .scallopDividerの既定値（-6px、カード自身の外周用）をそのまま使えばよく、上書き不要。
+// .scallopDividerの既定値（-5px、カード自身の外周用）をそのまま使えばよく、上書き不要。
 
 const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
