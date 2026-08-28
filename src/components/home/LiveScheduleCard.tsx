@@ -19,11 +19,11 @@ import styles from "./StadiumHome.module.css";
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
 
-// 本券と半券の境界線の位置。半券幅104pxのため 104-7=97px
+// 本券と半券の境界線の位置。半券幅104pxのため 104-6=98px
 // （計算根拠はNextLiveTicket側と同じ。詳しくはStadiumHome.module.cssの.scallopDivider参照）。
-const SCALLOP_STYLE = { "--scallop-right": "97px" } as CSSProperties;
+const SCALLOP_STYLE = { "--scallop-right": "98px" } as CSSProperties;
 // 「前回」は半券が無い（=.tornTicketMainという単独カードの右端そのものが境界線）ため、
-// .scallopDividerの既定値（-7px、カード自身の外周用）をそのまま使えばよく、上書き不要。
+// .scallopDividerの既定値（-6px、カード自身の外周用）をそのまま使えばよく、上書き不要。
 
 const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
@@ -172,7 +172,7 @@ export function CurrentLiveCard({
 export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
   return (
     <div className="relative">
-      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--ink)] px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none">
+      <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--stub-gray)] px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none">
         次回のライブ
       </span>
 
@@ -194,7 +194,7 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
           </div>
         </div>
 
-        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDark} />
+        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDarkGray} />
       </div>
     </div>
   );

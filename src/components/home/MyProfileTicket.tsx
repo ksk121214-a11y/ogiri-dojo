@@ -17,8 +17,8 @@ import styles from "./StadiumHome.module.css";
 // マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋連続した
 // 丸い切り欠き」のチケット言語を流用し、半券側にOGIRI LIVEのスタンプ風グラフィックを置く
 // （半券の幅は92pxのため、境界線の位置も.scallopDivider共通の--scallop-rightで
-// 85px＝92-7に合わせている。計算根拠はNextLiveTicket側の104px幅・97pxと同じ考え方）。
-const SCALLOP_STYLE = { "--scallop-right": "85px" } as CSSProperties;
+// 86px＝92-6に合わせている。計算根拠はNextLiveTicket側の104px幅・98pxと同じ考え方）。
+const SCALLOP_STYLE = { "--scallop-right": "86px" } as CSSProperties;
 
 export default function MyProfileTicket({
   onOpenStats,

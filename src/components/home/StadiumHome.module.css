@@ -32,6 +32,14 @@
   --bg-kraft: #b58f5c;
   /* 遊び方ページ専用：明るいコンクリートの背景（第4の面色）。 */
   --bg-concrete: #d4cec4;
+  /* ライブ予定ページの「次回のライブ」チケット専用：黒だと強すぎるため、
+     「濃いグレー」の要望で変更。タグ（フラットな塗り）にはそのまま見た目通りの
+     --stub-grayを使い、半券（.grainDarkGrayでdark-grainをoverlay合成する側）は
+     --accent-textured-baseと同じ理由でoverlayの暗くなる分を逆算した
+     --stub-gray-textured-baseを使う（この2つの値の関係は--accent／
+     --accent-textured-baseの関係と同じ）。 */
+  --stub-gray: #555555;
+  --stub-gray-textured-base: #9f9f9f;
 
   position: relative;
   isolation: isolate;
@@ -55,6 +63,16 @@
  */
 .grainDark {
   background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
+}
+
+/* ライブ予定ページの「次回のライブ」チケットの半券用。.grainDarkの黒だと強すぎるとの
+   指摘を受け、下地の色だけを--stub-gray（濃いグレー）に変えた同系のテクスチャ。 */
+.grainDarkGray {
+  background-color: var(--stub-gray-textured-base);
   background-image: url("/images/textures/dark-grain-512.webp");
   background-blend-mode: overlay;
   background-repeat: repeat;
@@ -229,22 +247,23 @@
  * 相当）を別要素として復活させた。どちらも同じ--scallop-right（境界線の位置）を
  * 基準にし、キャップ側はcalc()で自分の直径ぶんだけ調整するので、値は一箇所
  * （コンポーネント側の--scallop-right）を合わせるだけで両方が同じ縦線上に揃う。
+ * 2026-08-28（さらに追記）：「もっと小さく」の要望でさらに一回り縮小。
  */
 .scallopDivider {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 14px;
+  width: 12px;
   z-index: 3;
   pointer-events: none;
-  /* 既定値-7pxは「区切り線ではなく、そのカード自体の外周」に使う場合
+  /* 既定値-6pxは「区切り線ではなく、そのカード自体の外周」に使う場合
      （マイページの演者名チケットの右端など）の値。半券との内部境界に使う場合は
      半券の幅に応じてコンポーネント側で上書きする（詳しくは各コンポーネントのコメント）。 */
-  right: var(--scallop-right, -7px);
-  -webkit-mask-image: radial-gradient(ellipse 5px 7px at 7px 8px, white 90%, transparent 100%);
-  mask-image: radial-gradient(ellipse 5px 7px at 7px 8px, white 90%, transparent 100%);
-  -webkit-mask-size: 14px 16px;
-  mask-size: 14px 16px;
+  right: var(--scallop-right, -6px);
+  -webkit-mask-image: radial-gradient(ellipse 4px 6px at 6px 7px, white 90%, transparent 100%);
+  mask-image: radial-gradient(ellipse 4px 6px at 6px 7px, white 90%, transparent 100%);
+  -webkit-mask-size: 12px 14px;
+  mask-size: 12px 14px;
   -webkit-mask-repeat: repeat-y;
   mask-repeat: repeat-y;
 }
@@ -254,24 +273,31 @@
 .scallopCapBottom {
   position: absolute;
   z-index: 3;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 9999px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
-  right: calc(var(--scallop-right, -7px) - 3px);
+  right: calc(var(--scallop-right, -6px) - 2px);
   pointer-events: none;
 }
 .scallopCapTop {
-  top: -10px;
+  top: -8px;
 }
 .scallopCapBottom {
-  bottom: -10px;
+  bottom: -8px;
 }
 
-/* ホーム（背景が黒＋dark-grain）に乗るチケット用。 */
+/*
+ * ホーム（背景が黒＋dark-grain）に乗るチケット用。
+ * 2026-08-28: 「窪みから見える色がページ本体の背景と違う」との指摘を受けて確認したところ、
+ * ページ本体の背景（.grainDark）はbackground-blend-mode: overlayでテクスチャを
+ * 合成しているのに対し、こちらは合成モード指定が漏れており素のグレースケール画像が
+ * そのまま乗っていた（見た目の色味がずれていた原因）。.grainDarkと同じoverlayに揃えた。
+ */
 .scallopDark {
   background-color: var(--bg);
   background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
   background-size: 90px 90px;
 }
 
