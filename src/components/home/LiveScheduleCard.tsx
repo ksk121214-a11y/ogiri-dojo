@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import Link from "next/link";
 
 import { ClockGlyph, HistoryClockGlyph } from "./icons";
@@ -5,14 +7,24 @@ import type { LiveScheduleDate, LiveTicketInfo } from "@/data/liveScheduleData";
 import styles from "./StadiumHome.module.css";
 
 // ライブ予定ページ（/live-schedule）専用の3種類のチケットカード。
-// 「前回」は本券のみ（左右がスタンプのふちのようなギザギザ縁の.stepTicket）、
-// 「今回」「次回」は本券＋半券（NextLiveTicketと同じ.ticket＋丸い切り欠き）に
-// バーコード＋OGIRI LIVEのスタンプ風グラフィックを添える。
+// 「前回」は「今回のチケットの半券（赤い部分）が切り取られた」見た目にしたいという
+// 要望のため、「今回」「次回」と同じ.ticketの2カラムグリッド構造をそのまま使い、
+// 半券側だけ何も貼らずページの背景（コンクリート）を透かして見せている
+// （本券側=.tornTicketMainだけが独立した丸角＋切り欠き付きのカード）。
+// 「今回」「次回」は本券＋半券（丸い切り欠き）にバーコード＋OGIRI LIVEの
+// スタンプ風グラフィックを添える。
 // 背景がホーム（黒）ではなく明るいコンクリートのため、切り欠きの質感は
 // .notchConcreteを使い、ページの背景色と馴染むようにしている。
 // ホームのNextLiveTicketとは見た目の要件が違う（インラインのアクションボタンを
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
+
+// 「前回」の切り欠きは、.tornTicketMain（=元の1frカラムぶんの幅だけの単独カード）の
+// 右端そのものに来てほしいため、.scallopRight等と同じ考え方で右端に半分だけ
+// はみ出す位置（-8px）を明示的に指定する（NextLiveTicket側の既定値96pxは、
+// 半券がまだ残っている前提で「.ticket全体の右端から104px」を意味する値のため、
+// 半券が無いこちらでは使えない）。
+const TORN_NOTCH_STYLE = { "--notch-right": "-8px" } as CSSProperties;
 
 const BARCODE_PATTERN = [
   2, 1, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 2, 1, 3, 1, 2, 4, 1, 1, 3, 2, 1, 4, 2, 1,
@@ -81,20 +93,29 @@ function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: stri
 
 export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
   return (
-    <div className={`${styles.stepTicket} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}>
-      <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
-        <HistoryClockGlyph />
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/60">
-          前回のライブ
+    <div className={styles.tornTicketRow}>
+      <div
+        className={`${styles.tornTicketMain} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}
+      >
+        <div className={`${styles.notchTop} ${styles.notchConcrete}`} style={TORN_NOTCH_STYLE} aria-hidden />
+        <div className={`${styles.notchBottom} ${styles.notchConcrete}`} style={TORN_NOTCH_STYLE} aria-hidden />
+
+        <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
+          <HistoryClockGlyph />
         </span>
-        <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
-          {date.year}年{date.month}月{date.day}日（{date.weekday}）
-        </p>
-        <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>
+        <div className="min-w-0 flex-1">
+          <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/60">
+            前回のライブ
+          </span>
+          <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
+            {date.year}年{date.month}月{date.day}日（{date.weekday}）
+          </p>
+          <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>
+        </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1.5">
+
+      {/* 半券があった場所。何も貼らず、ページの背景（コンクリート）をそのまま見せる。 */}
+      <div className="flex flex-col items-center justify-center gap-1.5 px-1">
         <span className="rounded-sm bg-[var(--ink)]/12 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
           終了
         </span>

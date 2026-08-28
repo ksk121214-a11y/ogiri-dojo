@@ -191,6 +191,24 @@
 }
 
 /*
+ * ライブ予定ページの「前回のライブ」用：半券（赤い部分）が切り取られたチケット。
+ * .ticketと同じ2カラムのグリッドは維持しつつ、本券側だけを独立した丸角＋切り欠き付きの
+ * カード（.tornTicketMain）にし、半券側にはもう何も貼らない（ページの背景がそのまま
+ * 見える＝「そこだけ切り取られた」ように見せる）。
+ */
+.tornTicketRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+.tornTicketMain {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  color: var(--ink);
+}
+
+/*
  * 本券と半券の境界の丸い切り欠き。mask-composite（subtract）で.ticket自体に
  * 本物の穴を開ける方式を試したが、環境によって効かずノッチが消えてしまう
  * リスクがあったため、確実に動くdiv＋背景色の方式に戻した。

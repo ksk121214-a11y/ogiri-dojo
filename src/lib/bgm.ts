@@ -11,6 +11,10 @@ const BGM_PATHS = {
   waiting: "/sounds/bgm/waiting.mp3", // 開演前・閉幕後の待機画面
   entrance: "/sounds/bgm/entrance.mp3", // 出囃子：お題発表の間
   live: "/sounds/bgm/live.mp3", // 回答〜結果発表までの本編中
+  // 2026-08-28追加：ライブ画面（/live・/live-demo）以外の全画面（ホーム・次回ライブ・
+  // 遊び方・マイページ・寄合帳など）で流す共通BGM。StadiumSfxControllerと対になる
+  // AmbientBgmController（src/components/app/）から再生する。
+  home: "/sounds/bgm/home.mp3",
 } as const;
 
 export type BgmName = keyof typeof BGM_PATHS;
@@ -21,6 +25,7 @@ const BGM_VOLUME: Record<BgmName, number> = {
   waiting: 0.13,
   entrance: 0.13,
   live: 0.06,
+  home: 0.13,
 };
 const FADE_MS = 700;
 

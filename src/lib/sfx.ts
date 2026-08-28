@@ -28,6 +28,12 @@ const SFX_PATHS = {
   joinAsPlayer: "/sounds/join-as-player.mp3",
   // 同じくOpeningView.tsx専用。参加者一覧に新しい名前が増えるたびに鳴らす。
   participantJoined: "/sounds/participant-joined.mp3",
+  // 2026-08-28追加：StadiumSfxController（src/components/app/）が、Stadium系画面
+  // （ホーム・次回ライブ・遊び方・マイページ・寄合帳）内のクリックに自動で振り分ける2音。
+  // pageTurn＝それ以外全部の既定音、homeClick＝下部ナビ4項目／ロゴ／「遊び方を見る」専用
+  // （data-sfx="home"を付けた要素だけがhomeClickになる）。
+  pageTurn: "/sounds/page-turn.wav",
+  homeClick: "/sounds/home-click.mp3",
 } as const;
 
 export type SfxName = keyof typeof SFX_PATHS;

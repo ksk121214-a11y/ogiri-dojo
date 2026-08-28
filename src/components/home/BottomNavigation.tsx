@@ -98,6 +98,7 @@ export default function BottomNavigation() {
       <div className="mx-auto flex w-full max-w-[480px]">
         <Link
           href="/"
+          data-sfx="home"
           aria-current={isHome ? "page" : undefined}
           className={`${itemClass} ${isHome ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
         >
@@ -106,6 +107,7 @@ export default function BottomNavigation() {
         </Link>
         <Link
           href="/live-schedule"
+          data-sfx="home"
           aria-current={isLiveSchedule ? "page" : undefined}
           className={`${itemClass} ${isLiveSchedule ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
         >
@@ -114,6 +116,7 @@ export default function BottomNavigation() {
         </Link>
         <Link
           href="/how-to-play"
+          data-sfx="home"
           aria-current={isHowToPlay ? "page" : undefined}
           className={`${itemClass} ${isHowToPlay ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
         >
@@ -122,6 +125,7 @@ export default function BottomNavigation() {
         </Link>
         <Link
           href="/mypage"
+          data-sfx="home"
           aria-current={isMyPage ? "page" : undefined}
           className={`${itemClass} ${isMyPage ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
         >

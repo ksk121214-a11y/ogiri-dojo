@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
+
+import AmbientBgmController from "@/components/app/AmbientBgmController";
+import StadiumSfxController from "@/components/app/StadiumSfxController";
+
 import "./globals.css";
 
 const notoSansJP = Noto_Sans_JP({
@@ -41,7 +45,11 @@ export default function RootLayout({
       lang="ja"
       className={`${notoSansJP.variable} ${yujiSyuku.variable} ${orbitron.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body className="min-h-full flex flex-col font-sans">
+        <AmbientBgmController />
+        <StadiumSfxController />
+        {children}
+      </body>
     </html>
   );
 }

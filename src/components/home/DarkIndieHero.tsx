@@ -52,6 +52,7 @@ export default function DarkIndieHero() {
           </p>
           <Link
             href="/how-to-play"
+            data-sfx="home"
             className={`${styles.pressable} mt-1 flex items-center gap-1.5 rounded-md border border-[var(--text-on-dark)]/70 px-4 py-2 text-base font-bold text-[var(--text-on-dark)] transition hover:bg-[var(--text-on-dark)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
           >
             <PlayGlyph />

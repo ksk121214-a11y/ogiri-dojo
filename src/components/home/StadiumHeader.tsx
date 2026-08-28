@@ -28,6 +28,7 @@ export default function StadiumHeader() {
       <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-3 px-4 py-2">
         <Link
           href="/"
+          data-sfx="home"
           className={`${styles.titleTexture} shrink-0 font-sans text-xl font-black tracking-tight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
         >
           爆笑スタジアム
