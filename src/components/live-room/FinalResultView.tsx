@@ -4,8 +4,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
@@ -61,7 +61,11 @@ export default function FinalResultView({
                 本日のベストアンサー
               </p>
               <div className="mt-2 flex items-center gap-2">
-                <InitialAvatar name={data.bestAnswer.name} seed={0} size={22} />
+                {data.bestAnswer.participantId === myParticipantId ? (
+                  <MyIconAvatar size={22} bare />
+                ) : (
+                  <ParticipantIconAvatar participantId={data.bestAnswer.participantId} size={22} bare />
+                )}
                 <p className="font-sans text-xs text-[#6b6b90]">{data.bestAnswer.name}</p>
               </div>
               <p className="mt-1 font-sans text-lg font-bold leading-relaxed">
@@ -87,9 +91,9 @@ export default function FinalResultView({
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 {top3[3 - step].participantId === myParticipantId ? (
-                  <MyIconAvatar size={28} />
+                  <MyIconAvatar size={28} bare />
                 ) : (
-                  <InitialAvatar name={top3[3 - step].name} seed={3 - step} size={28} />
+                  <ParticipantIconAvatar participantId={top3[3 - step].participantId} size={28} bare />
                 )}
                 <p className="font-sans text-lg font-bold">
                   {truncateLiveDisplayName(top3[3 - step].name)}
@@ -123,9 +127,9 @@ export default function FinalResultView({
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="shrink-0 text-[#8a8ab0]">{idx + 1}位</span>
                         {isMe ? (
-                          <MyIconAvatar size={24} />
+                          <MyIconAvatar size={24} bare />
                         ) : (
-                          <InitialAvatar name={r.name} seed={idx} size={24} />
+                          <ParticipantIconAvatar participantId={r.participantId} size={24} bare />
                         )}
                         <span className="truncate">{truncateLiveDisplayName(r.name)}</span>
                       </span>

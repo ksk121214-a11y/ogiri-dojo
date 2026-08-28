@@ -3,8 +3,8 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef } from "react";
 
-import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
@@ -54,9 +54,9 @@ export default function GroupResultView({
               <span className="flex min-w-0 items-center gap-2.5 font-sans text-sm text-[#1a1a3a]">
                 <span className="text-[#8a8ab0]">{idx + 1}位</span>
                 {isMe ? (
-                  <MyIconAvatar size={28} />
+                  <MyIconAvatar size={28} bare />
                 ) : (
-                  <InitialAvatar name={entry.name} seed={idx} size={28} />
+                  <ParticipantIconAvatar participantId={entry.participantId} size={28} bare />
                 )}
                 <span className="truncate">{truncateLiveDisplayName(entry.name)}</span>
               </span>

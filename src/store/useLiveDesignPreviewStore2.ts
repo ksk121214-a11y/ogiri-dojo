@@ -618,6 +618,7 @@ function showFinalResult() {
   const finalResult: FinalResultData = {
     bestAnswer: best
       ? {
+          participantId: best.participant_id,
           name: participantNames[best.participant_id] ?? "（名前未設定）",
           body: best.body,
           scoreTotal: best.score_total,

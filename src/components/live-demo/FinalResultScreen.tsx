@@ -3,8 +3,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 
-import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
@@ -118,15 +118,9 @@ export default function FinalResultScreen() {
               </p>
               <div className="mt-3 flex items-center gap-2">
                 {bestAnswer.participantId === MY_PARTICIPANT_ID ? (
-                  <MyIconAvatar size={24} />
+                  <MyIconAvatar size={24} bare />
                 ) : (
-                  <InitialAvatar
-                    name={getParticipantName(state, bestAnswer.participantId)}
-                    seed={state.participants.findIndex(
-                      (p) => p.id === bestAnswer.participantId,
-                    )}
-                    size={24}
-                  />
+                  <ParticipantIconAvatar participantId={bestAnswer.participantId} size={24} bare />
                 )}
                 <p className="font-sans text-xs text-[#ffcf4a]">
                   {getParticipantName(state, bestAnswer.participantId)}
@@ -162,14 +156,12 @@ export default function FinalResultScreen() {
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 {top3[3 - step].participant.id === MY_PARTICIPANT_ID ? (
-                  <MyIconAvatar size={32} />
+                  <MyIconAvatar size={32} bare />
                 ) : (
-                  <InitialAvatar
-                    name={top3[3 - step].participant.displayName}
-                    seed={state.participants.findIndex(
-                      (p) => p.id === top3[3 - step].participant.id,
-                    )}
+                  <ParticipantIconAvatar
+                    participantId={top3[3 - step].participant.id}
                     size={32}
+                    bare
                   />
                 )}
                 <p className="font-sans text-lg font-bold text-white">
@@ -205,9 +197,6 @@ export default function FinalResultScreen() {
               <div className="mt-4 max-h-64 w-full space-y-1.5 overflow-y-auto">
                 {ranking.map((r, idx) => {
                   const isMe = r.participant.id === MY_PARTICIPANT_ID;
-                  const participantIndex = state.participants.findIndex(
-                    (p) => p.id === r.participant.id,
-                  );
                   return (
                     <div
                       key={r.participant.id}
@@ -218,13 +207,9 @@ export default function FinalResultScreen() {
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="shrink-0">{idx + 1}位</span>
                         {isMe ? (
-                          <MyIconAvatar size={24} />
+                          <MyIconAvatar size={24} bare />
                         ) : (
-                          <InitialAvatar
-                            name={r.participant.displayName}
-                            seed={participantIndex}
-                            size={24}
-                          />
+                          <ParticipantIconAvatar participantId={r.participant.id} size={24} bare />
                         )}
                         <span className="truncate">
                           {r.participant.displayName}

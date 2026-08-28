@@ -3,8 +3,8 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef } from "react";
 
-import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
+import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
 import {
@@ -50,9 +50,6 @@ export default function GroupResultScreen() {
         <div className="mt-4 space-y-2">
           {ranking.map((entry, idx) => {
             const isMe = entry.participant.id === MY_PARTICIPANT_ID;
-            const participantIndex = state.participants.findIndex(
-              (p) => p.id === entry.participant.id,
-            );
             return (
               <motion.div
                 key={entry.participant.id}
@@ -66,13 +63,9 @@ export default function GroupResultScreen() {
                 <span className="flex min-w-0 items-center gap-2.5 font-sans text-sm text-[#1a1a3a]">
                   <span className="text-[#8a8ab0]">{idx + 1}位</span>
                   {isMe ? (
-                    <MyIconAvatar size={28} />
+                    <MyIconAvatar size={28} bare />
                   ) : (
-                    <InitialAvatar
-                      name={entry.participant.displayName}
-                      seed={participantIndex}
-                      size={28}
-                    />
+                    <ParticipantIconAvatar participantId={entry.participant.id} size={28} bare />
                   )}
                   <span className="truncate">
                     {entry.participant.displayName}

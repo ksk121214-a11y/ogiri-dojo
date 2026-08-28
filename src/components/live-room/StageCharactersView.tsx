@@ -3,11 +3,37 @@
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 
+import { getAvatarIconSrc } from "@/lib/avatarIcons";
 import { BASE_PATH } from "@/lib/basePath";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
+import { getParticipantAvatarColor, getParticipantAvatarIconSrc } from "@/lib/participantAvatar";
 import { useUserStore } from "@/store/useUserStore";
 
 const EMPTY_SCORE_REVEALS: Record<string, number> = {};
+
+// 自分・他の参加者（ボット含む）のアイコン線画を、mask-imageで指定色に塗って表示する。
+// 2026-08-29:「アイコンをまるで囲わないでそのままアイコンの感じで」の要望で、
+// 以前あった「線画の下に敷く白い円」は撤去した（新しいアイコン素材は円の縁取りごと
+// 絵柄に含まれているため、下敷きが無くても素の見た目のまま表示される）。
+function AvatarGlyph({ iconSrc, color }: { iconSrc: string; color: string }) {
+  return (
+    <span
+      aria-hidden
+      className="absolute inset-0"
+      style={{
+        backgroundColor: color,
+        WebkitMaskImage: `url(${BASE_PATH}${iconSrc})`,
+        maskImage: `url(${BASE_PATH}${iconSrc})`,
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+      }}
+    />
+  );
+}
 
 // 中央の「舞台」ビジュアルエリア：組の回答者を横並びに配置し、
 // 審査サイクルに乗っている1人だけスポットライトを浴びて前に出る。
@@ -25,7 +51,10 @@ export default function StageCharactersView({
   compact = false,
 }: {
   members: { id: string; name: string }[];
-  // 自分のアイコンだけ、マイページで選んだ色（useUserStore.avatarColor）で塗った線画にする。
+  // 自分のアイコンだけ、マイページで選んだ絵柄・色（useUserStore）を反映する。
+  // それ以外の参加者（ボット含む）はparticipant_idから決定的に選んだ絵柄・色にする
+  // （マイページの設定はこのブラウザにしか保存されず他人からは見えないため、
+  // 参照: src/lib/participantAvatar.ts）。
   myParticipantId?: string | null;
   activeParticipantId: string | null;
   // 送信直後・まだ回答フリップが出ていない「一呼吸」中の対象者。この間は回答フリップが
@@ -41,7 +70,10 @@ export default function StageCharactersView({
   scoreReveals?: Record<string, number>;
   compact?: boolean;
 }) {
-  const avatarColor = useUserStore((s) => s.user.avatarColor);
+  const myAvatarColor = useUserStore((s) => s.user.avatarColor);
+  const myAvatarIcon = useUserStore((s) => s.user.avatarIcon);
+  const myIconSrc = getAvatarIconSrc(myAvatarIcon);
+
   return (
     <div
       className={`flex items-end justify-center ${
@@ -56,6 +88,8 @@ export default function StageCharactersView({
         const isMe = member.id === myParticipantId;
         const scoreRevealValue = scoreReveals[member.id];
         const showScore = scoreRevealValue !== undefined;
+        const iconSrc = isMe ? myIconSrc : getParticipantAvatarIconSrc(member.id);
+        const iconColor = isMe ? myAvatarColor : getParticipantAvatarColor(member.id);
         return (
           <motion.div
             key={member.id}
@@ -66,36 +100,7 @@ export default function StageCharactersView({
           >
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">
-                {isMe ? (
-                  <>
-                    {/* 線画の外周円とほぼ同じ大きさ(直径≒画像幅の92%)の白い円を下敷きにし、
-                        円の中が背景の舞台色で透けないようにする。 */}
-                    <span aria-hidden className="absolute inset-[4%] rounded-full bg-white" />
-                    <span
-                      aria-hidden
-                      className="absolute inset-0"
-                      style={{
-                        backgroundColor: avatarColor,
-                        WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                        maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                        WebkitMaskSize: "contain",
-                        maskSize: "contain",
-                        WebkitMaskRepeat: "no-repeat",
-                        maskRepeat: "no-repeat",
-                        WebkitMaskPosition: "center",
-                        maskPosition: "center",
-                      }}
-                    />
-                  </>
-                ) : (
-                  <Image
-                    src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
-                    alt=""
-                    fill
-                    sizes="64px"
-                    className="object-contain"
-                  />
-                )}
+                <AvatarGlyph iconSrc={iconSrc} color={iconColor} />
               </div>
             ) : (
               <>
@@ -171,34 +176,7 @@ export default function StageCharactersView({
                         : undefined
                     }
                   >
-                    {isMe ? (
-                      <>
-                        <span aria-hidden className="absolute inset-[4%] rounded-full bg-white" />
-                        <span
-                          aria-hidden
-                          className="absolute inset-0"
-                          style={{
-                            backgroundColor: avatarColor,
-                            WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                            maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-                            WebkitMaskSize: "contain",
-                            maskSize: "contain",
-                            WebkitMaskRepeat: "no-repeat",
-                            maskRepeat: "no-repeat",
-                            WebkitMaskPosition: "center",
-                            maskPosition: "center",
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <Image
-                        src={`${BASE_PATH}/images/live2/avatar-2-crop.png`}
-                        alt=""
-                        fill
-                        sizes="150px"
-                        className="object-contain"
-                      />
-                    )}
+                    <AvatarGlyph iconSrc={iconSrc} color={iconColor} />
                   </div>
                 </div>
               </>

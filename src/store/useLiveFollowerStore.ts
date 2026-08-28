@@ -31,7 +31,7 @@ export interface GroupResultData {
 }
 
 export interface FinalResultData {
-  bestAnswer: { name: string; body: string; scoreTotal: number } | null;
+  bestAnswer: { participantId: string; name: string; body: string; scoreTotal: number } | null;
   ranking: RoomRankingEntry[];
   myRank: number | null;
 }
@@ -188,6 +188,7 @@ async function refreshFinalResult() {
   const bestAnswerRow = getBestAnswer(resolvedAnswers);
   const bestAnswer = bestAnswerRow
     ? {
+        participantId: bestAnswerRow.participant_id,
         name: participantNames[bestAnswerRow.participant_id] ?? "（名前未設定）",
         body: bestAnswerRow.body,
         scoreTotal: bestAnswerRow.score_total,

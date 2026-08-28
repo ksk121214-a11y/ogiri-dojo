@@ -33,11 +33,13 @@ export const BGM_PATHS = {
 
 export type BgmName = keyof typeof BGM_PATHS;
 
+// 2026-08-29: 「bgmが全体的にデカすぎる、特にライブ中は結構下げて」の要望で全体を
+// 引き下げた（waiting/entrance/home: 0.13→0.08、live: 0.06→0.025とさらに大きく下げる）。
 const BGM_VOLUME: Record<BgmName, number> = {
-  waiting: 0.13,
-  entrance: 0.13,
-  live: 0.06,
-  home: 0.13,
+  waiting: 0.08,
+  entrance: 0.08,
+  live: 0.025,
+  home: 0.08,
 };
 const FADE_MS = 700;
 
@@ -193,16 +195,54 @@ function getAudioContext(): AudioContext | null {
 // （BGM確認モーダルのONボタン・右上音声設定のBGM/SEトグル、両方のonClick冒頭）。
 export function resumeAudioContext(): void {
   const ctx = getAudioContext();
-  if (!ctx) return;
-  if (ctx.state === "suspended") {
-    ctx.resume()
-      .then(() => setState({ audioUnlocked: true }))
-      .catch((err) => {
-        console.error("[audio] AudioContext resumeに失敗", err);
-      });
-  } else if (ctx.state === "running") {
-    setState({ audioUnlocked: true });
+  if (ctx) {
+    if (ctx.state === "suspended") {
+      ctx.resume()
+        .then(() => setState({ audioUnlocked: true }))
+        .catch((err) => {
+          console.error("[audio] AudioContext resumeに失敗", err);
+        });
+    } else if (ctx.state === "running") {
+      setState({ audioUnlocked: true });
+    }
   }
+  unlockAllBgm();
+}
+
+// 2026-08-29: 「ライブで場面転換するたびに毎回『BGMを再開』を押さないといけない」対策。
+// iOS Safari等は「各<audio>要素は個別にユーザー操作の文脈で一度再生されないと
+// 自動再生がブロックされ続ける」傾向があるため、BGM確認モーダルのON・音声設定の
+// BGM/SEオン、いずれかのユーザー操作の中で、今後使う可能性のある全てのBGM
+// （waiting/entrance/live/home）を無音のままこっそり一度再生→即一時停止しておく。
+// これにより、後でフェーズ切り替え等ユーザー操作を伴わないタイミングでplay()を
+// 呼んでも、そのブラウザ・オリジンでは既に許可された実績があるとみなされ
+// ブロックされにくくなる。失敗しても致命的ではなく、通常のneedsAudioResume経由の
+// 再試行フローに任せる。
+const unlockedBgmNames = new Set<BgmName>();
+
+function unlockBgmElement(name: BgmName): void {
+  if (typeof window === "undefined" || unlockedBgmNames.has(name)) return;
+  unlockedBgmNames.add(name);
+  const audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
+  audio.volume = 0;
+  audio.muted = true;
+  const result = audio.play();
+  if (result && typeof result.then === "function") {
+    result
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+      })
+      .catch(() => {
+        // アンロックできなくても致命的ではない（unlockedBgmNamesから外し、
+        // 次回のユーザー操作でもう一度試せるようにする）。
+        unlockedBgmNames.delete(name);
+      });
+  }
+}
+
+function unlockAllBgm(): void {
+  (Object.keys(BGM_PATHS) as BgmName[]).forEach(unlockBgmElement);
 }
 
 // ============================================================
