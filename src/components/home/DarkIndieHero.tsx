@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 
 import { BASE_PATH } from "@/lib/basePath";
 
@@ -11,7 +12,9 @@ import styles from "./StadiumHome.module.css";
 // （sanpachi-c38b-halftone-transparent.png、ハーフトーン調のヴィンテージマイク）を使用し、
 // 白黒ハーフトーン風のドット柄（CSSモジュール側の.halftone）を背景に重ねている。
 // マイク側に視線が集まるよう左側にタイトル用の余白を確保。
-export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void }) {
+// 2026-08-28: 「遊び方を見る」はモーダル（TutorialModal）を開く方式から、下部ナビと同じ
+// 専用ページ（/how-to-play）へ遷移する方式に変更した。
+export default function DarkIndieHero() {
   return (
     <section className={`${styles.heroPanel} ${styles.grainDark} relative px-5 py-4`}>
       <div className={styles.halftone} aria-hidden />
@@ -47,14 +50,13 @@ export default function DarkIndieHero({ onHowToPlay }: { onHowToPlay: () => void
           <p className="text-base leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>
-          <button
-            type="button"
-            onClick={onHowToPlay}
+          <Link
+            href="/how-to-play"
             className={`${styles.pressable} mt-1 flex items-center gap-1.5 rounded-md border border-[var(--text-on-dark)]/70 px-4 py-2 text-base font-bold text-[var(--text-on-dark)] transition hover:bg-[var(--text-on-dark)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
           >
             <PlayGlyph />
             遊び方を見る
-          </button>
+          </Link>
         </div>
       </div>
     </section>

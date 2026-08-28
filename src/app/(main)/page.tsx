@@ -1,14 +1,11 @@
 "use client";
 
-import { useState } from "react";
-
 import AccountSummary from "@/components/home/AccountSummary";
 import BottomNavigation from "@/components/home/BottomNavigation";
 import DarkIndieHero from "@/components/home/DarkIndieHero";
 import JoinLiveButton from "@/components/home/JoinLiveButton";
 import NextLiveTicket, { type NextLiveInfo } from "@/components/home/NextLiveTicket";
 import StadiumAppShell from "@/components/home/StadiumAppShell";
-import TutorialModal from "@/components/app/TutorialModal";
 
 // ダミーの次回ライブ開催予定（L0 相当）
 const NEXT_LIVE: NextLiveInfo = {
@@ -24,24 +21,20 @@ const NEXT_LIVE: NextLiveInfo = {
 // ホーム画面：地下の小さなお笑いライブハウス・インディーズイベントのフライヤーをイメージした
 // トンマナにリデザイン（2026-08-27）。認証・状態管理・ライブ参加処理（/liveへの遷移）は
 // 従来のまま変更せず、見た目と構成要素だけをStadium*コンポーネント群に置き換えている。
+// 2026-08-28: 「遊び方」はモーダル（TutorialModal）を開く方式から専用ページ（/how-to-play）へ
+// 遷移する方式に変更したため、ここで持っていたtutorialOpenの状態管理は不要になった。
 export default function Home() {
-  const [tutorialOpen, setTutorialOpen] = useState(false);
-
   return (
-    <>
-      <StadiumAppShell bottomNav={<BottomNavigation onHowToPlay={() => setTutorialOpen(true)} />}>
-        <DarkIndieHero onHowToPlay={() => setTutorialOpen(true)} />
+    <StadiumAppShell bottomNav={<BottomNavigation />}>
+      <DarkIndieHero />
 
-        <div id="next-live" className="scroll-mt-4">
-          <NextLiveTicket live={NEXT_LIVE} />
-        </div>
+      <div id="next-live" className="scroll-mt-4">
+        <NextLiveTicket live={NEXT_LIVE} />
+      </div>
 
-        <JoinLiveButton />
+      <JoinLiveButton />
 
-        <AccountSummary />
-      </StadiumAppShell>
-
-      <TutorialModal open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
-    </>
+      <AccountSummary />
+    </StadiumAppShell>
   );
 }

@@ -19,6 +19,8 @@ import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 // next.config側でtrailingSlash: trueのため実際のpathnameは"/sns"ではなく"/sns/"になる。
 // これを考慮せず`startsWith("/sns/")`だけで判定すると寄合帳トップ自身（"/sns/"）まで
 // Stadium側に誤って含まれてしまうため、"/sns/"ちょうど（トップ自身）は明示的に除外する。
+// 2026-08-28（追記）：下部ナビ「遊び方」をモーダルから専用ページ（/how-to-play）に
+// 変更したため、こちらもStadium側に追加。
 export default function MainLayout({
   children,
 }: {
@@ -29,7 +31,11 @@ export default function MainLayout({
     pathname.startsWith("/sns/") &&
     pathname !== "/sns/" &&
     !pathname.startsWith("/sns/u/");
-  const isStadiumPage = pathname === "/" || pathname.startsWith("/mypage") || isSnsSubPage;
+  const isStadiumPage =
+    pathname === "/" ||
+    pathname.startsWith("/mypage") ||
+    pathname.startsWith("/how-to-play") ||
+    isSnsSubPage;
 
   if (isStadiumPage) {
     return (
