@@ -1,11 +1,14 @@
 "use client";
 
 import { BASE_PATH } from "@/lib/basePath";
+import { getAvatarIconSrc } from "@/lib/avatarIcons";
 import { useUserStore } from "@/store/useUserStore";
 
 // マイページ・寄合帳・番付表・結果発表など「あなた」のアイコンを表示する箇所で共通利用する。
 // 大喜利ライブの舞台で使っている線画アイコン（avatar-2-crop.png）と共通の画像をCSS maskとして使い、
 // user.avatarColorで塗ることで「ライブと同じアイコン・色は自分で選べる」を実現している。
+// 2026-08-28: user.avatarIcon（絵柄）でマスク画像そのものも複数種類から選べるようにした
+// （マイページの編集画面参照）。
 // 複数箇所で個別に同じ参照ロジックを持つと表示がズレる不具合が過去に起きたため、ここに一本化する。
 // bare=trueの場合は円形の背景・枠を出さず、線画そのものを表示する（マイページの演者名カード用）。
 export default function MyIconAvatar({
@@ -16,6 +19,8 @@ export default function MyIconAvatar({
   bare?: boolean;
 }) {
   const avatarColor = useUserStore((s) => s.user.avatarColor);
+  const avatarIcon = useUserStore((s) => s.user.avatarIcon);
+  const iconSrc = getAvatarIconSrc(avatarIcon);
 
   const glyphSize = bare ? size : size * 0.8;
   const glyph = (
@@ -26,8 +31,8 @@ export default function MyIconAvatar({
         width: glyphSize,
         height: glyphSize,
         backgroundColor: avatarColor,
-        WebkitMaskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
-        maskImage: `url(${BASE_PATH}/images/live2/avatar-2-line-mask.png)`,
+        WebkitMaskImage: `url(${BASE_PATH}${iconSrc})`,
+        maskImage: `url(${BASE_PATH}${iconSrc})`,
         WebkitMaskSize: "contain",
         maskSize: "contain",
         WebkitMaskRepeat: "no-repeat",

@@ -46,6 +46,7 @@ export interface DojoUser {
   displayName: string;
   bio: string; // 一言コメント（プロフィールの自己紹介、§寄合帳プロフィール）
   avatarColor: string; // マイページ・寄合帳アイコン（大喜利ライブの舞台アイコンと共通の線画）を塗る色
+  avatarIcon: string; // アイコンの絵柄（AvatarIconId、@/lib/avatarIcons参照）。旧データ互換のため未設定でも動くようMyIconAvatar側でフォールバックする
   rank: RankKey;
   masteryMeter: number; // 熟練度メーター（減らない経験値、§6.1）
   points: number; // 消費用ポイント残高（§5.2）

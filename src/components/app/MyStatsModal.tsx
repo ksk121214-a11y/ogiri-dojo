@@ -3,8 +3,12 @@
 import { getNextRank, getRankByMeter } from "@/data/collectionData";
 import { useUserStore } from "@/store/useUserStore";
 
+import styles from "@/components/home/StadiumHome.module.css";
+
 // マイページの演者名カードから開く、段位・ポイント・表彰実績の詳細モーダル。
 // 常時表示だと情報過多になるため、普段は隠しておき見たい人だけがここを開く構成にした。
+// 2026-08-28: マイページ本体（Stadiumテーマ）に合わせ、旧dojoテーマの見た目から
+// チケット言語（.grainPaper・--ink／--accent等）を使ったデザインに刷新。
 export default function MyStatsModal({
   open,
   onClose,
@@ -32,30 +36,30 @@ export default function MyStatsModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex w-full max-w-sm flex-col gap-5 rounded-3xl border border-dojo-dark-brown/10 bg-dojo-tatami-cream p-6 shadow-2xl"
+        className={`${styles.grainPaper} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-3xl p-6 text-[var(--ink)] shadow-2xl`}
       >
         <div className="flex items-center justify-between">
-          <h2 className="font-sans text-base font-bold text-dojo-ink">段位・実績</h2>
+          <h2 className="font-sans text-lg font-black">段位・実績</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="rounded-full px-2 py-1 font-sans text-sm text-dojo-dark-brown hover:bg-black/5"
+            className={`${styles.pressable} rounded-full px-2 py-1 font-sans text-sm text-[var(--ink)]/70 hover:bg-[var(--ink)]/5`}
           >
             ✕
           </button>
         </div>
 
         <div className="rounded-2xl bg-white p-5 text-center">
-          <p className="font-sans text-[11px] text-dojo-dark-brown/70">段位</p>
-          <p className="mt-1 font-brush text-3xl text-dojo-dark-brown">{rank.label}</p>
-          <div className="mx-auto mt-4 h-2 w-full max-w-xs overflow-hidden rounded-full bg-dojo-dark-brown/10">
+          <p className="font-sans text-[11px] text-[var(--ink)]/60">段位</p>
+          <p className="mt-1 font-sans text-3xl font-black text-[var(--ink)]">{rank.label}</p>
+          <div className="mx-auto mt-4 h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--ink)]/10">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-dojo-spotlight-orange to-dojo-curtain-gold transition-all"
+              className={`${styles.grainAccent} h-full rounded-full transition-all`}
               style={{ width: `${progressRatio * 100}%` }}
             />
           </div>
-          <p className="mt-2 font-sans text-[11px] text-dojo-dark-brown/70">
+          <p className="mt-2 font-sans text-[11px] text-[var(--ink)]/60">
             {nextRank ? `次は「${nextRank.label}」` : "最高位「達人」に到達しています"}
           </p>
         </div>
@@ -71,15 +75,15 @@ export default function MyStatsModal({
         </div>
 
         <div>
-          <h3 className="mb-2 font-sans text-sm font-bold text-dojo-ink">表彰実績</h3>
+          <h3 className="mb-2 font-sans text-sm font-bold">表彰実績</h3>
           <div className="flex gap-2 font-sans text-xs">
-            <span className="rounded-full bg-dojo-ink px-3 py-1.5 text-dojo-curtain-gold">
+            <span className={`${styles.grainAccent} rounded-full px-3 py-1.5 font-bold text-[var(--paper)]`}>
               1位 × {user.awardCounts.first}
             </span>
-            <span className="rounded-full bg-dojo-ink px-3 py-1.5 text-dojo-gold-foil">
+            <span className="rounded-full bg-[var(--ink)] px-3 py-1.5 font-bold text-[var(--paper)]">
               2位 × {user.awardCounts.second}
             </span>
-            <span className="rounded-full bg-dojo-ink px-3 py-1.5 text-dojo-spotlight-orange-light">
+            <span className="rounded-full bg-[var(--ink)]/60 px-3 py-1.5 font-bold text-[var(--paper)]">
               3位 × {user.awardCounts.third}
             </span>
           </div>
@@ -92,8 +96,8 @@ export default function MyStatsModal({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-white p-3 text-center">
-      <p className="font-sans text-[10px] text-dojo-dark-brown/70">{label}</p>
-      <p className="mt-1 font-sans text-sm font-bold tabular-nums text-dojo-ink">{value}</p>
+      <p className="font-sans text-[10px] text-[var(--ink)]/60">{label}</p>
+      <p className="mt-1 font-sans text-sm font-bold tabular-nums text-[var(--ink)]">{value}</p>
     </div>
   );
 }

@@ -20,6 +20,15 @@ import styles from "./StadiumHome.module.css";
 // 87px＝92-5に合わせている。計算根拠はNextLiveTicket側の104px幅・99pxと同じ考え方）。
 const SCALLOP_STYLE = { "--scallop-right": "87px" } as CSSProperties;
 
+// 名前表示に使える幅がこのカードでは限られているため、文字数に応じて段階的に
+// フォントサイズを落とし、10文字（表示名の最大長）でも省略(...)にならないようにする。
+function nameSizeClass(name: string): string {
+  if (name.length <= 4) return "text-2xl";
+  if (name.length <= 6) return "text-xl";
+  if (name.length <= 8) return "text-lg";
+  return "text-base";
+}
+
 export default function MyProfileTicket({
   onOpenStats,
   onOpenEdit,
@@ -43,12 +52,18 @@ export default function MyProfileTicket({
       <div className={`${styles.scallopCapBottom} ${styles.scallopKraft}`} aria-hidden />
 
       <div className="flex flex-col gap-3 px-5 py-5">
-        <div className="flex items-start gap-3.5">
+        <div className="flex items-start gap-3">
           <span className="flex shrink-0 items-center justify-center">
-            <MyIconAvatar size={56} bare />
+            <MyIconAvatar size={48} bare />
           </span>
           <div className="flex min-w-0 flex-col gap-1.5 pt-1">
-            <p className="truncate font-sans text-2xl font-black text-[var(--ink)]">{displayName}</p>
+            {/* 2026-08-28: 「名前を10文字にしても...で切れず見れるように」の要望で、
+                長い名前ほど自動的にフォントサイズを一段階ずつ落として省略されないようにする。 */}
+            <p
+              className={`truncate font-sans font-black text-[var(--ink)] ${nameSizeClass(displayName)}`}
+            >
+              {displayName}
+            </p>
             <span
               className={`${styles.grainAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
             >

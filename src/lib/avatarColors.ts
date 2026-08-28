@@ -1,12 +1,9 @@
-// マイページ・寄合帳アイコン（大喜利ライブの舞台アイコンと共通の線画）で選べる色プリセット。
-// デザイン方針のdojo-*カラーパレットから、アイコンの塗り色として見分けやすいものを選んでいる。
+// マイページ・寄合帳アイコン（大喜利ライブの舞台アイコンと共通の線画）で選べる塗り色プリセット。
+// 2026-08-28: 「色は黒赤青緑の四色でいいよ」の要望で8色から4色に絞った。
+// 「黒」「赤」はStadiumテーマの基調色（--ink／--accent）とそのまま揃え、他画面と浮かないようにしている。
 export const AVATAR_COLOR_PRESETS = [
-  { label: "緞帳赤", value: "#C0263F" },
-  { label: "深緋", value: "#8E1A2E" },
-  { label: "幕金", value: "#E8B84C" },
-  { label: "灯り橙", value: "#FF8A3D" },
-  { label: "歓声ピンク", value: "#FF6FA5" },
-  { label: "畳縁緑", value: "#5C7A54" },
-  { label: "焦げ茶", value: "#5B4530" },
-  { label: "幕裏紺", value: "#1F1D2B" },
+  { label: "黒", value: "#171513" },
+  { label: "赤", value: "#c8320c" },
+  { label: "青", value: "#1d5fa8" },
+  { label: "緑", value: "#2f7d4f" },
 ] as const;

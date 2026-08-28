@@ -23,25 +23,29 @@ export default function MyPage() {
   const [editOpen, setEditOpen] = useState(false);
 
   return (
-    <>
-      <StadiumPageShell contentTheme="kraft">
-        <MyProfileTicket onOpenStats={() => setStatsOpen(true)} onOpenEdit={() => setEditOpen(true)} />
+    <StadiumPageShell contentTheme="kraft">
+      <MyProfileTicket onOpenStats={() => setStatsOpen(true)} onOpenEdit={() => setEditOpen(true)} />
 
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="shrink-0 font-sans text-2xl font-black text-[var(--ink)]">寄合帳</h2>
-            <div className="h-px flex-1 bg-[var(--ink)]/20" aria-hidden />
-          </div>
-          <p className="mt-1.5 font-sans text-xs text-[var(--ink)]/70">
-            道場の仲間たちが出したお題に回答して、いいねやツッコミを送り合う簡易版SNS（ダミーデータ）
-          </p>
+      <div>
+        <div className="flex items-center gap-3">
+          <h2 className="shrink-0 font-sans text-2xl font-black text-[var(--ink)]">寄合帳</h2>
+          <div className="h-px flex-1 bg-[var(--ink)]/20" aria-hidden />
         </div>
+        <p className="mt-1.5 font-sans text-xs text-[var(--ink)]/70">
+          道場の仲間たちが出したお題に回答して、いいねやツッコミを送り合う簡易版SNS（ダミーデータ）
+        </p>
+      </div>
 
-        <SnsFeedSection variant="stadium" />
-      </StadiumPageShell>
+      <SnsFeedSection variant="stadium" />
 
+      {/*
+        2026-08-28: モーダルは.shell（StadiumAppShellのルート要素）の外側に置くと
+        --ink／--accent等のCSS変数が継承されずテキストが薄く表示されてしまうため、
+        あえてchildrenの一部としてここに置く（position: fixedなので見た目上は
+        childrenの並び順やmax-w-[480px]の制約とは無関係に画面全体を覆う）。
+      */}
       <MyStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
       {editOpen && <MyProfileEditModal onClose={() => setEditOpen(false)} />}
-    </>
+    </StadiumPageShell>
   );
 }
