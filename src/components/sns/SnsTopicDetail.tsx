@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import stadiumStyles from "@/components/home/StadiumHome.module.css";
+import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import { isLocallyCreated } from "@/lib/staticContent";
@@ -12,6 +14,8 @@ const MAX_LENGTH = 80;
 
 // お題詳細＋回答一覧。回答投稿・いいねはuseSnsStoreのダミー状態に即時反映する。
 // static export対応のため、useParamsではなくpage.tsx（generateStaticParams）からtopicIdを受け取る。
+// 2026-08-28: マイページの寄合帳から来ることがほとんどのため、見た目もマイページと同じ
+// 地下ライブハウス風（StadiumPageShell）に統一した。
 export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
@@ -42,12 +46,17 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
 
   if (!topic) {
     return (
-      <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <p className="font-sans text-sm text-dojo-dark-brown">
-          お題が見つかりませんでした。
-        </p>
-        <SnsBackButton className="font-sans text-xs font-bold text-dojo-ink hover:underline" />
-      </div>
+      <StadiumPageShell contentTheme="kraft">
+        <div className="flex flex-col items-center gap-4 py-16 text-center">
+          <p className="font-sans text-sm text-[var(--ink)]/70">
+            お題が見つかりませんでした。
+          </p>
+          <SnsBackButton
+            fallbackHref="/mypage"
+            className="font-sans text-xs font-bold text-[var(--ink)] hover:underline"
+          />
+        </div>
+      </StadiumPageShell>
     );
   }
 
@@ -62,51 +71,54 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <SnsBackButton />
+    <StadiumPageShell contentTheme="kraft">
+      <SnsBackButton
+        fallbackHref="/mypage"
+        className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
+      />
 
-      <div className="rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-5 sm:p-6">
+      <div className={`${stadiumStyles.grainPaper} rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <SnsAuthorBadge authorId={topic.authorId} />
           <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className="rounded-full bg-dojo-curtain-red px-3 py-1 font-sans text-[10px] font-bold text-dojo-washi-white">
+            <span className={`${stadiumStyles.grainAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               お題
             </span>
-            <span className="font-sans text-[10px] text-dojo-dark-brown">
+            <span className="font-sans text-[10px] text-[var(--ink)]/60">
               {topic.createdAtLabel}
             </span>
           </div>
         </div>
-        <p className="mt-3 font-sans text-lg font-bold leading-snug text-dojo-ink sm:text-xl">
+        <p className="mt-3 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {topic.body}
         </p>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-2 rounded-2xl border border-dojo-dark-brown/20 bg-dojo-light-brown/40 p-4"
+        className={`${stadiumStyles.grainPaper} flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)]`}
       >
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="あなたの回答を入力..."
           rows={3}
-          className={`w-full rounded-lg border bg-dojo-tatami-cream p-3 font-sans text-sm text-dojo-ink outline-none ${
+          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-sm text-[var(--ink)] outline-none ${
             overLimit
-              ? "border-dojo-curtain-red focus:border-dojo-curtain-red"
-              : "border-dojo-dark-brown/25 focus:border-dojo-curtain-gold"
+              ? "border-[var(--accent)] focus:border-[var(--accent)]"
+              : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
           }`}
         />
         <div className="flex items-center justify-between gap-2">
           <span
-            className={`font-sans text-[11px] ${overLimit ? "font-bold text-dojo-curtain-red" : "text-dojo-dark-brown"}`}
+            className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
           >
             {body.length} / {MAX_LENGTH}
           </span>
           <button
             type="submit"
             disabled={!body.trim() || overLimit}
-            className="shrink-0 rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-xs font-bold text-dojo-washi-white shadow-[0_0_14px_rgba(192,38,63,0.35)] transition hover:bg-dojo-deep-crimson active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
           >
             回答する
           </button>
@@ -114,11 +126,11 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
       </form>
 
       <div className="flex flex-col gap-2">
-        <h2 className="font-sans text-sm font-bold text-dojo-ink">
+        <h2 className="font-sans text-sm font-bold text-[var(--ink)]">
           回答 {topicAnswers.length}件
         </h2>
         {topicAnswers.length === 0 && (
-          <p className="rounded-xl border border-dojo-dark-brown/15 bg-dojo-light-brown/40 p-6 text-center font-sans text-xs text-dojo-dark-brown">
+          <p className={`${stadiumStyles.grainPaper} rounded-xl p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
             まだ回答がありません。最初の回答を投稿してみましょう。
           </p>
         )}
@@ -128,30 +140,30 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           return (
             <div
               key={answer.id}
-              className="flex items-start justify-between gap-3 rounded-xl border border-dojo-dark-brown/15 bg-dojo-light-brown/60 px-4 py-3"
+              className={`${stadiumStyles.grainPaper} flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-[var(--ink)]`}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <SnsAuthorBadge authorId={answer.authorId} />
-                  <span className="shrink-0 font-sans text-[10px] text-dojo-dark-brown">
+                  <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
                     {answer.createdAtLabel}
                   </span>
                 </div>
                 {answerLinkDisabled ? (
                   <div className="mt-2 flex flex-col gap-1">
-                    <p className="font-sans text-sm text-dojo-ink">
+                    <p className="font-sans text-sm text-[var(--ink)]">
                       {answer.body}
                     </p>
-                    <p className="font-sans text-[11px] text-dojo-dark-brown">
+                    <p className="font-sans text-[11px] text-[var(--ink)]/70">
                       ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件
                     </p>
                   </div>
                 ) : (
                   <Link href={`/sns/answers/${answer.id}`} className="mt-2 flex flex-col gap-1">
-                    <p className="font-sans text-sm text-dojo-ink">
+                    <p className="font-sans text-sm text-[var(--ink)]">
                       {answer.body}
                     </p>
-                    <p className="font-sans text-[11px] text-dojo-dark-brown hover:underline">
+                    <p className="font-sans text-[11px] text-[var(--ink)]/70 hover:underline">
                       ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件 →
                     </p>
                   </Link>
@@ -163,7 +175,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
                 className={`mt-1 flex shrink-0 items-center gap-1 self-start rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 ${
                   liked
                     ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
-                    : "border-dojo-dark-brown/30 text-dojo-dark-brown hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
+                    : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
                 }`}
               >
                 {liked ? "❤" : "🤍"}
@@ -175,6 +187,6 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           );
         })}
       </div>
-    </div>
+    </StadiumPageShell>
   );
 }

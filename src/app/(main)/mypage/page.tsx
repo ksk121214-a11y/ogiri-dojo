@@ -4,10 +4,8 @@ import { useState } from "react";
 
 import MyProfileEditModal from "@/components/app/MyProfileEditModal";
 import MyStatsModal from "@/components/app/MyStatsModal";
-import TutorialModal from "@/components/app/TutorialModal";
-import BottomNavigation from "@/components/home/BottomNavigation";
 import MyProfileTicket from "@/components/home/MyProfileTicket";
-import StadiumAppShell from "@/components/home/StadiumAppShell";
+import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsFeedSection from "@/components/sns/SnsFeedSection";
 
 // マイページ：自分の演者情報（アイコン・名前・一言コメント）と、
@@ -16,21 +14,17 @@ import SnsFeedSection from "@/components/sns/SnsFeedSection";
 // モーダルで見る形にし、常時表示するのは名前まわりとフォロー数・寄合帳だけに絞っている
 // （ガチャが無いため装備中・所有コレクションのセクションは廃止）。
 //
-// 2026-08-28: ホームと同じ地下ライブハウス風のトンマナ（StadiumAppShell）に統一。
-// ヘッダー・下部ナビはホームと共通のコンポーネントをそのまま再利用し、本文の背景だけ
-// 茶色いクラフト紙（contentTheme="kraft"）に切り替えている。演者名カードも
-// 「次回ライブ」チケットと同じ切り欠き付きチケットのデザイン言語（MyProfileTicket）に揃えた。
+// 2026-08-28: ホームと同じ地下ライブハウス風のトンマナ（StadiumPageShell＝StadiumAppShell＋
+// 下部ナビ＋遊び方モーダルの共通ラッパー）に統一。本文の背景は茶色いクラフト紙
+// （contentTheme="kraft"）。演者名カードも「次回ライブ」チケットと同じ切り欠き付きチケットの
+// デザイン言語（MyProfileTicket）に揃えた。
 export default function MyPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   return (
     <>
-      <StadiumAppShell
-        contentTheme="kraft"
-        bottomNav={<BottomNavigation onHowToPlay={() => setTutorialOpen(true)} />}
-      >
+      <StadiumPageShell contentTheme="kraft">
         <MyProfileTicket onOpenStats={() => setStatsOpen(true)} onOpenEdit={() => setEditOpen(true)} />
 
         <div>
@@ -44,11 +38,10 @@ export default function MyPage() {
         </div>
 
         <SnsFeedSection variant="stadium" />
-      </StadiumAppShell>
+      </StadiumPageShell>
 
       <MyStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
       {editOpen && <MyProfileEditModal onClose={() => setEditOpen(false)} />}
-      <TutorialModal open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
     </>
   );
 }

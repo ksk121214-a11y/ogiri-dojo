@@ -12,13 +12,24 @@ import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 // （ルーティング自体は変えず、チラミングだけをパス判定で出し分けている）。
 // 2026-08-28：マイページ（/mypage）も同じStadiumAppShellを自前で持つようにしたため、
 // ここでの出し分けにマイページも加えた。
+// 2026-08-28（追記）：「お題を投稿する」「お題に回答する」の各サブページ（/sns/new、
+// お題詳細/sns/[topicId]、回答詳細/sns/answers/[answerId]）も旧デザインのまま残っていたため
+// 同様にStadium側へ。寄合帳トップ（/sns）自体と演者プロフィール系（/sns/u/...）は
+// 現状のナビ（AppHeader）からリンクされておらず旧デザインのまま据え置くため対象外にしている。
+// next.config側でtrailingSlash: trueのため実際のpathnameは"/sns"ではなく"/sns/"になる。
+// これを考慮せず`startsWith("/sns/")`だけで判定すると寄合帳トップ自身（"/sns/"）まで
+// Stadium側に誤って含まれてしまうため、"/sns/"ちょうど（トップ自身）は明示的に除外する。
 export default function MainLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isStadiumPage = pathname === "/" || pathname.startsWith("/mypage");
+  const isSnsSubPage =
+    pathname.startsWith("/sns/") &&
+    pathname !== "/sns/" &&
+    !pathname.startsWith("/sns/u/");
+  const isStadiumPage = pathname === "/" || pathname.startsWith("/mypage") || isSnsSubPage;
 
   if (isStadiumPage) {
     return (
