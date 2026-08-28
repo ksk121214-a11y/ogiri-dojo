@@ -228,31 +228,32 @@
 
 /*
  * マイページ（背景が茶色いクラフト紙）に乗るチケット用。
- * 2026-08-28: 一度は「紙よりわずかに明るいオフホワイトの円」に変更したが、
- * それだと今度は「本物の背景が透けて見える凹み」に見えなくなってしまうという
- * フィードバックを受け、ホーム（.notchDark）と同じ考え方＝実際に背後にある
- * クラフト紙の色・質感をそのまま見せる方式に戻した。ただしinset shadowが濃すぎると
- * 単なる黒っぽいシミに見えて紙の色そのものが分かりづらくなっていたため、
- * 影は控えめにしてクラフト紙の色が伝わりやすいようにしている。
+ * 2026-08-28: 「本物の背景が見えるように」との指摘を受け、クラフト紙のテクスチャ画像を
+ * タイルを小さく（90px）してこの20px程度の円の中でも粒の濃淡がちゃんと見えるようにし、
+ * 影も紙の色・質感が伝わる程度まで弱めた（濃すぎると単なる黒いシミに見えてしまうため）。
  */
 .notchKraft {
   background-color: var(--bg-kraft);
   background-image: url("/images/textures/warm-kraft-paper-512.webp");
-  background-size: 200px 200px;
-  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.3);
+  background-size: 90px 90px;
+  box-shadow: inset 0 1px 2px rgba(23, 21, 19, 0.25);
 }
 .notchTop.notchKraft {
-  background-position: -12px -8px;
+  background-position: -4px -2px;
 }
 .notchBottom.notchKraft {
-  background-position: -12px -140px;
+  background-position: -4px -70px;
 }
 
 /*
  * マイページ演者名チケットの右端（本体の外周）を、スタンプ／コインのふちのような
- * 半円の連続した切り欠きにする。notchTop/notchBottomと同じ「背景色の円を境界にまたがせ、
- * .profileCardのoverflow:hiddenで外側半分をクリップする」手法を、repeat-yの背景タイルで
- * 縦方向に連続させたもの（mask-compositeは使わず単純なbackground-imageの塗りのみ）。
+ * 半円の連続した切り欠きにする。
+ * 2026-08-28: 当初はradial-gradientそのものを背景色として塗る方式にしていたが、
+ * 単色のシミのように見えて「本物の背景」らしく見えないという指摘を受け、
+ * .tornBannerと同じ「mask-imageは1枚だけ（複数レイヤーの合成=mask-compositeを使わない）」
+ * 手法に変更。実際のクラフト紙テクスチャ画像を背景に敷き、その上からradial-gradientの
+ * mask-image（1枚だけなのでcomposite指定は不要＝環境依存の消失リスクが小さい）を
+ * repeat-yでタイル状に繰り返し、円の形にくり抜いて見せている。
  */
 .scallopRight {
   position: absolute;
@@ -262,9 +263,15 @@
   width: 18px;
   z-index: 3;
   pointer-events: none;
-  background-image: radial-gradient(circle at 9px 9px, var(--bg-kraft) 8px, transparent 8.5px);
-  background-size: 18px 22px;
-  background-repeat: repeat-y;
+  background-color: var(--bg-kraft);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-size: 90px 90px;
+  -webkit-mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
+  mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
+  -webkit-mask-size: 18px 22px;
+  mask-size: 18px 22px;
+  -webkit-mask-repeat: repeat-y;
+  mask-repeat: repeat-y;
 }
 
 /*
