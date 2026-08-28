@@ -204,7 +204,10 @@
 .tornTicketMain {
   position: relative;
   overflow: hidden;
-  border-radius: 20px;
+  /* 2026-08-28: 「点線で切ったような感じで右側の角だけ尖ってる感じ」の要望のため、
+     左側（元々のチケット本来の角）だけ丸め、右側（半券を切り取った断面）は
+     角丸にせずシャープな直角にして「そこで切った」感を出す。 */
+  border-radius: 20px 0 0 20px;
   color: var(--ink);
 }
 
