@@ -111,7 +111,10 @@
   background-color: var(--bg-kraft);
   background-image: url("/images/textures/warm-kraft-paper-512.webp");
   background-repeat: repeat;
-  background-size: 320px 320px;
+  /* 2026-08-28: 320pxだとスマホ画面内でタイルの継ぎ目（明暗のムラ）が目立ち、
+     参考画像のような均一な紙面に見えなかったため、元画像に近い480pxまで広げて
+     繰り返し回数を減らし、まだら感を抑えている。 */
+  background-size: 480px 480px;
 }
 
 /* 黒い紙の繊維・コピー機のノイズを疑似要素で重ねる。本文やボタンの文字には掛からないよう
@@ -223,17 +226,20 @@
   background-position: -8px -96px;
 }
 
-/* マイページ（背景が茶色いクラフト紙）に乗るチケット用。 */
+/*
+ * マイページ（背景が茶色いクラフト紙）に乗るチケット用。
+ * 2026-08-28: 当初は.notchDarkと同じ「背後の質感がそのまま見える」方式（クラフト紙の色・
+ * 画像をそのまま敷く）にしたが、実機で確認すると紙面（--paper）とほぼ同化してしまい
+ * 切り欠きがほとんど見えなくなっていた（参考画像は白っぽい丸のくぼみとしてはっきり見える）。
+ * そのため方式を変更し、紙よりわずかに明るいオフホワイトの円＋内側の陰影で
+ * 「紙に穴が開いてくぼんでいる」ことが常にはっきり見えるようにした
+ * （背後の色を透かすのではなく、くぼみそのものを陰影で見せる方式）。
+ */
 .notchKraft {
-  background-color: var(--bg-kraft);
-  background-image: url("/images/textures/warm-kraft-paper-512.webp");
-  background-size: 200px 200px;
-}
-.notchTop.notchKraft {
-  background-position: -12px -8px;
-}
-.notchBottom.notchKraft {
-  background-position: -12px -140px;
+  background-color: #f8f1e1;
+  box-shadow:
+    inset 0 1px 3px rgba(23, 21, 19, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .stubDivider {
@@ -253,6 +259,8 @@
   grid-template-columns: minmax(0, 1fr) 92px;
   color: var(--ink);
   border-radius: 20px;
+  /* 参考画像はカードが茶色い背景から少し浮いて見えるため、控えめなドロップシャドウを追加。 */
+  box-shadow: 0 10px 24px rgba(23, 21, 19, 0.28);
 }
 
 /* バーコード：画像を使わずCSSの縦棒だけで表現する */

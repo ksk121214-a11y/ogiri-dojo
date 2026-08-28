@@ -75,18 +75,20 @@ export default function MyProfileTicket({
           </Link>
         </div>
 
-        <div className="flex gap-2">
+        {/* 「段位・実績を見る」が参考画像では1行に収まっているのに対し、text-smだと
+            この列幅では折り返ってしまっていたため、text-xs・px-2に詰めてnowrapにしている。 */}
+        <div className="flex gap-1.5">
           <button
             type="button"
             onClick={onOpenStats}
-            className={`${styles.pressable} flex-1 rounded-xl bg-[var(--ink)] px-3 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+            className={`${styles.pressable} flex-1 whitespace-nowrap rounded-xl bg-[var(--ink)] px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
           >
             段位・実績を見る
           </button>
           <button
             type="button"
             onClick={onOpenEdit}
-            className={`${styles.pressable} flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--ink)]/70 px-3 py-2.5 font-sans text-sm font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5`}
+            className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5`}
           >
             <EditGlyph />
             編集する
@@ -107,23 +109,23 @@ function OgiriStamp() {
   return (
     <svg
       viewBox="0 0 100 100"
-      width="60"
-      height="60"
-      className="text-[var(--accent)] opacity-45"
+      width="76"
+      height="76"
+      className="text-[var(--accent)] opacity-60"
       style={{ transform: "rotate(-8deg)" }}
       aria-hidden
     >
       <defs>
-        <path id="ogiriStampArc" d="M 12,52 A 38,38 0 1 1 88,52" fill="none" />
+        <path id="ogiriStampArc" d="M 10,53 A 40,40 0 1 1 90,53" fill="none" />
       </defs>
-      <circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" strokeWidth="2" />
-      <circle cx="50" cy="50" r="31" fill="none" stroke="currentColor" strokeWidth="1" />
-      <text fill="currentColor" fontSize="10" fontWeight={700} letterSpacing="1.5">
+      <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="2.2" />
+      <circle cx="50" cy="50" r="32" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <text fill="currentColor" fontSize="10.5" fontWeight={700} letterSpacing="1.5">
         <textPath href="#ogiriStampArc" xlinkHref="#ogiriStampArc" startOffset="50%" textAnchor="middle">
           OGIRI LIVE
         </textPath>
       </text>
-      <text x="50" y="64" textAnchor="middle" fontSize="12" fontWeight={700} fill="currentColor">
+      <text x="50" y="65" textAnchor="middle" fontSize="13" fontWeight={700} fill="currentColor">
         ★ ★ ★
       </text>
     </svg>
