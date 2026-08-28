@@ -27,6 +27,9 @@
      （このg≈0.113の逆算式はscratchpad/accent-base-solve.pyを参照）。 */
   --accent-textured-base: #e08b35;
   --border-dark: #312f2b;
+  /* マイページ専用：茶色いクラフト紙の背景（ホームの--bgに対する第3の面色）。
+     ivory-paper（チケット券面）とは別の、コンテンツ全体の背景として使う。 */
+  --bg-kraft: #b58f5c;
 
   position: relative;
   isolation: isolate;
@@ -98,6 +101,19 @@
   background-size: 260px 260px;
 }
 
+/*
+ * マイページ専用の背景：茶色いクラフト紙（写真ベースの実素材、warm-kraft-paper-512.png）。
+ * 他の.grain*と違いグレースケール素材の色付けではなく、すでに色の付いた紙の質感写真そのもの
+ * なのでblend-modeは使わず、素材の画像をそのまま敷き詰める（background-colorは読み込み中の
+ * フォールバックとしてのみ機能）。
+ */
+.grainKraft {
+  background-color: var(--bg-kraft);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-repeat: repeat;
+  background-size: 320px 320px;
+}
+
 /* 黒い紙の繊維・コピー機のノイズを疑似要素で重ねる。本文やボタンの文字には掛からないよう
    .shell自体（背景専用の最背面レイヤー）にだけ適用し、子要素のテキストは影響を受けない。 */
 .shell::before {
@@ -165,10 +181,13 @@
  * 本物の穴を開ける方式を試したが、環境によって効かずノッチが消えてしまう
  * リスクがあったため、確実に動くdiv＋背景色の方式に戻した。
  * ただし単色（--bg）だと実際の背景の質感と合わずに見えていたため、
- * ページ全体と同じ.grainDark相当の質感（黒地＋インクムラ）を持たせ、
+ * 「そのチケットが乗っているページ本体の背景」と同じ質感を持たせ、
  * さらに内側にほんの少しinset shadowを入れて「本当に凹んでいる」ような
  * 陰影を付けている（タイル位置が周囲と厳密には連続しないが、ランダムな
  * 粒状の質感なので継ぎ目はほぼ分からない）。
+ * 2026-08-28: マイページ（背景が茶色いクラフト紙）にも同じチケット意匠を使うことになったため、
+ * 背景の質感（色・画像）だけを.notchDark／.notchKraftの2種類に分け、
+ * 位置・形状はこのベースクラスに共通化した。
  */
 .notchTop,
 .notchBottom {
@@ -177,26 +196,63 @@
   width: 20px;
   height: 20px;
   border-radius: 9999px;
-  background-color: var(--bg);
-  background-image: url("/images/textures/dark-grain-512.webp");
-  background-blend-mode: overlay;
-  background-size: 120px 120px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-  right: 96px;
+  /* --notch-right未指定時はNextLiveTicket（104px幅の半券）に合わせた96pxを既定値にする。
+     マイページの演者名チケット（92px幅の半券）はコンポーネント側でこの変数を上書きする。 */
+  right: var(--notch-right, 96px);
   transform: translateX(50%);
 }
 .notchTop {
   top: -10px;
-  background-position: -8px -4px;
 }
 .notchBottom {
   bottom: -10px;
+}
+
+/* ホーム（背景が黒＋dark-grain）に乗るチケット用。 */
+.notchDark {
+  background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-size: 120px 120px;
+}
+.notchTop.notchDark {
+  background-position: -8px -4px;
+}
+.notchBottom.notchDark {
   background-position: -8px -96px;
+}
+
+/* マイページ（背景が茶色いクラフト紙）に乗るチケット用。 */
+.notchKraft {
+  background-color: var(--bg-kraft);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-size: 200px 200px;
+}
+.notchTop.notchKraft {
+  background-position: -12px -8px;
+}
+.notchBottom.notchKraft {
+  background-position: -12px -140px;
 }
 
 .stubDivider {
   position: relative;
   border-left: 2px dashed rgba(23, 21, 19, 0.3);
+}
+
+/*
+ * マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋丸い切り欠き」の
+ * チケット言語を流用し、半券側にOGIRI LIVEのスタンプ風グラフィックを置く。
+ * 半券の幅は92px固定（NextLiveTicketの104pxよりやや狭い、スタンプ1つだけを置くため）。
+ */
+.profileCard {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  color: var(--ink);
+  border-radius: 20px;
 }
 
 /* バーコード：画像を使わずCSSの縦棒だけで表現する */

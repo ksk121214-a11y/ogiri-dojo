@@ -41,8 +41,8 @@ export default function NextLiveTicket({ live }: { live: NextLiveInfo }) {
       </span>
 
       <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={styles.notchTop} aria-hidden />
-        <div className={styles.notchBottom} aria-hidden />
+        <div className={`${styles.notchTop} ${styles.notchDark}`} aria-hidden />
+        <div className={`${styles.notchBottom} ${styles.notchDark}`} aria-hidden />
 
         {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
         <div className="flex flex-col gap-0 px-5 pt-3 pb-2">

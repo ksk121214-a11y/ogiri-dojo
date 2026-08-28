@@ -32,3 +32,16 @@ export function ClockGlyph({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function EditGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
+      <path
+        d="m14.5 4.5 5 5L8 21H3v-5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

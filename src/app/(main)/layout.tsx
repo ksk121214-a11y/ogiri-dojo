@@ -10,15 +10,17 @@ import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 // 2026-08-27：ホーム（/）だけは地下ライブハウス風の専用ヘッダー・下部ナビ（StadiumAppShell）を
 // 自前で持つようリデザインしたため、既存の共通AppHeader／余白付きmainはホーム以外にだけ適用する
 // （ルーティング自体は変えず、チラミングだけをパス判定で出し分けている）。
+// 2026-08-28：マイページ（/mypage）も同じStadiumAppShellを自前で持つようにしたため、
+// ここでの出し分けにマイページも加えた。
 export default function MainLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isHome = pathname === "/";
+  const isStadiumPage = pathname === "/" || pathname.startsWith("/mypage");
 
-  if (isHome) {
+  if (isStadiumPage) {
     return (
       <>
         {children}

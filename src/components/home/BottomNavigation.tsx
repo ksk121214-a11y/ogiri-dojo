@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import styles from "./StadiumHome.module.css";
 
@@ -71,10 +72,16 @@ function PersonIcon({ active }: { active: boolean }) {
 }
 
 // 下部固定ナビゲーション。ホーム／次回ライブ／遊び方／マイページの4つ。
-// 「次回ライブ」はチケットカードへのページ内スクロール、「遊び方」は既存のTutorialModalを開く
-// （どちらも新しいルートを増やさず、既存のホーム内動線を再利用する）。
-// 選択中(ホーム)は色だけでなくaria-current="page"と線幅の太さでも区別する。
+// 「次回ライブ」はホームのチケットカードへのページ内スクロール（#next-live）、
+// 「遊び方」は既存のTutorialModalを開く（どちらも新しいルートを増やさず既存の動線を再利用する）。
+// 2026-08-28: マイページでも同じ下部ナビを使う要望のため、選択中タブは固定（ホーム）ではなく
+// usePathnameで現在地から判定するようにした。「次回ライブ」はどのページからでもホームの
+// チケットカード位置へ飛べるよう href を "/#next-live" にしている。
 export default function BottomNavigation({ onHowToPlay }: { onHowToPlay: () => void }) {
+  const pathname = usePathname();
+  const isHome = pathname === "/";
+  const isMyPage = pathname.startsWith("/mypage");
+
   const itemClass =
     "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-xs font-bold focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]";
 
@@ -85,23 +92,28 @@ export default function BottomNavigation({ onHowToPlay }: { onHowToPlay: () => v
       aria-label="下部ナビゲーション"
     >
       <div className="mx-auto flex w-full max-w-[480px]">
-        <Link href="/" aria-current="page" className={`${itemClass} text-[var(--accent)]`}>
-          <HomeIcon active />
+        <Link
+          href="/"
+          aria-current={isHome ? "page" : undefined}
+          className={`${itemClass} ${isHome ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+        >
+          <HomeIcon active={isHome} />
           ホーム
         </Link>
-        <a
-          href="#next-live"
-          className={`${itemClass} text-[var(--text-on-dark)]`}
-        >
+        <Link href="/#next-live" className={`${itemClass} text-[var(--text-on-dark)]`}>
           <CalendarIcon active={false} />
           次回ライブ
-        </a>
+        </Link>
         <button type="button" onClick={onHowToPlay} className={`${itemClass} text-[var(--text-on-dark)]`}>
           <BookIcon active={false} />
           遊び方
         </button>
-        <Link href="/mypage" className={`${itemClass} text-[var(--text-on-dark)]`}>
-          <PersonIcon active={false} />
+        <Link
+          href="/mypage"
+          aria-current={isMyPage ? "page" : undefined}
+          className={`${itemClass} ${isMyPage ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+        >
+          <PersonIcon active={isMyPage} />
           マイページ
         </Link>
       </div>
