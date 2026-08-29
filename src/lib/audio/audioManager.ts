@@ -405,6 +405,17 @@ function attemptPlay(audio: HTMLAudioElement) {
 function activateBgm(name: BgmName, startAtMs?: number) {
   if (currentBgm?.name === name) {
     if (currentBgm.audio.paused) attemptPlay(currentBgm.audio);
+    // 2026-08-29:「同じ曲のまま」の要求でも、必ず正しい音量へ向けてフェードし直す。
+    // これが無いと2つのバグが起きる：
+    // ①一時停止中（OFF等でvolumeを0までフェードダウン済み）の曲をそのままplay()する
+    //   だけだと、無音のまま再生され続ける（「場面転換でBGMが鳴らない」の原因）。
+    // ②再生中でも、直前にstopBgm/OFF等で「0へ向かうフェードアウト」がまだ進行中
+    //   （700ms経ちきっておらずpause前）の状態でONに戻すと、ここで何もしないと
+    //   古いフェードアウトタイマーが生き続けて音が消えていき、最後にpauseされて
+    //   しまう（「素早くOFF→ONにすると音が鳴らなくなる」バグ）。
+    // fadeAudio自体が「同じaudio要素への新しいフェード要求は、進行中の古いタイマーを
+    // clearIntervalしてから開始する」ため、狙った音量へ向けて上書きできる。
+    fadeAudio(currentBgm.audio, currentBgm.audio.volume, BGM_VOLUME[name], FADE_MS);
     return;
   }
   const prev = currentBgm;
@@ -475,16 +486,27 @@ export function playBgm(name: BgmName, opts?: { startAtMs?: number }): void {
   activateBgm(name, opts?.startAtMs);
 }
 
+// 2026-08-29:「BGMが重なって鳴る／OFFにしても止まらない」対策。currentBgmという
+// 単一のポインタだけを頼りに止めていると、画面側のクリーンアップ漏れ等で
+// bgmElements内の別の曲が再生されたまま取り残された場合に、そのゾンビ再生を
+// 止める手段が無くなってしまう。ここでは「実際に鳴っている（pausedでない）
+// 全ての曲」を対象に確実にフェードアウト・停止する防御的な実装にする。
+function fadeOutAndPauseAllBgmElements(): void {
+  bgmElements.forEach((audio) => {
+    if (!audio.paused) {
+      fadeAudio(audio, audio.volume, 0, FADE_MS, () => {
+        audio.pause();
+      });
+    }
+  });
+}
+
 export function stopBgm(): void {
   pendingBgmName = null;
   pendingBgmStartAtMs = undefined;
-  if (!currentBgm) return;
-  const prev = currentBgm;
   currentBgm = null;
   setState({ currentBgmTrack: null, bgmLoading: false });
-  fadeAudio(prev.audio, prev.audio.volume, 0, FADE_MS, () => {
-    prev.audio.pause();
-  });
+  fadeOutAndPauseAllBgmElements();
 }
 
 // ブラウザの自動再生制限で鳴らせなかったBGMを、ユーザーの操作をきっかけに再試行する。
@@ -494,6 +516,7 @@ export function retryCurrentBgm(): void {
   resumeAudioContext();
   if (currentBgm && currentBgm.audio.paused && state.bgmEnabled) {
     attemptPlay(currentBgm.audio);
+    fadeAudio(currentBgm.audio, currentBgm.audio.volume, BGM_VOLUME[currentBgm.name], FADE_MS);
   }
 }
 
@@ -509,11 +532,11 @@ export function setBgmEnabled(next: boolean): void {
     if (pendingBgmName) {
       activateBgm(pendingBgmName, pendingBgmStartAtMs);
     }
-  } else if (currentBgm) {
-    const audio = currentBgm.audio;
-    fadeAudio(audio, audio.volume, 0, FADE_MS, () => {
-      audio.pause();
-    });
+  } else {
+    // currentBgmだけでなく、万一取り残されて鳴っている曲があっても確実に止める
+    // （stopBgmと同じ防御的ヘルパーを使う。ただしcurrentBgm自体は保持し、
+    // 再度ONにした時に続きから再開できるようにする＝stopBgmとの違い）。
+    fadeOutAndPauseAllBgmElements();
   }
 }
 
