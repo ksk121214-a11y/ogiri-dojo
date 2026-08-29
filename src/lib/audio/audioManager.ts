@@ -24,11 +24,17 @@ import { BASE_PATH } from "@/lib/basePath";
 // BGM
 // ============================================================
 
+// 2026-08-30: waiting/live/homeを、出囃子(entrance)以外の3曲を大幅に軽量化した
+// 差し替え版に更新（192kbps・15MB前後→128kbps・1.8MB前後）。next.config.tsで
+// /sounds/*にimmutableな長期キャッシュを設定しているため、同じファイル名のまま
+// 中身だけ差し替えると既にキャッシュ済みの端末に古い内容が残り続けてしまう。
+// そのため上書きせず、ファイル名に-v2を付けた新しいパスにしている
+// （entranceは今回差し替えていないため元のファイル名のまま）。
 export const BGM_PATHS = {
-  waiting: "/sounds/bgm/waiting.mp3",
+  waiting: "/sounds/bgm/waiting-v2.mp3",
   entrance: "/sounds/bgm/entrance.mp3",
-  live: "/sounds/bgm/live.mp3",
-  home: "/sounds/bgm/home.mp3",
+  live: "/sounds/bgm/live-v2.mp3",
+  home: "/sounds/bgm/home-v2.mp3",
 } as const;
 
 export type BgmName = keyof typeof BGM_PATHS;
