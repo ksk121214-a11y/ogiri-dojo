@@ -85,7 +85,9 @@ function cleanupChannels() {
   tsukkomiChannel = null;
 }
 
-async function fetchActiveLive(): Promise<LiveRow | null> {
+// ホーム画面の「次回ライブ」チケット（参加ボタン押下時に「既に参加済みか」を確認する
+// 用途、src/components/home/useLiveJoinFlow.ts参照）でも使うためexportしている。
+export async function fetchActiveLive(): Promise<LiveRow | null> {
   const { data } = await supabase
     .from("lives")
     .select("*")
@@ -96,7 +98,7 @@ async function fetchActiveLive(): Promise<LiveRow | null> {
   return data as LiveRow | null;
 }
 
-async function fetchMyParticipant(liveId: string, userId: string): Promise<ParticipantRow | null> {
+export async function fetchMyParticipant(liveId: string, userId: string): Promise<ParticipantRow | null> {
   const { data } = await supabase
     .from("participants")
     .select("*")

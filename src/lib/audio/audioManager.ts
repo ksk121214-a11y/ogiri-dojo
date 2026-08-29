@@ -66,6 +66,8 @@ export const SFX_PATHS = {
   participantJoined: "/sounds/participant-joined.mp3",
   pageTurn: "/sounds/page-turn.wav",
   homeClick: "/sounds/home-click.mp3",
+  // ホームの「次回ライブ」チケット、参加成功時に半券が切り離される演出用。
+  ticketTear: "/sounds/ticket-tear.mp3",
 } as const;
 
 export type SfxName = keyof typeof SFX_PATHS;

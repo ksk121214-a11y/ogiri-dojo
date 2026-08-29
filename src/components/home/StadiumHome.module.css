@@ -480,3 +480,83 @@
     transform: scale(0.98);
   }
 }
+
+/*
+ * ホームの「次回ライブ」チケット専用：参加成功時に赤い半券が切り離される演出のため、
+ * 本体（.nextLiveTicketMain）と半券（.nextLiveTicketStub）を独立した要素に分離する
+ * （マイページの寄合券スタンプ欄=.profileCardRow/.profileCardMain/.profileCardStubと
+ * 同じ考え方）。通常の.ticket（1つのgridの中に2列を収め、overflow:hiddenで丸ごと
+ * 切り欠きを隠す）のままだと、半券をアニメーションで外側へ動かした瞬間に
+ * overflow:hiddenでクリップされてしまうため、外側の.nextLiveTicketRow自体は
+ * overflow:visibleにし、角丸・切り欠きの見た目は本体・半券それぞれの要素が
+ * 個別に担う。半券が居なくなった後は本体側の右端の切り欠き（.scallopDivider等、
+ * 既存のものをそのまま流用）から背景が見える。
+ */
+.nextLiveTicketRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+.nextLiveTicketMain {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px 0 0 20px;
+  color: var(--ink);
+}
+.nextLiveTicketStub {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0 20px 20px 0;
+  color: var(--ink);
+}
+
+/*
+ * 半券が切り離されるアニメーション。最初に右へ少し引っ張られ(0〜15%)、その後
+ * 右下へ大きく移動しながら軽く傾き(15〜70%)、最後の30%でフェードアウトする。
+ * 動きに勢いを持たせつつ最後は自然に減速するよう、cubic-bezierで加速→減速の
+ * イージングにしている。発光・フラッシュ等の派手な演出は使わずtransform/opacityのみ。
+ */
+@keyframes nextLiveTicketStubDetach {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+    box-shadow: none;
+  }
+  15% {
+    transform: translate(10px, 0) rotate(0deg);
+    opacity: 1;
+    box-shadow: 2px 2px 6px rgba(23, 21, 19, 0.18);
+  }
+  70% {
+    transform: translate(105px, 105px) rotate(3deg);
+    opacity: 1;
+    box-shadow: 2px 2px 6px rgba(23, 21, 19, 0.18);
+  }
+  100% {
+    transform: translate(115px, 120px) rotate(3deg);
+    opacity: 0;
+    box-shadow: none;
+  }
+}
+
+.nextLiveTicketStubDetaching {
+  animation: nextLiveTicketStubDetach 620ms cubic-bezier(0.3, 0.7, 0.35, 1) forwards;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+/* 「大きく移動させず、短いフェードアウトだけにする」動作の縮小版。 */
+@keyframes nextLiveTicketStubFade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nextLiveTicketStubDetaching {
+    animation: nextLiveTicketStubFade 150ms ease-out forwards;
+  }
+}
