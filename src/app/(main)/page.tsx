@@ -1,5 +1,6 @@
 "use client";
 
+import SlowLoadingBanner from "@/components/app/SlowLoadingBanner";
 import AccountSummary from "@/components/home/AccountSummary";
 import BottomNavigation from "@/components/home/BottomNavigation";
 import DarkIndieHero from "@/components/home/DarkIndieHero";
@@ -8,6 +9,7 @@ import NextLiveTicket from "@/components/home/NextLiveTicket";
 import StadiumAppShell from "@/components/home/StadiumAppShell";
 import { useLiveJoinFlow } from "@/components/home/useLiveJoinFlow";
 import { CURRENT_LIVE, CURRENT_LIVE_RECEPTION } from "@/data/liveScheduleData";
+import { useAuthStore } from "@/store/useAuthStore";
 
 // ホーム画面：地下の小さなお笑いライブハウス・インディーズイベントのフライヤーをイメージした
 // トンマナにリデザイン（2026-08-27）。認証・状態管理・ライブ参加処理（/liveへの遷移）は
@@ -22,9 +24,11 @@ export default function Home() {
   const { status, error, handleJoinClick, handleAnimationEnd } = useLiveJoinFlow();
   const stubVisible = status !== "joined";
   const isDetaching = status === "detaching";
+  const authLoading = useAuthStore((s) => s.loading);
 
   return (
     <StadiumAppShell bottomNav={<BottomNavigation />}>
+      <SlowLoadingBanner isLoading={authLoading} />
       <DarkIndieHero />
 
       <div id="next-live" className="scroll-mt-4">

@@ -112,6 +112,8 @@ export default function StageCharactersView({
                     alt=""
                     fill
                     sizes="150px"
+                    loading="eager"
+                    fetchPriority="high"
                     className="object-contain"
                   />
                   {isGlowingSeat && (

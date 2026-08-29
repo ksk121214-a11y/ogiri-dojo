@@ -361,6 +361,49 @@ export function preloadAllSfx(): void {
   });
 }
 
+// 2026-08-29: ライブ待機画面の素材事前読み込み進捗表示（useLiveAssetPreload）から、
+// 1件ずつ「成功したか」を確認しながら読み込むために使う。loadSfx自体はvoidを返し
+// 失敗してもconsole.warnするだけの設計（呼び出し側のフォールバック前提）だが、
+// ここでは進捗表示・自動リトライのために成否を判定できるようにする。
+// 既にsfxBuffersにキャッシュ済みなら（loadSfx内部の判定で）再ダウンロードしない。
+export async function preloadSfxOne(name: SfxName): Promise<{ ok: boolean }> {
+  await loadSfx(name);
+  return { ok: sfxBuffers.has(name) };
+}
+
+// 同じく、指定したBGMが実際に鳴らせる状態（canplaythrough）になるまで待つ。
+// 実際には鳴らさない（volumeやplay()には触れない）。既に十分バッファ済みなら
+// 即座に解決する。preload="auto"は生成時に設定済みのため、ここでload()を
+// 明示的に呼ぶ必要はない（呼ぶと、既に別の理由で再生が始まっていた場合に
+// 再生位置がリセットされてしまうため、あえて呼ばない）。
+export function preloadBgmOne(name: BgmName): Promise<{ ok: boolean }> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined") {
+      resolve({ ok: false });
+      return;
+    }
+    const nodes = getOrCreateBgmNodes(name);
+    if (nodes.audio.readyState >= 3) {
+      resolve({ ok: true });
+      return;
+    }
+    const cleanup = () => {
+      nodes.audio.removeEventListener("canplaythrough", onReady);
+      nodes.audio.removeEventListener("error", onError);
+    };
+    const onReady = () => {
+      cleanup();
+      resolve({ ok: true });
+    };
+    const onError = () => {
+      cleanup();
+      resolve({ ok: false });
+    };
+    nodes.audio.addEventListener("canplaythrough", onReady, { once: true });
+    nodes.audio.addEventListener("error", onError, { once: true });
+  });
+}
+
 function playSfxFallback(name: SfxName) {
   if (typeof window === "undefined") return;
   let base = sfxFallbackCache.get(name);

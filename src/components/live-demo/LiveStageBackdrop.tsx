@@ -60,6 +60,7 @@ export default function LiveStageBackdrop({
             src={`${BASE_PATH}/images/live2/side-left-crop.png`}
             alt=""
             fill
+            priority
             sizes="300px"
             className="object-contain object-left-top"
           />
@@ -72,6 +73,7 @@ export default function LiveStageBackdrop({
             src={`${BASE_PATH}/images/live2/side-left-crop.png`}
             alt=""
             fill
+            priority
             sizes="300px"
             className="-scale-x-100 object-contain object-left-top"
           />

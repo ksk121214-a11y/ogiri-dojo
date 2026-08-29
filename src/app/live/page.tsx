@@ -16,6 +16,7 @@ import StageAnsweringView from "@/components/live-room/StageAnsweringView";
 import TopicRevealView from "@/components/live-room/TopicRevealView";
 import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
+import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
@@ -55,6 +56,13 @@ export default function LivePage() {
 
   const now = useTickingNow();
   const [joining, setJoining] = useState(false);
+
+  // 2026-08-29:「お題発表・回答・審査で使う必須素材が、表示される瞬間に読み込み待ち
+  // にならないようにする」対応。ページに滞在している間ずっと（フェーズがどう変わっても
+  // アンマウントされずに）裏で進める必要があるため、フェーズごとの各Viewではなく
+  // このページ自体のトップレベルで呼ぶ。進捗表示はOpeningView（開幕＝実質的な
+  // 待機画面）にだけpropsで渡す。
+  const assetPreload = useLiveAssetPreload();
 
   useEffect(() => {
     const unsubscribe = subscribe();
@@ -151,7 +159,7 @@ export default function LivePage() {
           {live.current_phase === "interlude" ? (
             <InterludeScreen key="interlude" />
           ) : live.current_phase === "opening" ? (
-            <OpeningView key="opening" />
+            <OpeningView key="opening" assetPreload={assetPreload} />
           ) : live.current_phase === "topic_reveal" ? (
             <TopicRevealView key="topic_reveal" />
           ) : isMyGroupOnStage ? (

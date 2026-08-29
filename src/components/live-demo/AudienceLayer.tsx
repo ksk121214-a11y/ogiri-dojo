@@ -82,6 +82,8 @@ export default function AudienceLayer({
           alt=""
           fill
           sizes={`${fixedRenderWidthPx}px`}
+          loading="eager"
+          fetchPriority="high"
           className={`object-contain ${imageClassName}`}
         />
       </div>
@@ -106,6 +108,8 @@ export default function AudienceLayer({
         alt=""
         fill
         sizes="100vw"
+        loading="eager"
+        fetchPriority="high"
         className={fit === "contain" ? "object-contain" : "object-cover"}
         style={fit === "contain" ? undefined : { objectPosition: "50% 53%" }}
       />

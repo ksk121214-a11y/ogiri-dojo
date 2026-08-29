@@ -130,6 +130,15 @@ export function useLiveJoinFlow() {
     setStatus("idle");
   }, []);
 
+  // 2026-08-29:「ライブ画面のルートと必要なJSも待機画面からprefetchする」対応。
+  // JoinLiveButtonは（半券アニメーションを挟むため）<Link>ではなく<button>+
+  // router.pushにしているため、Next.jsの<Link>が持つ自動prefetchの恩恵を受けられない。
+  // ホーム画面に来た時点で明示的にprefetchしておくことで、「参加する」を押した時点では
+  // 既に/liveのJSチャンクが取得済みになり、遷移直後の白画面・読み込み待ちを減らす。
+  useEffect(() => {
+    router.prefetch("/live");
+  }, [router]);
+
   useEffect(() => {
     let cancelled = false;
     const safeEvaluate = () => {

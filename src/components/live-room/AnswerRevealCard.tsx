@@ -61,11 +61,19 @@ export default function AnswerRevealCard({
             : undefined
         }
       >
+        {/* 2026-08-29:「回答フリップ画像が万が一出なかった時」の保険。フリップ画像
+            （answer-flip.png）が何らかの理由で読み込めなかった場合、下の回答文字
+            （暗い色）がライブ舞台の暗い背景にそのまま乗ってしまい読めなくなるため、
+            先に白いカードを敷いておく。画像が正常に表示される場合は、object-containで
+            同じアスペクト比のフリップ画像がぴったり重なるため見た目は変わらない。 */}
+        <div className="absolute inset-0 rounded-2xl bg-white" aria-hidden />
         <Image
           src={`${BASE_PATH}/images/live/answer-flip.png`}
           alt=""
           fill
           sizes="384px"
+          loading="eager"
+          fetchPriority="high"
           className="pointer-events-none select-none object-contain"
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-[12%] pb-[10%] pt-[22%] text-center">
