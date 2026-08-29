@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { useRouter } from "next/navigation";
 
-import { clearLiveEntry, hasEnteredLive, setLiveEntry } from "@/lib/liveEntryStorage";
+import { clearLiveEntry, getLiveEntry, hasEnteredLive, setLiveEntry } from "@/lib/liveEntryStorage";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { fetchActiveLive, fetchMyParticipant } from "@/store/useLiveFollowerStore";
@@ -37,6 +37,20 @@ import { fetchActiveLive, fetchMyParticipant } from "@/store/useLiveFollowerStor
 // 半券は切れたままになる（要件どおり、結果発表とcloseは区別される）。
 export type LiveJoinStatus = "idle" | "checking" | "detaching" | "error" | "joined";
 
+// useSyncExternalStoreのsubscribe引数：liveEntryStorageは変更を通知する仕組みを
+// 持たない単純なlocalStorageラッパーのため、購読すべきイベントが無い（値が変わる
+// のはこのフック自身のsetLiveEntry/clearLiveEntry呼び出しの直後だけで、その都度
+// 別途setStatusによる再レンダーが起きるため、それ以外の変化を監視する必要が無い）。
+function subscribeNothing() {
+  return () => {};
+}
+function getHasStoredEntrySnapshot(): boolean {
+  return !!getLiveEntry()?.entered;
+}
+function getHasStoredEntryServerSnapshot(): boolean {
+  return false; // サーバーにはlocalStorageが無いため、SSR時は常に「未入場」扱い。
+}
+
 export function useLiveJoinFlow() {
   const [status, setStatus] = useState<LiveJoinStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +58,27 @@ export function useLiveJoinFlow() {
   // 連打防止：非同期処理の完了を待たずに二重発火しないよう、state更新より確実な
   // refで即座にガードする（setStateは次のレンダーまで反映されないため）。
   const inFlightRef = useRef(false);
+
+  // 2026-08-29:「マイページ・次回ライブ・遊び方からホームに戻ると、半券が一瞬戻って
+  // 一瞬で消える」ちらつき対策。statusのuseState初期化子でlocalStorageを見てしまうと
+  // SSR結果（サーバーにはlocalStorageが無いので必ず"idle"）とクライアントの初回
+  // レンダリングが食い違い、hydration mismatchになる。かといってuseEffect/
+  // useLayoutEffect内でsetStateして後から補正する形も、cascading renderを避ける
+  // という理由でReactの新しいガイドライン上避けるべきとされている。
+  // useSyncExternalStoreは「サーバーとクライアントで値が異なってもmismatchに
+  // ならず、ハイドレーション直後（ペイント前）に同期的にクライアント値へ更新される」
+  // 仕組みをReactが正式に提供しているため、まさにこのケース向けに使う。
+  const hasStoredEntry = useSyncExternalStore(
+    subscribeNothing,
+    getHasStoredEntrySnapshot,
+    getHasStoredEntryServerSnapshot,
+  );
+  // 実際にUI側へ渡す実効ステータス：まだevaluate()の判定が済んでいない("idle"の
+  // まま)間だけ、localStorageの記録で楽観的に補完する。evaluate()がidle/joinedの
+  // どちらかに確定した後は、そちらを優先する（hasStoredEntryが古いままでも
+  // 上書きされない）。
+  const effectiveStatus: LiveJoinStatus = status === "idle" && hasStoredEntry ? "joined" : status;
+
   // 評価処理が進行中（通信中・アニメーション中）は、Realtime等からの再評価で
   // 状態を上書きしない（進行中のアニメーションを壊さないため）ためのガード。
   const statusRef = useRef<LiveJoinStatus>("idle");
@@ -147,7 +182,7 @@ export function useLiveJoinFlow() {
     if (inFlightRef.current) return; // 連打防止：通信中・アニメーション中・再入場中は無視
     inFlightRef.current = true;
 
-    if (status === "joined") {
+    if (effectiveStatus === "joined") {
       // 再入場：半券アニメーション・SEは再生せず、既存の待機画面へ直接戻る。
       router.push("/live");
       inFlightRef.current = false;
@@ -195,5 +230,5 @@ export function useLiveJoinFlow() {
     router.push("/live");
   };
 
-  return { status, error, handleJoinClick, handleAnimationEnd };
+  return { status: effectiveStatus, error, handleJoinClick, handleAnimationEnd };
 }
