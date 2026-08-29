@@ -186,23 +186,30 @@ export default function ScoringPhysicsBoard({
   const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const rafRef = useRef<number | null>(null);
   const prevWidthRef = useRef<number | null>(null);
+  // 2026-08-30:「満点じゃないのに金になる／点数分の玉が出ない／玉が出ない時がある」
+  // 対策。maxBallsは呼び出し元でeligibleJudgeCount（審査資格のある参加者数）から
+  // 動的に計算されており、審査サイクルの最中にも参加者の入退室で変動しうる値。
+  // 以前はpropsのmaxBallsが変わるたびにmaxBallsRef.currentを即座に上書きしていた
+  // ため、「5人ぶん(15個)降っている途中で審査員が減ってmaxBallsが3に下がる」と
+  // totalSpawnedRef(15) >= maxBallsRef(3) が真になり、実際は満点でないのに満点判定
+  // されて弾け、かつ以降のspawnBallsForPointsはperfectTriggeredRef済みとして
+  // 即座に捨てられる（＝以降の採点の玉が一切出ない）という不整合を起こしていた。
+  // 1回答の審査サイクル中はmaxBallsを固定し、roundKeyが切り替わるタイミング
+  // （＝次の回答の審査に移る瞬間）でだけ、その時点の最新値を取り込むようにする。
   const maxBallsRef = useRef(maxBalls);
+  const latestMaxBallsPropRef = useRef(maxBalls);
   const onBigLaughRef = useRef(onBigLaugh);
   const spawnedEventIdsRef = useRef<Set<string>>(new Set());
   const prevRoundKeyRef = useRef<string | null>(null);
 
   const [layout, setLayout] = useState<Layout | null>(null);
   const [totalBalls, setTotalBalls] = useState(0);
+  // "X / Y"表示のYも、ロジックと同じ固定値を見せる（propsのmaxBallsをそのまま
+  // 表示すると、審査サイクル中に分母だけ動いて見える不整合になるため）。
+  const [fixedMaxBalls, setFixedMaxBalls] = useState(maxBalls);
 
   useEffect(() => {
-    maxBallsRef.current = maxBalls;
-    // maxBalls（審査員数由来の理論上限）が変わったら、新しく降らせる玉の半径にも
-    // 反映されるようlayoutを更新する（既存の玉のサイズは変えない）。
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    if (rect.width === 0) return;
-    setLayout(computeLayout(rect.width, rect.height, maxBalls));
+    latestMaxBallsPropRef.current = maxBalls;
   }, [maxBalls]);
   useEffect(() => {
     onBigLaughRef.current = onBigLaugh;
@@ -468,6 +475,10 @@ export default function ScoringPhysicsBoard({
     if (roundKey === prevRoundKeyRef.current) return;
     prevRoundKeyRef.current = roundKey;
 
+    // 次の回答の審査に移るこのタイミングでだけ、maxBallsの最新値を取り込んで固定する。
+    maxBallsRef.current = latestMaxBallsPropRef.current;
+    setFixedMaxBalls(latestMaxBallsPropRef.current);
+
     spawnedEventIdsRef.current = new Set();
     totalSpawnedRef.current = 0;
     setTotalBalls(0);
@@ -490,7 +501,7 @@ export default function ScoringPhysicsBoard({
   // 静止した瞬間に即座に弾けさせず、金色に染まりきる(GOLD_TRANSITION_MS)のを見せた上で
   // さらに一呼吸(PERFECT_POP_HOLD_MS)置いてから弾けるようにする。
   useEffect(() => {
-    if (totalBalls < maxBalls || perfectTriggeredRef.current) return;
+    if (totalBalls < fixedMaxBalls || perfectTriggeredRef.current) return;
     const checkInterval = setInterval(() => {
       const engine = engineRef.current;
       if (!engine) return;
@@ -511,7 +522,7 @@ export default function ScoringPhysicsBoard({
       triggerPerfectEffect();
     }, 150);
     return () => clearInterval(checkInterval);
-  }, [totalBalls, maxBalls, triggerPerfectEffect]);
+  }, [totalBalls, fixedMaxBalls, triggerPerfectEffect]);
 
   // 採点が確定した(resolved)瞬間に弾けさせる（既定では遅延0）。満点の場合は、
   // 金色に染まりきる猶予(GOLD_TRANSITION_MS+PERFECT_POP_HOLD_MS)が
@@ -555,7 +566,11 @@ export default function ScoringPhysicsBoard({
       if (perfectTriggeredRef.current) return true;
       if (!engine || !l) return false;
 
-      const remaining = maxBalls - totalSpawnedRef.current;
+      // このroundKey（1回答の審査サイクル）中に固定したmaxBallsRef.currentで判定する。
+      // propsのmaxBalls（審査員数の増減で動く）を直接使うと、審査中に上限が下がった
+      // 瞬間、既に降らせた玉数との差分(remaining)が負になり、点数分の玉が出なくなる
+      // 不整合が起きるため。
+      const remaining = maxBallsRef.current - totalSpawnedRef.current;
       const count = Math.min(points, Math.max(0, remaining));
       if (count === 0) return true;
 
@@ -586,7 +601,7 @@ export default function ScoringPhysicsBoard({
       }
       return true;
     },
-    [layout, maxBalls],
+    [layout],
   );
 
   // scoreEventsに新しく増えた分だけ玉を降らせる。誰の採点でも(自分の投票でも
@@ -622,7 +637,7 @@ export default function ScoringPhysicsBoard({
           </div>
 
           <div className="absolute bottom-2 right-2 rounded-full bg-[#1a1a3a]/85 px-3 py-1 font-sans text-xs font-bold tabular-nums text-[#ffcf4a]">
-            {totalBalls} / {maxBalls}
+            {totalBalls} / {fixedMaxBalls}
           </div>
         </div>
       </div>
@@ -652,7 +667,7 @@ export default function ScoringPhysicsBoard({
       </div>
 
       <div className="absolute bottom-2 right-2 rounded-full bg-dojo-stage-dark/80 px-3 py-1 font-sans text-xs font-bold tabular-nums text-dojo-curtain-gold">
-        {totalBalls} / {maxBalls}
+        {totalBalls} / {fixedMaxBalls}
       </div>
     </div>
   );

@@ -64,9 +64,17 @@ export default function AnswerRevealCard({
         {/* 2026-08-29:「回答フリップ画像が万が一出なかった時」の保険。フリップ画像
             （answer-flip.png）が何らかの理由で読み込めなかった場合、下の回答文字
             （暗い色）がライブ舞台の暗い背景にそのまま乗ってしまい読めなくなるため、
-            先に白いカードを敷いておく。画像が正常に表示される場合は、object-containで
-            同じアスペクト比のフリップ画像がぴったり重なるため見た目は変わらない。 */}
-        <div className="absolute inset-0 rounded-2xl bg-white" aria-hidden />
+            先に白いカードを敷いておく。
+            2026-08-30:「フリップが正常に表示されている時も白い枠が見えてしまう」との
+            指摘を受けて修正。answer-flip.png自体は上部に指のイラストがあり、指と紙の
+            境目や外周に透明な余白があるため、コンテナ全体(inset-0)を白で覆うと、
+            その透明な余白から保険用の白が透けて見えてしまっていた。テキストの表示範囲
+            （下のtext要素とまったく同じpadding値）だけに絞ることで、フリップの
+            紙の内側（実際に文字が乗る場所）だけをカバーし、指や外周には重ならないようにする。 */}
+        <div
+          className="absolute top-[22%] right-[12%] bottom-[10%] left-[12%] rounded-lg bg-white"
+          aria-hidden
+        />
         <Image
           src={`${BASE_PATH}/images/live/answer-flip.png`}
           alt=""
