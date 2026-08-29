@@ -42,12 +42,21 @@ export interface TsukkomiEvent {
   text: string;
 }
 
+// 2026-08-29:「ライブ中、自分のアイコンが他の参加者の画面ではランダムなアイコンに
+// なる」対応。participant_display_names RPCがavatar_icon/avatar_colorも返すように
+// なったため、表示名と同じ経路でアイコン設定も取得する。
+export interface ParticipantAvatarInfo {
+  icon: string;
+  color: string;
+}
+
 interface LiveFollowerState {
   live: LiveRow | null;
   myParticipant: ParticipantRow | null;
   participants: ParticipantRow[];
   groups: GroupRow[];
   participantNames: Record<string, string>; // participant_id → display_name
+  participantAvatars: Record<string, ParticipantAvatarInfo>; // participant_id → 絵柄・色
   currentTurn: TurnRow | null;
   currentTopic: TopicRow | null;
   activeAnswer: AnswerRow | null;
@@ -119,13 +128,25 @@ async function fetchGroupsForLive(liveId: string): Promise<GroupRow[]> {
 }
 
 // 組結果・最終結果で他人の表示名を出すための安全な経路（生のprofilesは自分の行しか読めないため）。
-async function fetchParticipantNames(liveId: string): Promise<Record<string, string>> {
+// 2026-08-29: 表示名と同じ経路でavatar_icon/avatar_colorも取得するようにした
+// （participant_display_names RPC自体を拡張、詳しくはsupabase/migrations/0015参照）。
+async function fetchParticipantProfiles(liveId: string): Promise<{
+  names: Record<string, string>;
+  avatars: Record<string, ParticipantAvatarInfo>;
+}> {
   const { data } = await supabase.rpc("participant_display_names", { p_live_id: liveId });
-  const map: Record<string, string> = {};
-  for (const row of (data ?? []) as { participant_id: string; display_name: string }[]) {
-    map[row.participant_id] = row.display_name;
+  const names: Record<string, string> = {};
+  const avatars: Record<string, ParticipantAvatarInfo> = {};
+  for (const row of (data ?? []) as {
+    participant_id: string;
+    display_name: string;
+    avatar_icon: string;
+    avatar_color: string;
+  }[]) {
+    names[row.participant_id] = row.display_name;
+    avatars[row.participant_id] = { icon: row.avatar_icon, color: row.avatar_color };
   }
-  return map;
+  return { names, avatars };
 }
 
 async function fetchResolvedAnswersForLive(liveId: string): Promise<AnswerRow[]> {
@@ -295,6 +316,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   participants: [],
   groups: [],
   participantNames: {},
+  participantAvatars: {},
   currentTurn: null,
   currentTopic: null,
   activeAnswer: null,
@@ -323,15 +345,20 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       let participants: ParticipantRow[] = [];
       let groups: GroupRow[] = [];
       let participantNames: Record<string, string> = {};
+      let participantAvatars: Record<string, ParticipantAvatarInfo> = {};
       if (live) {
-        [participants, groups, participantNames] = await Promise.all([
+        const [participantsResult, groupsResult, profiles] = await Promise.all([
           fetchParticipantsForLive(live.id),
           fetchGroupsForLive(live.id),
-          fetchParticipantNames(live.id),
+          fetchParticipantProfiles(live.id),
         ]);
+        participants = participantsResult;
+        groups = groupsResult;
+        participantNames = profiles.names;
+        participantAvatars = profiles.avatars;
       }
       if (cancelled) return;
-      set({ live, myParticipant, participants, groups, participantNames, loading: false });
+      set({ live, myParticipant, participants, groups, participantNames, participantAvatars, loading: false });
       await refreshTurnDerived();
     };
 

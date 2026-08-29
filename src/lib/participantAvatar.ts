@@ -1,11 +1,14 @@
 // 自分以外の参加者（ボット含む）のアイコン絵柄・色を決定的に割り当てるためのヘルパー。
 //
-// マイページのアイコン設定（avatarIcon/avatarColor）はこのブラウザのlocalStorageにしか
-// 保存されておらず、他の参加者からは見えない（Supabaseのprofilesテーブルには
-// avatar関連のカラムが無い）。そのため「ボットのアイコンも編集画面にあるどれかの
-// アイコンと色にしてほしい」という要望に対しては、participant_id（同じ人なら
-// ライブ中ずっと不変のID）から常に同じ絵柄・色が一意に決まるようハッシュ化して
-// 割り当てる。同じparticipantIdなら誰の画面で見ても同じ見た目になる。
+// 2026-08-29: profiles.avatar_icon/avatar_colorの追加により、本人が実際に選んだ
+// 絵柄・色は他の参加者にも公開されるようになった（participant_display_names RPC
+// 経由、参照: src/store/useLiveFollowerStore.ts）。このファイルの決定的ハッシュは、
+// ①ボット作成時にprofilesへ書き込む初期値（useLiveBotStore.ts、getParticipantAvatarIconId
+// を使う）、②何らかの理由でSupabase側の値がまだ取得できていない場合のフォールバック
+// （ParticipantIconAvatar/StageCharactersView）、の2用途にのみ使う。
+// participant_id（同じ人ならライブ中ずっと不変のID）から常に同じ絵柄・色が一意に
+// 決まるようハッシュ化しているため、同じparticipantIdなら誰の画面で見ても
+// 同じ見た目になる（Supabase未取得時の一時的な見た目としても破綻しない）。
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
 import { AVATAR_ICON_PRESETS } from "@/lib/avatarIcons";
 
@@ -24,6 +27,12 @@ function pickParticipantIconPreset(participantId: string) {
 
 export function getParticipantAvatarIconSrc(participantId: string): string {
   return pickParticipantIconPreset(participantId).src;
+}
+
+// ボット作成時（useLiveBotStore.ts）に、profiles.avatar_iconへ書き込む初期値として使う
+// （AVATAR_ICON_PRESETSのid文字列、例: "afro"）。
+export function getParticipantAvatarIconId(participantId: string): string {
+  return pickParticipantIconPreset(participantId).id;
 }
 
 export function getParticipantAvatarSilhouetteSrc(participantId: string): string {

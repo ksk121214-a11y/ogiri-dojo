@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { BOT_NAMES } from "@/data/liveDemoData";
 import { createBotClient, type BotSession } from "@/lib/liveBotClients";
 import type { ParticipantRow } from "@/lib/liveRoomTypes";
+import { getParticipantAvatarColor, getParticipantAvatarIconId } from "@/lib/participantAvatar";
 
 interface LiveBotState {
   bots: BotSession[];
@@ -44,10 +45,25 @@ export const useLiveBotStore = create<LiveBotState>()((set, get) => ({
       const userId = authData.user.id;
       const displayName = availableNames[i] ?? `ボット${i + 1}`;
 
-      // 自分自身のプロフィール名をボット名に変更（本人によるdisplay_name自己更新。既存RLSにそのまま合致）。
+      // 2026-08-29: ボットのアイコン絵柄・色も、userIdから決定的に選んで
+      // profilesへ書き込んでおく。何もしないとavatar_icon/avatar_colorは
+      // デフォルト値（"default"）のままになり、全ボットが同じ見た目になってしまう
+      // （「ボットのアイコンも編集画面にあるどれかのアイコンと色にしてほしい」の
+      // 要望に応えられなくなる）。参加者間で表示するavatar_icon/avatar_colorは
+      // participant_display_names RPC経由でprofilesの値を正として使うため、
+      // ここで書き込んだ値がそのままボットの見た目として全員に一貫して見える。
+      const botAvatarIcon = getParticipantAvatarIconId(userId);
+      const botAvatarColor = getParticipantAvatarColor(userId);
+
+      // 自分自身のプロフィール名・アイコンをボット用に変更（本人によるself-update。既存RLSにそのまま合致）。
       await client
         .from("profiles")
-        .update({ display_name: displayName, display_name_set: true })
+        .update({
+          display_name: displayName,
+          display_name_set: true,
+          avatar_icon: botAvatarIcon,
+          avatar_color: botAvatarColor,
+        })
         .eq("id", userId);
 
       const { data: existing } = await client

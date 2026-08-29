@@ -9,7 +9,9 @@ import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
-import type { FinalResultData } from "@/store/useLiveFollowerStore";
+import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
+
+const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 
 // 実バックエンド版ライブの最終結果発表。src/components/live-demo/FinalResultScreen.tsxと
 // 同じアクセントカラー（本日のベストアンサー＝赤枠、1〜3位＝青枠）を使うが、この
@@ -23,9 +25,11 @@ const RANK_COLOR = ["text-[#ffcf4a]", "text-[#8a93c7]", "text-[#ff8f4a]"];
 export default function FinalResultView({
   data,
   myParticipantId,
+  participantAvatars = EMPTY_AVATARS,
 }: {
   data: FinalResultData;
   myParticipantId: string | null;
+  participantAvatars?: Record<string, ParticipantAvatarInfo>;
 }) {
   const [step, setStep] = useState(0);
   const top3 = data.ranking.slice(0, 3);
@@ -64,7 +68,13 @@ export default function FinalResultView({
                 {data.bestAnswer.participantId === myParticipantId ? (
                   <MyIconAvatar size={22} bare />
                 ) : (
-                  <ParticipantIconAvatar participantId={data.bestAnswer.participantId} size={22} bare />
+                  <ParticipantIconAvatar
+                    participantId={data.bestAnswer.participantId}
+                    avatarIcon={participantAvatars[data.bestAnswer.participantId]?.icon}
+                    avatarColor={participantAvatars[data.bestAnswer.participantId]?.color}
+                    size={22}
+                    bare
+                  />
                 )}
                 <p className="font-sans text-xs text-[#6b6b90]">{data.bestAnswer.name}</p>
               </div>
@@ -93,7 +103,13 @@ export default function FinalResultView({
                 {top3[3 - step].participantId === myParticipantId ? (
                   <MyIconAvatar size={28} bare />
                 ) : (
-                  <ParticipantIconAvatar participantId={top3[3 - step].participantId} size={28} bare />
+                  <ParticipantIconAvatar
+                    participantId={top3[3 - step].participantId}
+                    avatarIcon={participantAvatars[top3[3 - step].participantId]?.icon}
+                    avatarColor={participantAvatars[top3[3 - step].participantId]?.color}
+                    size={28}
+                    bare
+                  />
                 )}
                 <p className="font-sans text-lg font-bold">
                   {truncateLiveDisplayName(top3[3 - step].name)}
@@ -129,7 +145,13 @@ export default function FinalResultView({
                         {isMe ? (
                           <MyIconAvatar size={24} bare />
                         ) : (
-                          <ParticipantIconAvatar participantId={r.participantId} size={24} bare />
+                          <ParticipantIconAvatar
+                            participantId={r.participantId}
+                            avatarIcon={participantAvatars[r.participantId]?.icon}
+                            avatarColor={participantAvatars[r.participantId]?.color}
+                            size={24}
+                            bare
+                          />
                         )}
                         <span className="truncate">{truncateLiveDisplayName(r.name)}</span>
                       </span>

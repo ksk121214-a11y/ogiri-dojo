@@ -30,6 +30,7 @@ export default function AudienceAnsweringView() {
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
   const participants = useLiveFollowerStore((s) => s.participants);
   const participantNames = useLiveFollowerStore((s) => s.participantNames);
+  const participantAvatars = useLiveFollowerStore((s) => s.participantAvatars);
   const groups = useLiveFollowerStore((s) => s.groups);
   const currentTurn = useLiveFollowerStore((s) => s.currentTurn);
   const currentTopic = useLiveFollowerStore((s) => s.currentTopic);
@@ -244,6 +245,7 @@ export default function AudienceAnsweringView() {
             <StageCharactersView
               members={stageMembers}
               myParticipantId={myParticipant.id}
+              participantAvatars={participantAvatars}
               activeParticipantId={activeParticipantId}
               revealPendingParticipantId={revealPendingParticipantId}
               scoreReveals={seatScores}

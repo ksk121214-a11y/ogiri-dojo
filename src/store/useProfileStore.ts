@@ -15,6 +15,11 @@ export interface DojoProfile {
   xUsername: string | null;
   avatarUrl: string | null;
   isHost: boolean;
+  // 2026-08-29: マイページで選ぶアイコンの絵柄・色（src/lib/avatarIcons.ts・
+  // avatarColors.tsのプリセットid/hex）。他の参加者にライブ中も自分の見た目が
+  // 正しく伝わるよう、useUserStore（ローカルのみ）ではなくprofilesに保存する。
+  avatarIcon: string;
+  avatarColor: string;
 }
 
 interface ProfileState {
@@ -22,6 +27,10 @@ interface ProfileState {
   loading: boolean;
   updateDisplayName: (
     name: string,
+  ) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  updateAvatar: (
+    icon: string,
+    color: string,
   ) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
@@ -32,6 +41,8 @@ function toDojoProfile(row: {
   x_username: string | null;
   avatar_url: string | null;
   is_host: boolean;
+  avatar_icon: string;
+  avatar_color: string;
 }): DojoProfile {
   return {
     id: row.id,
@@ -40,13 +51,15 @@ function toDojoProfile(row: {
     xUsername: row.x_username,
     avatarUrl: row.avatar_url,
     isHost: row.is_host,
+    avatarIcon: row.avatar_icon,
+    avatarColor: row.avatar_color,
   };
 }
 
 async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, display_name_set, x_username, avatar_url, is_host")
+    .select("id, display_name, display_name_set, x_username, avatar_url, is_host, avatar_icon, avatar_color")
     .eq("id", userId)
     .single();
   if (error || !data) return null;
@@ -82,6 +95,20 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     useUserStore.setState((s) => ({ user: { ...s.user, displayName: trimmed } }));
     return { ok: true };
   },
+
+  updateAvatar: async (icon, color) => {
+    const userId = get().profile?.id;
+    if (!userId) return { ok: false, reason: "ログインしていません" };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ avatar_icon: icon, avatar_color: color })
+      .eq("id", userId);
+    if (error) return { ok: false, reason: error.message };
+
+    set((s) => (s.profile ? { profile: { ...s.profile, avatarIcon: icon, avatarColor: color } } : s));
+    return { ok: true };
+  },
 }));
 
 if (typeof window !== "undefined") {
@@ -93,8 +120,25 @@ if (typeof window !== "undefined") {
     useProfileStore.setState({ loading: true });
     fetchProfile(userId).then((profile) => {
       useProfileStore.setState({ profile, loading: false });
-      if (profile) {
-        useUserStore.setState((s) => ({ user: { ...s.user, displayName: profile.displayName } }));
+      if (!profile) return;
+      useUserStore.setState((s) => ({ user: { ...s.user, displayName: profile.displayName } }));
+
+      // 2026-08-29: avatar_icon/avatar_colorをprofilesに追加する前から、この端末の
+      // useUserStore（localStorage）に既にアイコン設定を持っているユーザーがいる。
+      // 何もしないとprofiles側の初期値（"default"）で上書きされ、既存の見た目が
+      // リセットされてしまうため、profiles側がまだ初期値のままで、かつローカル側に
+      // それと異なる設定があれば、ローカルの設定を一度だけSupabaseへ移行する
+      // （以降はSupabase側が正の情報源になり、他の参加者からも正しく見える）。
+      const localUser = useUserStore.getState().user;
+      const isProfileAvatarDefault = profile.avatarIcon === "default" && profile.avatarColor === "#c8320c";
+      const isLocalAvatarCustomized =
+        localUser.avatarIcon !== "default" || localUser.avatarColor !== "#c8320c";
+      if (isProfileAvatarDefault && isLocalAvatarCustomized) {
+        useProfileStore.getState().updateAvatar(localUser.avatarIcon, localUser.avatarColor);
+      } else {
+        useUserStore.setState((s) => ({
+          user: { ...s.user, avatarIcon: profile.avatarIcon, avatarColor: profile.avatarColor },
+        }));
       }
     });
   };

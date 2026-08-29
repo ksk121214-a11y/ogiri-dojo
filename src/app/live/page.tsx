@@ -47,6 +47,7 @@ export default function LivePage() {
   const currentTopic = useLiveFollowerStore((s) => s.currentTopic);
   const groupResult = useLiveFollowerStore((s) => s.groupResult);
   const finalResult = useLiveFollowerStore((s) => s.finalResult);
+  const participantAvatars = useLiveFollowerStore((s) => s.participantAvatars);
   const liveLoading = useLiveFollowerStore((s) => s.loading);
   const followerError = useLiveFollowerStore((s) => s.error);
   const subscribe = useLiveFollowerStore((s) => s.subscribe);
@@ -275,11 +276,19 @@ export default function LivePage() {
             )}
 
           {live.current_phase === "group_result" && groupResult && (
-            <GroupResultView data={groupResult} myParticipantId={myParticipant?.id ?? null} />
+            <GroupResultView
+              data={groupResult}
+              myParticipantId={myParticipant?.id ?? null}
+              participantAvatars={participantAvatars}
+            />
           )}
 
           {live.current_phase === "final_result" && finalResult && (
-            <FinalResultView data={finalResult} myParticipantId={myParticipant?.id ?? null} />
+            <FinalResultView
+              data={finalResult}
+              myParticipantId={myParticipant?.id ?? null}
+              participantAvatars={participantAvatars}
+            />
           )}
 
           {followerError && (

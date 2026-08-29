@@ -12,9 +12,11 @@ import {
   getParticipantAvatarIconSrc,
   getParticipantAvatarSilhouetteSrc,
 } from "@/lib/participantAvatar";
+import type { ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
 import { useUserStore } from "@/store/useUserStore";
 
 const EMPTY_SCORE_REVEALS: Record<string, number> = {};
+const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 
 // 中央の「舞台」ビジュアルエリア：組の回答者を横並びに配置し、
 // 審査サイクルに乗っている1人だけスポットライトを浴びて前に出る。
@@ -26,17 +28,23 @@ const EMPTY_SCORE_REVEALS: Record<string, number> = {};
 export default function StageCharactersView({
   members,
   myParticipantId = null,
+  participantAvatars = EMPTY_AVATARS,
   activeParticipantId,
   revealPendingParticipantId = null,
   scoreReveals = EMPTY_SCORE_REVEALS,
   compact = false,
 }: {
   members: { id: string; name: string }[];
-  // 自分のアイコンだけ、マイページで選んだ絵柄・色（useUserStore）を反映する。
-  // それ以外の参加者（ボット含む）はparticipant_idから決定的に選んだ絵柄・色にする
-  // （マイページの設定はこのブラウザにしか保存されず他人からは見えないため、
-  // 参照: src/lib/participantAvatar.ts）。
+  // 自分のアイコンだけ、マイページで選んだ絵柄・色（useUserStore、ローカル編集中の
+  // 最新値）を反映する。それ以外の参加者（ボット含む）は、Supabase側（profiles、
+  // participant_display_names RPC経由）に保存された実際の絵柄・色を使う。
+  // 2026-08-29: 以前はマイページの設定がこのブラウザにしか保存されず他人からは
+  // 見えなかったため、participant_idから決定的に選んだ絵柄・色（フォールバック、
+  // 参照: src/lib/participantAvatar.ts）で代用していたが、profilesにavatar_icon/
+  // avatar_colorを追加したことで本人の実際の設定を全員に見せられるようになった。
+  // フォールバックは、まだ取得できていない・該当行が無い場合の保険として残す。
   myParticipantId?: string | null;
+  participantAvatars?: Record<string, ParticipantAvatarInfo>;
   activeParticipantId: string | null;
   // 送信直後・まだ回答フリップが出ていない「一呼吸」中の対象者。この間は回答フリップが
   // まだ画面を覆っていないため、回答席の光る演出が実際に見える唯一のタイミング
@@ -70,9 +78,20 @@ export default function StageCharactersView({
         const isMe = member.id === myParticipantId;
         const scoreRevealValue = scoreReveals[member.id];
         const showScore = scoreRevealValue !== undefined;
-        const iconSrc = isMe ? myIconSrc : getParticipantAvatarIconSrc(member.id);
-        const silhouetteSrc = isMe ? mySilhouetteSrc : getParticipantAvatarSilhouetteSrc(member.id);
-        const iconColor = isMe ? myAvatarColor : getParticipantAvatarColor(member.id);
+        const otherAvatar = participantAvatars[member.id];
+        const iconSrc = isMe
+          ? myIconSrc
+          : otherAvatar
+            ? getAvatarIconSrc(otherAvatar.icon)
+            : getParticipantAvatarIconSrc(member.id);
+        const silhouetteSrc = isMe
+          ? mySilhouetteSrc
+          : otherAvatar
+            ? getAvatarSilhouetteSrc(otherAvatar.icon)
+            : getParticipantAvatarSilhouetteSrc(member.id);
+        const iconColor = isMe
+          ? myAvatarColor
+          : (otherAvatar?.color ?? getParticipantAvatarColor(member.id));
         return (
           <motion.div
             key={member.id}

@@ -8,7 +8,9 @@ import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
-import type { GroupResultData } from "@/store/useLiveFollowerStore";
+import type { GroupResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
+
+const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 
 // 実バックエンド版ライブの組結果発表。src/components/live-demo/GroupResultScreen.tsxと
 // 同じ見た目（白カード＋青枠）だが、useLiveDemoStore/MY_PARTICIPANT_IDには依存せず、
@@ -16,9 +18,11 @@ import type { GroupResultData } from "@/store/useLiveFollowerStore";
 export default function GroupResultView({
   data,
   myParticipantId,
+  participantAvatars = EMPTY_AVATARS,
 }: {
   data: GroupResultData;
   myParticipantId: string | null;
+  participantAvatars?: Record<string, ParticipantAvatarInfo>;
 }) {
   // Strict Mode（開発時）はマウント直後のeffectを2回連続で実行するため、ガード無しだと
   // 音が二重に重なって鳴ってしまう。refで「もう鳴らした」を記録して2回目を防ぐ。
@@ -56,7 +60,13 @@ export default function GroupResultView({
                 {isMe ? (
                   <MyIconAvatar size={28} bare />
                 ) : (
-                  <ParticipantIconAvatar participantId={entry.participantId} size={28} bare />
+                  <ParticipantIconAvatar
+                    participantId={entry.participantId}
+                    avatarIcon={participantAvatars[entry.participantId]?.icon}
+                    avatarColor={participantAvatars[entry.participantId]?.color}
+                    size={28}
+                    bare
+                  />
                 )}
                 <span className="truncate">{truncateLiveDisplayName(entry.name)}</span>
               </span>

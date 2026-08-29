@@ -33,6 +33,7 @@ export default function MyProfileEditModal({
   const updateAvatarIcon = useUserStore((s) => s.updateAvatarIcon);
   const profile = useProfileStore((s) => s.profile);
   const updateDisplayName = useProfileStore((s) => s.updateDisplayName);
+  const updateAvatar = useProfileStore((s) => s.updateAvatar);
 
   const currentName = profile?.displayName ?? user.displayName;
 
@@ -63,6 +64,16 @@ export default function MyProfileEditModal({
     updateBio(bio.trim());
 
     if (profile) {
+      // 2026-08-29:「ライブ中、自分のアイコンが相手の画面ではランダムなアイコンに
+      // なる」対応。アイコンの絵柄・色はこれまでuseUserStore（このブラウザにしか
+      // 保存されない）だけに保存していたため、他の参加者からは見えなかった。
+      // ログイン中はSupabase（profiles）にも保存し、他の参加者にも公開する。
+      const avatarResult = await updateAvatar(icon, color);
+      if (!avatarResult.ok) {
+        setSubmitting(false);
+        setError(avatarResult.reason);
+        return;
+      }
       const result = await updateDisplayName(trimmedName);
       if (!result.ok) {
         setSubmitting(false);
