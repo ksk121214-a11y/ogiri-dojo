@@ -213,24 +213,75 @@ export function resumeAudioContext(): void {
 }
 
 // 2026-08-29: 「場面転換のたびにBGMを再開が必要になる」対策の核心部分。
-// 4曲ぶんのHTMLAudioElementをここで使い回す（bgmElements）ようにし、
+// 4曲ぶんのHTMLAudioElementをここで使い回す（bgmNodes）ようにし、
 // 「ユーザー操作の中で一度再生に成功した、まさにそのインスタンス」を
 // 曲の切り替え時にもそのまま使い続ける。iOS Safari等は「新しく作った
 // <audio>要素は個別に一度ユーザー操作の文脈で再生されないと自動再生が
 // ブロックされ続ける」傾向があるため、切り替えのたびにnew Audio()していた
 // 以前の実装では、事前アンロックが効かず毎回ブロックされていた。
-const bgmElements = new Map<BgmName, HTMLAudioElement>();
+//
+// 2026-08-29追記:「スマホ実機だと音量が下がらない・重なって聞こえる」対策。
+// iOS Safariは仕様上 <audio> の volume プロパティをサポートしておらず、
+// JSから設定しても無視されて常に最大音量(1.0)固定になる（Apple公式ドキュメント・
+// MDN互換性データで明記された既知の制限。PCのブラウザでは効くため気付きにくい）。
+// このため、audio.volumeでの音量制御はやめ、SEと同じWeb Audio API経由
+// （MediaElementSourceNode→GainNode→destination）に統一する。GainNodeの
+// gain.valueによる音量制御はiOS Safariでも機能する。
+interface BgmNodes {
+  audio: HTMLAudioElement;
+  // AudioContextが使えない極端に古い環境向けのフォールバックではnullのままにし、
+  // その場合だけ従来通りaudio.volumeで制御する（get/setBgmVolume参照）。
+  gain: GainNode | null;
+}
 
-function getOrCreateBgmElement(name: BgmName): HTMLAudioElement {
-  let audio = bgmElements.get(name);
-  if (!audio) {
-    audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
-    audio.loop = true;
-    audio.volume = 0;
-    audio.preload = "auto";
-    bgmElements.set(name, audio);
+const bgmNodes = new Map<BgmName, BgmNodes>();
+
+function getOrCreateBgmNodes(name: BgmName): BgmNodes {
+  let nodes = bgmNodes.get(name);
+  if (nodes) return nodes;
+
+  const audio = new Audio(`${BASE_PATH}${BGM_PATHS[name]}`);
+  audio.loop = true;
+  audio.preload = "auto";
+  // 音量はGainNode側で制御するため、audio自体は最大のままにしておく
+  // （iOS Safariはどのみちこの値を無視するので実害はない）。
+  audio.volume = 1;
+
+  let gain: GainNode | null = null;
+  const ctx = getAudioContext();
+  if (ctx) {
+    try {
+      const source = ctx.createMediaElementSource(audio);
+      gain = ctx.createGain();
+      gain.gain.value = 0;
+      source.connect(gain).connect(ctx.destination);
+    } catch (err) {
+      // createMediaElementSourceは同じaudio要素に対して二重に呼べない等の制約があるが、
+      // ここはMapで一意生成しているので通常は失敗しない。万一失敗したらvolumeへフォールバック。
+      console.warn(`[audio] BGM用GainNode作成に失敗（volumeフォールバックへ切替）: ${name}`, err);
+      gain = null;
+      audio.volume = 0;
+    }
+  } else {
+    audio.volume = 0; // AudioContext自体が使えない環境向けのフォールバック
   }
-  return audio;
+
+  nodes = { audio, gain };
+  bgmNodes.set(name, nodes);
+  return nodes;
+}
+
+function getBgmVolume(nodes: BgmNodes): number {
+  return nodes.gain ? nodes.gain.gain.value : nodes.audio.volume;
+}
+
+function setBgmVolume(nodes: BgmNodes, v: number): void {
+  const clamped = Math.max(0, Math.min(1, v));
+  if (nodes.gain) {
+    nodes.gain.gain.value = clamped;
+  } else {
+    nodes.audio.volume = clamped;
+  }
 }
 
 // BGM確認モーダルのON・音声設定のBGM/SEオン、いずれかのユーザー操作の中で、
@@ -244,15 +295,15 @@ const unlockedBgmNames = new Set<BgmName>();
 function unlockBgmElement(name: BgmName): void {
   if (typeof window === "undefined" || unlockedBgmNames.has(name)) return;
   unlockedBgmNames.add(name);
-  const audio = getOrCreateBgmElement(name);
-  if (currentBgm?.name === name && !currentBgm.audio.paused) return; // 既に本再生中なら触らない
-  const result = audio.play();
+  const nodes = getOrCreateBgmNodes(name);
+  if (currentBgm?.name === name && !currentBgm.nodes.audio.paused) return; // 既に本再生中なら触らない
+  const result = nodes.audio.play();
   if (result && typeof result.then === "function") {
     result
       .then(() => {
         if (currentBgm?.name !== name) {
-          audio.pause();
-          audio.currentTime = 0;
+          nodes.audio.pause();
+          nodes.audio.currentTime = 0;
         }
       })
       .catch(() => {
@@ -362,30 +413,30 @@ export function playSfx(name: SfxName): void {
 // BGM
 // ============================================================
 
-let currentBgm: { name: BgmName; audio: HTMLAudioElement } | null = null;
+let currentBgm: { name: BgmName; nodes: BgmNodes } | null = null;
 // bgmEnabled=falseの間に要求された曲名（有効化された瞬間にこれを再生する）。
 let pendingBgmName: BgmName | null = null;
 let pendingBgmStartAtMs: number | undefined;
 const fadeTimers = new Map<HTMLAudioElement, ReturnType<typeof setInterval>>();
 
-function fadeAudio(audio: HTMLAudioElement, from: number, to: number, ms: number, onDone?: () => void) {
-  const existing = fadeTimers.get(audio);
+function fadeBgm(nodes: BgmNodes, from: number, to: number, ms: number, onDone?: () => void) {
+  const existing = fadeTimers.get(nodes.audio);
   if (existing) clearInterval(existing);
   const steps = 20;
   const stepMs = ms / steps;
   let i = 0;
-  audio.volume = from;
+  setBgmVolume(nodes, from);
   const timer = setInterval(() => {
     i++;
-    audio.volume = Math.max(0, Math.min(1, from + (to - from) * (i / steps)));
+    setBgmVolume(nodes, from + (to - from) * (i / steps));
     if (i >= steps) {
       clearInterval(timer);
-      fadeTimers.delete(audio);
-      audio.volume = to;
+      fadeTimers.delete(nodes.audio);
+      setBgmVolume(nodes, to);
       onDone?.();
     }
   }, stepMs);
-  fadeTimers.set(audio, timer);
+  fadeTimers.set(nodes.audio, timer);
 }
 
 // audio.play()が返すPromiseを必ず処理する。失敗時はneedsAudioResumeを立てて
@@ -402,9 +453,27 @@ function attemptPlay(audio: HTMLAudioElement) {
   }
 }
 
+// 2026-08-29:「その場所専用のBGMは、その場所以外では絶対に鳴らさない」という
+// 要件のため、直前のcurrentBgm（1曲）だけに頼らず、bgmNodesにある「keepName以外の
+// 全ての曲」を対象に、鳴っているものは必ずフェードアウト・停止する。画面側の
+// クリーンアップ漏れ等で万一取り残しがあっても、activateBgmが呼ばれるたびに
+// 確実に一本化されるため、複数の場所のBGMが同時に鳴り続ける事態を構造的に防げる
+// （currentBgmという単一ポインタだけに頼ると、ポインタが指していない
+// “取り残し”を検知できない）。
+function fadeOutAllBgmExcept(keepName: BgmName): void {
+  bgmNodes.forEach((otherNodes, otherName) => {
+    if (otherName === keepName) return;
+    if (!otherNodes.audio.paused) {
+      fadeBgm(otherNodes, getBgmVolume(otherNodes), 0, FADE_MS, () => {
+        otherNodes.audio.pause();
+      });
+    }
+  });
+}
+
 function activateBgm(name: BgmName, startAtMs?: number) {
   if (currentBgm?.name === name) {
-    if (currentBgm.audio.paused) attemptPlay(currentBgm.audio);
+    if (currentBgm.nodes.audio.paused) attemptPlay(currentBgm.nodes.audio);
     // 2026-08-29:「同じ曲のまま」の要求でも、必ず正しい音量へ向けてフェードし直す。
     // これが無いと2つのバグが起きる：
     // ①一時停止中（OFF等でvolumeを0までフェードダウン済み）の曲をそのままplay()する
@@ -413,16 +482,20 @@ function activateBgm(name: BgmName, startAtMs?: number) {
     //   （700ms経ちきっておらずpause前）の状態でONに戻すと、ここで何もしないと
     //   古いフェードアウトタイマーが生き続けて音が消えていき、最後にpauseされて
     //   しまう（「素早くOFF→ONにすると音が鳴らなくなる」バグ）。
-    // fadeAudio自体が「同じaudio要素への新しいフェード要求は、進行中の古いタイマーを
+    // fadeBgm自体が「同じaudio要素への新しいフェード要求は、進行中の古いタイマーを
     // clearIntervalしてから開始する」ため、狙った音量へ向けて上書きできる。
-    fadeAudio(currentBgm.audio, currentBgm.audio.volume, BGM_VOLUME[name], FADE_MS);
+    fadeBgm(currentBgm.nodes, getBgmVolume(currentBgm.nodes), BGM_VOLUME[name], FADE_MS);
+    // 「同じ曲のまま」の場合でも、他に取り残された曲が無いかは必ず確認する。
+    fadeOutAllBgmExcept(name);
     return;
   }
-  const prev = currentBgm;
+  fadeOutAllBgmExcept(name);
+
   // 2026-08-29: 曲ごとに使い回すAudio要素（unlockAllBgmで事前アンロック済みの、
   // まさにそのインスタンス）を取得する。切り替えのたびにnew Audio()すると
   // アンロック実績が引き継がれず「毎回BGMを再開が必要」になってしまうため。
-  const audio = getOrCreateBgmElement(name);
+  const nodes = getOrCreateBgmNodes(name);
+  const audio = nodes.audio;
 
   setState({ currentBgmTrack: name, bgmLoading: true });
 
@@ -459,15 +532,9 @@ function activateBgm(name: BgmName, startAtMs?: number) {
     }
   }
 
-  currentBgm = { name, audio };
+  currentBgm = { name, nodes };
   attemptPlay(audio);
-  fadeAudio(audio, 0, BGM_VOLUME[name], FADE_MS);
-
-  if (prev && prev.audio !== audio) {
-    fadeAudio(prev.audio, prev.audio.volume, 0, FADE_MS, () => {
-      prev.audio.pause();
-    });
-  }
+  fadeBgm(nodes, 0, BGM_VOLUME[name], FADE_MS);
 }
 
 // 画面側（AmbientBgmController・/live・/live-demo・CurtainOverlay）が
@@ -488,14 +555,14 @@ export function playBgm(name: BgmName, opts?: { startAtMs?: number }): void {
 
 // 2026-08-29:「BGMが重なって鳴る／OFFにしても止まらない」対策。currentBgmという
 // 単一のポインタだけを頼りに止めていると、画面側のクリーンアップ漏れ等で
-// bgmElements内の別の曲が再生されたまま取り残された場合に、そのゾンビ再生を
+// bgmNodes内の別の曲が再生されたまま取り残された場合に、そのゾンビ再生を
 // 止める手段が無くなってしまう。ここでは「実際に鳴っている（pausedでない）
 // 全ての曲」を対象に確実にフェードアウト・停止する防御的な実装にする。
-function fadeOutAndPauseAllBgmElements(): void {
-  bgmElements.forEach((audio) => {
-    if (!audio.paused) {
-      fadeAudio(audio, audio.volume, 0, FADE_MS, () => {
-        audio.pause();
+function fadeOutAndPauseAllBgmNodes(): void {
+  bgmNodes.forEach((nodes) => {
+    if (!nodes.audio.paused) {
+      fadeBgm(nodes, getBgmVolume(nodes), 0, FADE_MS, () => {
+        nodes.audio.pause();
       });
     }
   });
@@ -506,7 +573,7 @@ export function stopBgm(): void {
   pendingBgmStartAtMs = undefined;
   currentBgm = null;
   setState({ currentBgmTrack: null, bgmLoading: false });
-  fadeOutAndPauseAllBgmElements();
+  fadeOutAndPauseAllBgmNodes();
 }
 
 // ブラウザの自動再生制限で鳴らせなかったBGMを、ユーザーの操作をきっかけに再試行する。
@@ -514,9 +581,9 @@ export function stopBgm(): void {
 export function retryCurrentBgm(): void {
   if (typeof window === "undefined") return;
   resumeAudioContext();
-  if (currentBgm && currentBgm.audio.paused && state.bgmEnabled) {
-    attemptPlay(currentBgm.audio);
-    fadeAudio(currentBgm.audio, currentBgm.audio.volume, BGM_VOLUME[currentBgm.name], FADE_MS);
+  if (currentBgm && currentBgm.nodes.audio.paused && state.bgmEnabled) {
+    attemptPlay(currentBgm.nodes.audio);
+    fadeBgm(currentBgm.nodes, getBgmVolume(currentBgm.nodes), BGM_VOLUME[currentBgm.name], FADE_MS);
   }
 }
 
@@ -536,7 +603,7 @@ export function setBgmEnabled(next: boolean): void {
     // currentBgmだけでなく、万一取り残されて鳴っている曲があっても確実に止める
     // （stopBgmと同じ防御的ヘルパーを使う。ただしcurrentBgm自体は保持し、
     // 再度ONにした時に続きから再開できるようにする＝stopBgmとの違い）。
-    fadeOutAndPauseAllBgmElements();
+    fadeOutAndPauseAllBgmNodes();
   }
 }
 
