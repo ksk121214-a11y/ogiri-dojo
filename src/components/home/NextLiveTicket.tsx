@@ -148,6 +148,10 @@ export default function NextLiveTicket({
               これが無いと、本体側だけギザギザで半券側の左端がまっすぐに見えてしまう。
             */}
             <div className={`${styles.scallopDividerLeft} ${styles.scallopDark}`} aria-hidden />
+            {/* 本体側（.scallopCapTop/.scallopCapBottom）と同じ丸い切り欠きを、半券の
+                左上・左下にも重ねる（本体の右側の角と同じ丸みに揃える）。 */}
+            <div className={`${styles.scallopCapTopLeft} ${styles.scallopDark}`} aria-hidden />
+            <div className={`${styles.scallopCapBottomLeft} ${styles.scallopDark}`} aria-hidden />
 
             <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
               {live.ticketNo}

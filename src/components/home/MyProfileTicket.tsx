@@ -172,6 +172,11 @@ function TicketStubColumn({ count }: { count: number }) {
   return (
     <div className={styles.profileCardStub}>
       <div className={`${styles.scallopDividerLeft} ${styles.scallopKraft}`} aria-hidden />
+      {/* 本体側（.scallopCapTop/.scallopCapBottom）と同じ丸い切り欠きを、半券（5分割の
+          スタンプ欄）の左上・左下にも重ねる。1枚目セルの上角・5枚目セルの下角が
+          本体側の右側の角と同じ丸みに揃う。 */}
+      <div className={`${styles.scallopCapTopLeft} ${styles.scallopKraft}`} aria-hidden />
+      <div className={`${styles.scallopCapBottomLeft} ${styles.scallopKraft}`} aria-hidden />
       {Array.from({ length: MAX_TICKETS }).map((_, i) => {
         const filled = i >= MAX_TICKETS - count;
         return (

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { clearLiveEntry, hasEnteredLive, setLiveEntry } from "@/lib/liveEntryStorage";
-import { playSfx } from "@/lib/sfx";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { fetchActiveLive, fetchMyParticipant } from "@/store/useLiveFollowerStore";
@@ -23,8 +22,9 @@ import { fetchActiveLive, fetchMyParticipant } from "@/store/useLiveFollowerStor
 //   src/lib/liveEntryStorage.tsのlocalStorageで別途保持する。
 //
 // 状態遷移：
-// idle（未入場）→ checking（通信中）→ detaching（半券アニメーション中）→ /liveへ遷移
-//                                    \→ error（失敗、idleに戻る）
+// idle（未入場）→ checking（通信中、成功後に1秒の間を置く）
+//              → detaching（半券アニメーション中）→ /liveへ遷移
+//              \→ error（失敗、idleに戻る）
 // joined（入場済み＝participants行がある、またはlocalStorageに入場済み記録がある）
 //   → クリックで即座に/liveへ遷移（半券アニメーションもSEも無し）
 //
@@ -177,10 +177,15 @@ export function useLiveJoinFlow() {
       return;
     }
 
-    // 3. 確認に成功：チケットを裂くSE→入場済み状態の保存（画面遷移より前に完了させる）
-    //    →半券の切り離しアニメーションへ進む。
-    playSfx("ticketTear");
+    // 3. 確認に成功：入場済み状態を保存（画面遷移より前に完了させる）。
     setLiveEntry(data.user.id, live.id);
+
+    // 「参加する」を押してすぐ切り取られるのではなく、1秒の間を置いてから
+    // 半券アニメーションへ進む（切符を受け取って一拍置いてから切る、という間）。
+    // SEはここでは鳴らさない：半券が斜めに裂け始める最初のタイミング（isDetaching＝
+    // trueになった瞬間）に合わせて鳴らす一元的な処理をNextLiveTicket.tsx側に
+    // 持たせているため、ここで重複して鳴らさない。
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     setStatus("detaching");
   };
 
