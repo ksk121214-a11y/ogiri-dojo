@@ -61,7 +61,8 @@ export default function NextLiveTicket({
     playSfx("ticketTear");
 
     // アニメーション終了イベント(onAnimationEnd)が何らかの理由で発火しなかった場合の
-    // 保険。reduced-motion時はアニメーション自体が短い(150ms)ため、タイマーも短くする。
+    // 保険。本体のアニメーションは700ms（nextLiveTicketStubDetach）なので少し余裕を
+    // 持たせる。reduced-motion時はアニメーション自体が短い(150ms)ため、タイマーも短くする。
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -69,7 +70,7 @@ export default function NextLiveTicket({
       () => {
         onDetachAnimationEnd?.();
       },
-      reduced ? 300 : 800,
+      reduced ? 300 : 900,
     );
     fallbackTimerRef.current = timer;
     return () => {
@@ -141,6 +142,13 @@ export default function NextLiveTicket({
             }`}
             onAnimationEnd={isDetaching ? handleAnimationEnd : undefined}
           >
+            {/*
+              半券の左端にも本体側（.nextLiveTicketMain）の.scallopDividerと同じ
+              座標のミシン目を重ねる（マイページのMyProfileTicket.tsxと同じ手法）。
+              これが無いと、本体側だけギザギザで半券側の左端がまっすぐに見えてしまう。
+            */}
+            <div className={`${styles.scallopDividerLeft} ${styles.scallopDark}`} aria-hidden />
+
             <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-sm font-bold tabular-nums">
               {live.ticketNo}
             </span>

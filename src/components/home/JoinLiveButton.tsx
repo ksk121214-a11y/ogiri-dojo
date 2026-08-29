@@ -9,7 +9,7 @@ const LABEL: Record<LiveJoinStatus, string> = {
   checking: "入場手続き中…",
   detaching: "入場手続き中…",
   error: "参加する",
-  joined: "会場に戻る",
+  joined: "再入場する",
 };
 
 // 「参加する」CTA。2026-08-29: 参加成功時にNextLiveTicketの半券を切り離す演出に
