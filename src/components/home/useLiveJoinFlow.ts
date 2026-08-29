@@ -152,16 +152,17 @@ export function useLiveJoinFlow() {
       safeEvaluate();
     }
 
-    // 司会者による完全終了（lives.current_phase: "closed"への更新）をその場で検知する。
-    // useLiveFollowerStoreの購読（"follower-lives"）とは別チャンネルにして、
-    // /liveページ側の購読と競合しないようにする。
-    const livesChannel = supabase
-      .channel("home-live-entry-watch")
-      .on("postgres_changes", { event: "*", schema: "public", table: "lives" }, safeEvaluate)
-      .subscribe();
+    // 2026-08-29:「ホームに戻ってからブラウザが重くなる」不具合の対応。
+    // 当初はRealtime（lives全体のpostgres_changes）でその場検知していたが、
+    // ライブ進行中はフェーズ遷移・持ち時間の一時停止解除等でlivesテーブルが
+    // 数秒おきに更新され続けるため、ホーム画面にいる間もそのたびにevaluate()
+    // （fetchActiveLive＋fetchMyParticipantの2クエリ）が走り続け、実機で
+    // 明確な負荷増を確認した。ホーム画面での「司会者の完全終了」検知は
+    // 数十秒程度の遅延が許容できる（要件でもポーリング・画面フォーカス時の
+    // 再取得が明示的に許容されている）ため、Realtime購読はやめて、緩やかな
+    // ポーリング＋画面フォーカス復帰・オンライン復帰時の再評価に一本化した。
+    const pollTimer = setInterval(safeEvaluate, 30_000);
 
-    // Realtimeの取りこぼし対策として、既存のuseLiveFollowerStoreと同じく
-    // 画面フォーカス復帰・オンライン復帰でも明示的に再評価する。
     const handleVisibility = () => {
       if (document.visibilityState === "visible") safeEvaluate();
     };
@@ -172,7 +173,7 @@ export function useLiveJoinFlow() {
     return () => {
       cancelled = true;
       cleanupAuth?.();
-      supabase.removeChannel(livesChannel);
+      clearInterval(pollTimer);
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
     };
