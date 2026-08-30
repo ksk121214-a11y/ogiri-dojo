@@ -8,6 +8,7 @@ import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
+import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
 import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
@@ -748,6 +749,16 @@ function GroupingPanel({
   );
 }
 
+// よく使う運営メッセージの定型文。クリックすると入力欄にセットされ、その後は
+// 自由に書き換えられる（定型文のまま送ることも、一部だけ変えることもできる）。
+const ANNOUNCEMENT_TEMPLATES = [
+  { label: "開始前", text: "まもなくゲームを開始します" },
+  { label: "少々お待ちを", text: "只今準備中です。少々お待ちください" },
+  { label: "音声確認", text: "音声・画面が正しく表示されているかご確認ください" },
+  { label: "結果発表前", text: "まもなく結果を発表します" },
+  { label: "お礼", text: "ご参加ありがとうございました" },
+] as const;
+
 // 運営メッセージ送信欄。組分け確認中〜ゲーム進行中まで共通で表示する。
 function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
   const live = useLiveHostStore((s) => s.live);
@@ -788,7 +799,8 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
 
   return (
     <AdminCard title="プレイヤー全員への運営メッセージ">
-      <div className="flex gap-2">
+      <AdminTemplateChips templates={ANNOUNCEMENT_TEMPLATES} onSelect={(t) => setMessage(t.text)} />
+      <div className="mt-2 flex gap-2">
         <input
           type="text"
           value={message}

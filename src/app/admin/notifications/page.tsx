@@ -7,6 +7,7 @@ import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
+import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { supabase } from "@/lib/supabase";
 
@@ -16,6 +17,31 @@ interface SentAnnouncement {
   body: string;
   created_at: string;
 }
+
+// よく使うお知らせの定型文。クリックするとタイトル・本文にセットされ、
+// その後は自由に書き換えられる（日時など個別の内容はセット後に書き換える想定）。
+const NOTIFICATION_TEMPLATES = [
+  {
+    label: "メンテナンスのお知らせ",
+    title: "メンテナンスのお知らせ",
+    body: "日時の間、メンテナンスのためライブに参加できません。ご不便をおかけしますが、よろしくお願いいたします。",
+  },
+  {
+    label: "新機能のお知らせ",
+    title: "新機能のお知らせ",
+    body: "新しい機能を追加しました。詳しくはアプリ内をご確認ください。",
+  },
+  {
+    label: "障害復旧のお知らせ",
+    title: "障害復旧のお知らせ",
+    body: "発生していた不具合は復旧いたしました。ご迷惑をおかけし申し訳ございませんでした。",
+  },
+  {
+    label: "次回ライブのお知らせ",
+    title: "次回ライブのお知らせ",
+    body: "次回のライブ開催が決まりました。詳しくは「次回ライブ」ページをご確認ください。",
+  },
+] as const;
 
 // お知らせ配信（運営者専用管理画面）。ユーザー管理の「警告を送る」は個別1人向け
 // だが、それとは別に全ユーザーのヘッダーの通知ベル（NotificationBell.tsx）に
@@ -118,6 +144,13 @@ export default function AdminNotificationsPage() {
 
       <AdminCard title="新しいお知らせを作成">
         <div className="flex flex-col gap-2">
+          <AdminTemplateChips
+            templates={NOTIFICATION_TEMPLATES}
+            onSelect={(t) => {
+              setTitle(t.title);
+              setBody(t.body);
+            }}
+          />
           <label className="flex flex-col gap-0.5 text-[11px] text-gray-600">
             タイトル
             <input

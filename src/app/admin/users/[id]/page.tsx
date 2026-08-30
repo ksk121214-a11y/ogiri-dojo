@@ -9,6 +9,7 @@ import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
+import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { supabase } from "@/lib/supabase";
 import { useTickingNow } from "@/lib/useTickingNow";
@@ -44,6 +45,32 @@ interface ParticipationRow {
   joined_at: string;
 }
 
+// よく使う警告理由・警告本文の定型文セット。クリックすると理由・本文の両方に
+// セットされ、その後は自由に書き換えられる（定型文のまま送ることも、
+// 対象に合わせて書き換えることもできる）。
+const WARNING_TEMPLATES = [
+  {
+    label: "不適切な投稿",
+    reason: "不適切な投稿内容",
+    body: "投稿内容がガイドラインに違反しているため、警告いたします。今後同様の行為が確認された場合、利用停止となることがあります。",
+  },
+  {
+    label: "誹謗中傷",
+    reason: "他の利用者への誹謗中傷",
+    body: "他の利用者に対する誹謗中傷が確認されたため、警告いたします。今後同様の行為が確認された場合、利用停止となることがあります。",
+  },
+  {
+    label: "スパム行為",
+    reason: "スパム行為（同一内容の連続投稿等）",
+    body: "同一内容の連続投稿など、スパムと判断される行為が確認されたため、警告いたします。",
+  },
+  {
+    label: "なりすまし",
+    reason: "なりすまし行為",
+    body: "他者になりすます行為が確認されたため、警告いたします。今後同様の行為が確認された場合、利用停止となることがあります。",
+  },
+] as const;
+
 const SANCTION_TYPE_LABEL: Record<string, string> = {
   warning: "警告",
   suspend_temporary: "期限付き利用停止",
@@ -72,6 +99,13 @@ export default function AdminUserDetailPage() {
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [memoDraft, setMemoDraft] = useState("");
+  // 警告フォーム（定型文＋自由入力）。window.promptの連鎖では定型文を選べないため、
+  // 「警告を送る」を押すとこのフォームを展開する形にした。
+  const [warningFormOpen, setWarningFormOpen] = useState(false);
+  const [warningTargetRef, setWarningTargetRef] = useState("");
+  const [warningReason, setWarningReason] = useState("");
+  const [warningBody, setWarningBody] = useState("");
+  const [warningResponseNote, setWarningResponseNote] = useState("");
   // 事故防止：この画面の対応操作（警告〜削除）は同時に1つだけ実行できるようにする
   // （どの操作が進行中かをキーで持ち、実行中は該当ボタンを含め全て無効化する）。
   const [pendingAction, setPendingAction] = useState<
@@ -157,14 +191,16 @@ export default function AdminUserDetailPage() {
 
   const handleWarning = async () => {
     if (pendingAction) return;
-    const targetRef = window.prompt("対象となった投稿や行為を入力してください", "") ?? "";
-    const reason = window.prompt("警告理由を入力してください", "") ?? "";
-    if (!reason) return;
-    const body = window.prompt("警告本文（本人への通知に表示されます）を入力してください", "") ?? "";
-    const responseNote = window.prompt("今回行った対応を入力してください（省略可）", "") ?? "";
+    const reason = warningReason.trim();
+    if (!reason) {
+      notifyError("警告理由を入力してください。");
+      return;
+    }
+    const body = warningBody.trim();
+    const responseNote = warningResponseNote.trim();
     setPendingAction("warning");
     try {
-      await recordSanction("warning", reason, `${body}\n\n対応：${responseNote}`, targetRef);
+      await recordSanction("warning", reason, `${body}\n\n対応：${responseNote}`, warningTargetRef.trim() || null);
       await supabase.from("notifications").insert({
         user_id: userId,
         type: "warning",
@@ -172,6 +208,11 @@ export default function AdminUserDetailPage() {
         body: body || reason,
       });
       notifySuccess("警告を送りました。");
+      setWarningFormOpen(false);
+      setWarningTargetRef("");
+      setWarningReason("");
+      setWarningBody("");
+      setWarningResponseNote("");
       await load();
     } finally {
       setPendingAction(null);
@@ -355,9 +396,84 @@ export default function AdminUserDetailPage() {
 
       <AdminCard title="対応操作（下にいくほど強い対応です）">
         <div className="flex flex-col items-start gap-2">
-          <AdminButton disabled={pendingAction !== null} onClick={handleWarning}>
-            {pendingAction === "warning" ? "処理中…" : "警告を送る"}
-          </AdminButton>
+          {!warningFormOpen ? (
+            <AdminButton disabled={pendingAction !== null} onClick={() => setWarningFormOpen(true)}>
+              警告を送る
+            </AdminButton>
+          ) : (
+            <div className="w-full rounded border border-gray-200 p-3">
+              <p className="text-xs font-bold text-gray-700">警告を送る</p>
+              <p className="mt-0.5 text-[11px] text-gray-500">
+                定型文をタップすると理由・本文にセットされます（送信前に自由に書き換えられます）。
+              </p>
+              <div className="mt-2">
+                <AdminTemplateChips
+                  templates={WARNING_TEMPLATES}
+                  onSelect={(t) => {
+                    setWarningReason(t.reason);
+                    setWarningBody(t.body);
+                  }}
+                />
+              </div>
+              <label className="mt-2 flex flex-col gap-0.5 text-[11px] text-gray-600">
+                対象となった投稿や行為（省略可）
+                <input
+                  type="text"
+                  value={warningTargetRef}
+                  onChange={(e) => setWarningTargetRef(e.target.value)}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="mt-2 flex flex-col gap-0.5 text-[11px] text-gray-600">
+                警告理由
+                <input
+                  type="text"
+                  value={warningReason}
+                  onChange={(e) => setWarningReason(e.target.value)}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="mt-2 flex flex-col gap-0.5 text-[11px] text-gray-600">
+                警告本文（本人への通知に表示されます）
+                <textarea
+                  value={warningBody}
+                  onChange={(e) => setWarningBody(e.target.value)}
+                  rows={3}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="mt-2 flex flex-col gap-0.5 text-[11px] text-gray-600">
+                今回行った対応（省略可）
+                <input
+                  type="text"
+                  value={warningResponseNote}
+                  onChange={(e) => setWarningResponseNote(e.target.value)}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs"
+                />
+              </label>
+              <div className="mt-2 flex gap-2">
+                <AdminButton
+                  variant="primary"
+                  disabled={pendingAction !== null || !warningReason.trim()}
+                  onClick={handleWarning}
+                >
+                  {pendingAction === "warning" ? "送信中…" : "この内容で送信する"}
+                </AdminButton>
+                <AdminButton
+                  disabled={pendingAction !== null}
+                  onClick={() => {
+                    setWarningFormOpen(false);
+                    setWarningTargetRef("");
+                    setWarningReason("");
+                    setWarningBody("");
+                    setWarningResponseNote("");
+                  }}
+                >
+                  キャンセル
+                </AdminButton>
+              </div>
+            </div>
+          )}
           <AdminButton disabled={pendingAction !== null} onClick={handleSuspendTemporary}>
             {pendingAction === "suspend_temporary" ? "処理中…" : "期限付きで利用停止する"}
           </AdminButton>
