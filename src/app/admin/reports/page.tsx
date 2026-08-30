@@ -36,6 +36,7 @@ const TARGET_TYPE_LABEL: Record<string, string> = {
   sns_topic: "お題投稿",
   sns_answer: "回答",
   sns_comment: "コメント",
+  live_result_comment: "ライブ結果コメント",
 };
 
 function truncate(text: string, max: number): string {

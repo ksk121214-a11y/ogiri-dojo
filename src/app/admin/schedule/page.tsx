@@ -199,7 +199,7 @@ export default function AdminSchedulePage() {
         </div>
       )}
 
-      <ResultsPublishSection notifySuccess={notifySuccess} notifyError={notifyError} />
+      <ResultsPublishSection />
     </AdminShell>
   );
 }
@@ -368,59 +368,29 @@ function ScheduleEntryForm({
   );
 }
 
-// 終了したライブの結果公開状態のみを扱う既存機能（第2段階から温存）。
-// 日時等の編集は上のライブ予定（表示専用データ）に役目が移ったため、ここでは
-// 結果公開トグルのみのシンプルな一覧にしている。
-function ResultsPublishSection({
-  notifySuccess,
-  notifyError,
-}: {
-  notifySuccess: (message: string) => void;
-  notifyError: (message: string) => void;
-}) {
+// 終了したライブの結果公開状態の一覧表示（第2段階から温存）。
+// 2026-08-31（ライブ結果のSNS掲載機能の追加）：以前はここで直接
+// lives.results_publishedを反転させていたが、自動抽出した内容をそのまま
+// 確認無しに公開してしまえるのは危険なため、実際の公開操作は
+// 「/admin/live-results/[liveId]」（掲載回答の確認・運営ベスト設定を経てから
+// 公開するページ）に一本化した。ここでは公開状態の確認と、その設定画面への
+// 導線のみを残す（同じlives.results_publishedを見ているだけで、公開フラグ自体は
+// 増やしていない）。
+function ResultsPublishSection() {
   const [lives, setLives] = useState<LiveRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from("lives")
-      .select("*")
-      .eq("current_phase", "closed")
-      .order("scheduled_at", { ascending: false });
-    setLives((data ?? []) as LiveRow[]);
-    setLoading(false);
-  };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, []);
-
-  const handleToggle = async (live: LiveRow) => {
-    if (togglingId) return;
-    setTogglingId(live.id);
-    try {
-      const { error } = await supabase
+    (async () => {
+      const { data } = await supabase
         .from("lives")
-        .update({ results_published: !live.results_published })
-        .eq("id", live.id);
-      if (error) {
-        notifyError(error.message);
-        return;
-      }
-      await logAdminAction({
-        action: live.results_published ? "results_unpublished" : "results_published",
-        targetType: "lives",
-        targetId: live.id,
-      });
-      notifySuccess(live.results_published ? "結果を非公開にしました。" : "結果を公開しました。");
-      await load();
-    } finally {
-      setTogglingId(null);
-    }
-  };
+        .select("*")
+        .eq("current_phase", "closed")
+        .order("scheduled_at", { ascending: false });
+      setLives((data ?? []) as LiveRow[]);
+      setLoading(false);
+    })();
+  }, []);
 
   if (loading || lives.length === 0) return null;
 
@@ -432,16 +402,21 @@ function ResultsPublishSection({
             key={live.id}
             className="flex items-center justify-between gap-2 rounded border border-gray-200 p-2"
           >
-            <p className="text-xs text-gray-700">
-              {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
-            </p>
-            <AdminButton disabled={togglingId === live.id} onClick={() => handleToggle(live)}>
-              {togglingId === live.id
-                ? "処理中…"
-                : live.results_published
-                  ? "結果を非公開にする"
-                  : "結果を公開する"}
-            </AdminButton>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-gray-700">
+                {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
+              </p>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  live.results_published ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                }`}
+              >
+                {live.results_published ? "SNS公開中" : "未公開"}
+              </span>
+            </div>
+            <Link href={`/admin/live-results/${live.id}`}>
+              <AdminButton>ライブ結果の設定・公開はこちら →</AdminButton>
+            </Link>
           </li>
         ))}
       </ul>

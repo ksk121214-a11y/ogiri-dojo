@@ -8,7 +8,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 
 const REASON_OPTIONS = ["不適切な表現", "スパム", "なりすまし", "その他"] as const;
 
-export type ReportTargetType = "sns_topic" | "sns_answer" | "sns_comment";
+export type ReportTargetType = "sns_topic" | "sns_answer" | "sns_comment" | "live_result_comment";
 
 // 演者アイコンが表示される箇所（寄合帳の投稿・プロフィール、番付表、結果発表など）に共通設置する
 // 通報ボタン。過度に卑猥・グロテスクな表現などの不適切な内容を、確認ダイアログを一度挟んでから

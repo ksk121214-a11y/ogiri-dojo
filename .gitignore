@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase CLIのローカルキャッシュ（npx supabase実行時に生成される、プロジェクトに含めない）
+supabase/.temp

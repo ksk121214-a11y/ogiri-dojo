@@ -45,6 +45,13 @@ export const ACTION_LABEL: Record<string, string> = {
   user_suspend_permanent: "永久停止にした",
   user_lift: "利用停止を解除した",
   user_deleted: "アカウントを完全削除した",
+
+  // ライブ結果（SNS掲載）
+  sns_live_result_answer_excluded: "ライブ結果の掲載回答を除外した",
+  sns_live_result_answer_restored: "ライブ結果の掲載回答を復帰した",
+  sns_live_result_rank_replaced: "ライブ結果の代表回答を差し替えた",
+  sns_live_result_best_set: "ライブ結果の運営ベストを設定・変更した",
+  sns_live_result_comment_set: "ライブ結果の運営コメントを変更した",
 };
 
 export const TARGET_TYPE_LABEL: Record<string, string> = {
@@ -57,6 +64,8 @@ export const TARGET_TYPE_LABEL: Record<string, string> = {
   sns_topic: "お題投稿",
   sns_answer: "回答",
   sns_comment: "コメント",
+  sns_live_results: "ライブ結果(SNS)",
+  sns_live_result_comment: "ライブ結果コメント",
 };
 
 export function formatActionLabel(action: string): string {

@@ -7,17 +7,19 @@ import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
+import SnsLiveResultsFeedList from "@/components/sns/SnsLiveResultsFeedList";
 import { isLocallyCreated } from "@/lib/staticContent";
 import { useSnsStore } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
 
-type FeedKind = "topics" | "answers";
+type FeedKind = "topics" | "answers" | "results";
 type AudienceKind = "forYou" | "following";
 type SortKind = "new" | "popular";
 
 const FEED_TABS: { key: FeedKind; label: string }[] = [
   { key: "topics", label: "お題" },
   { key: "answers", label: "回答" },
+  { key: "results", label: "ライブ結果" },
 ];
 
 const AUDIENCE_TABS: { key: AudienceKind; label: string }[] = [
@@ -91,7 +93,9 @@ export default function SnsFeedSection() {
   }, [answers, audience, sort, followingAuthorIds]);
 
   const currentCount = feed === "topics" ? visibleTopics.length : visibleAnswers.length;
-  const showFollowingEmpty = audience === "following" && currentCount === 0;
+  // 「ライブ結果」タブはおすすめ/フォロー中・新着/人気の切り替えを持たない
+  // （終了ライブの公式結果を新しい順に出すだけの一覧のため）。
+  const showFollowingEmpty = feed !== "results" && audience === "following" && currentCount === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,42 +127,48 @@ export default function SnsFeedSection() {
           ))}
         </div>
 
-        <div className="mx-auto flex w-full max-w-xs gap-2 border-b border-[var(--ink)]/10 pb-2">
-          {AUDIENCE_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setAudience(tab.key)}
-              className={`flex-1 border-b-2 px-3 py-1.5 font-sans text-xs font-bold transition ${
-                audience === tab.key
-                  ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-transparent text-[var(--ink)]/55 hover:text-[var(--ink)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {feed !== "results" && (
+          <div className="mx-auto flex w-full max-w-xs gap-2 border-b border-[var(--ink)]/10 pb-2">
+            {AUDIENCE_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setAudience(tab.key)}
+                className={`flex-1 border-b-2 px-3 py-1.5 font-sans text-xs font-bold transition ${
+                  audience === tab.key
+                    ? "border-[var(--accent)] text-[var(--accent)]"
+                    : "border-transparent text-[var(--ink)]/55 hover:text-[var(--ink)]"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
-        <div className="flex justify-center gap-2">
-          {SORT_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setSort(tab.key)}
-              className={`rounded-full px-3 py-1 font-sans text-[11px] font-bold transition ${
-                sort === tab.key
-                  ? "border border-[var(--accent)] text-[var(--accent)]"
-                  : "border border-transparent text-[var(--ink)]/50 hover:text-[var(--ink)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {feed !== "results" && (
+          <div className="flex justify-center gap-2">
+            {SORT_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setSort(tab.key)}
+                className={`rounded-full px-3 py-1 font-sans text-[11px] font-bold transition ${
+                  sort === tab.key
+                    ? "border border-[var(--accent)] text-[var(--accent)]"
+                    : "border border-transparent text-[var(--ink)]/50 hover:text-[var(--ink)]"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {showFollowingEmpty ? (
+      {feed === "results" ? (
+        <SnsLiveResultsFeedList />
+      ) : showFollowingEmpty ? (
         <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 rounded-2xl px-6 py-16 text-center text-[var(--ink)]`}>
           <p className="font-sans text-sm font-bold text-[var(--ink)]">
             フォロー中の演者の投稿はまだありません

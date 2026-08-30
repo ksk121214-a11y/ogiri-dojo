@@ -157,6 +157,11 @@ export default function AdminHomePage() {
       description: "重要な運営操作の履歴を確認します。",
       href: "/admin/logs",
     },
+    {
+      label: "ライブ結果（SNS掲載）",
+      description: "終了ライブの1〜3位代表・満点回答・運営ベストを設定し、寄合帳へ公開します。",
+      href: "/admin/live-results",
+    },
   ];
 
   return (
