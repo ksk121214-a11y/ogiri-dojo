@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
@@ -236,7 +237,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
                     : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
                 }`}
               >
-                {liked ? "❤" : "🤍"}
+                <HeartGlyph filled={liked} />
                 <span className="tabular-nums">
                   {answer.likes.toLocaleString()}
                 </span>

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import InitialAvatar from "@/components/app/InitialAvatar";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
+import { HeartGlyph } from "@/components/home/icons";
 import { ARCHIVE_LIVES, getAllArchiveAnswers } from "@/data/archiveData";
 import { getRankByMeter, RANK_DEFINITIONS } from "@/data/collectionData";
 import { DUMMY_RANKING } from "@/data/rankingData";
@@ -188,7 +189,7 @@ function ArchiveTab() {
                               : "border-dojo-dark-brown/30 text-dojo-dark-brown hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
                           }`}
                         >
-                          {liked[answer.id] ? "❤" : "🤍"}
+                          <HeartGlyph filled={liked[answer.id]} />
                           <span className="tabular-nums">
                             {(likes[answer.id] ?? answer.likes).toLocaleString()}
                           </span>

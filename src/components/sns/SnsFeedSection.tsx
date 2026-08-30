@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
 import { isLocallyCreated } from "@/lib/staticContent";
@@ -287,8 +288,9 @@ function AnswerFeedList({
             <p className="font-sans text-sm font-bold text-[var(--ink)] sm:text-base">
               {answer.body}
             </p>
-            <p className="font-sans text-[11px] text-[var(--ink)]/70">
-              ❤ {answer.likes.toLocaleString()}・ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件
+            <p className="flex items-center gap-1 font-sans text-[11px] text-[var(--ink)]/70">
+              <HeartGlyph filled />
+              {answer.likes.toLocaleString()}・ツッコミ {commentCountByAnswer.get(answer.id) ?? 0}件
             </p>
           </>
         );

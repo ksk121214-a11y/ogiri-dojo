@@ -202,3 +202,48 @@ export function CalendarAddGlyph({ className }: { className?: string }) {
     </svg>
   );
 }
+
+// 寄合帳のいいねボタン用。filled=trueで塗りつぶし（いいね済み）、falseで線画（未いいね）。
+export function HeartGlyph({ className, filled = false }: { className?: string; filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      className={className}
+      fill={filled ? "currentColor" : "none"}
+      aria-hidden
+    >
+      <path
+        d="M12 20.2c-4-2.6-8-5.7-8-10a4.6 4.6 0 0 1 8-3 4.6 4.6 0 0 1 8 3c0 4.3-4 7.4-8 10Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// 通報ボタン用の旗アイコン。
+export function FlagGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
+      <path d="M6 3.5v17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M6 4.5c2-1.2 4-1.2 6 0s4 1.2 6 0v9c-2 1.2-4 1.2-6 0s-4-1.2-6 0Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// 通報済み表示用のチェックマーク。
+export function CheckGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
+      <path d="M4.5 12.5 9.5 17.5 19.5 6.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

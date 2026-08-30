@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { CheckGlyph, FlagGlyph } from "@/components/home/icons";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 
@@ -90,9 +91,13 @@ export default function ReportButton({
           ? "text-dojo-curtain-red"
           : "text-dojo-gray-purple/70 hover:text-dojo-curtain-red"
       } ${className}`}
-      style={{ width: size, height: size, fontSize: size * 0.6 }}
+      style={{ width: size, height: size }}
     >
-      {reported ? "✅" : "🚩"}
+      {reported ? (
+        <CheckGlyph className="h-[60%] w-[60%]" />
+      ) : (
+        <FlagGlyph className="h-[60%] w-[60%]" />
+      )}
     </button>
   );
 }

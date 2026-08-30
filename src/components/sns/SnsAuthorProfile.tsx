@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import AvatarGlyph from "@/components/app/AvatarGlyph";
+import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import ReportButton from "@/components/app/ReportButton";
@@ -179,7 +180,10 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
             <span className="text-[11px] text-[var(--ink)]/70">回答</span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="font-bold text-[var(--ink)]">❤ {totalLikes}</span>
+            <span className="flex items-center gap-1 font-bold text-[var(--ink)]">
+              <HeartGlyph filled />
+              {totalLikes}
+            </span>
             <span className="text-[11px] text-[var(--ink)]/70">獲得いいね</span>
           </div>
         </div>
@@ -248,8 +252,9 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
                 <Link href={`/sns/answers/${answer.id}`}>
                   <p className="font-sans text-sm font-bold text-[var(--ink)]">{answer.body}</p>
                 </Link>
-                <p className="font-sans text-[11px] text-[var(--ink)]/70">
-                  ❤ {answer.likes.toLocaleString()}・ツッコミ{" "}
+                <p className="flex items-center gap-1 font-sans text-[11px] text-[var(--ink)]/70">
+                  <HeartGlyph filled />
+                  {answer.likes.toLocaleString()}・ツッコミ{" "}
                   {commentCountByAnswer.get(answer.id) ?? 0}件
                 </p>
               </div>
