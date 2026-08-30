@@ -30,7 +30,7 @@ export default function SnsMyProfileCard() {
 
   return (
     <div className="flex flex-col items-center gap-3 rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/70 p-6 text-center">
-      <MyIconAvatar size={64} />
+      <MyIconAvatar size={64} bare />
       <div>
         <p className="font-brush text-2xl text-dojo-ink">{user.displayName}</p>
         <p className="mt-1 font-sans text-xs font-bold text-dojo-ink">

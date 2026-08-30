@@ -11,9 +11,7 @@ export default function SnsFollowListRow({ author }: { author: SnsAuthorProfile 
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-dojo-dark-brown/15 bg-dojo-light-brown/60 p-3">
       <Link href={`/sns/u/${author.id}`} className="flex min-w-0 items-center gap-3">
-        <span
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg text-dojo-washi-white ${author.bgColorClass}`}
-        >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center text-2xl">
           {author.emoji}
         </span>
         <div className="min-w-0">

@@ -65,9 +65,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
         <div className="absolute right-4 top-4">
           <ReportButton />
         </div>
-        <span
-          className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-3xl text-dojo-washi-white ${author.bgColorClass}`}
-        >
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center text-5xl">
           {author.emoji}
         </span>
         <div>

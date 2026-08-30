@@ -9,9 +9,11 @@ import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
-// 寄合帳（お題一覧・お題詳細・回答カード）で共通利用する「アイコン(丸)＋演者名＋段位」の投稿者表示。
+// 寄合帳（お題一覧・お題詳細・回答カード）で共通利用する「アイコン＋演者名＋段位」の投稿者表示。
 // authorId === "me" の場合はマイページ（useUserStore）と同じ情報源（演者名・段位・装備中アイコン）を
 // そのまま反映し、それ以外は snsAuthors.ts のダミー投稿者プロフィールを参照する。
+// 2026-08-30: アイコンを丸背景で囲むデザインをやめ、線画/絵文字をそのまま出す表示に変更した
+// （MyIconAvatarはbare=trueを使用）。
 // 自分（"me"）は寄合帳トップ（/sns、プロフィールカードを直接埋め込み済み）へ、
 // それ以外は個別プロフィールページ（/sns/u/[authorId]）へのリンクになる。
 // 呼び出し側でカード全体をLinkにしている場合があるため、アンカーのネストを避けるよう呼び出し元は
@@ -46,7 +48,7 @@ export default function SnsAuthorBadge({
           onClick={(e) => e.stopPropagation()}
           className="flex min-w-0 items-center gap-2"
         >
-          <MyIconAvatar size={size} />
+          <MyIconAvatar size={size} bare />
           <span className="flex min-w-0 flex-col">
             <span className="truncate font-sans text-xs font-bold text-dojo-ink hover:underline">
               {user.displayName}
@@ -74,8 +76,8 @@ export default function SnsAuthorBadge({
         className="flex min-w-0 items-center gap-2"
       >
         <span
-          className={`flex shrink-0 items-center justify-center rounded-full text-dojo-washi-white ${author?.bgColorClass ?? "bg-dojo-dark-brown"}`}
-          style={{ width: size, height: size, fontSize: size * 0.5, backgroundColor: !author && realAuthor ? realAuthor.avatarColor : undefined }}
+          className="flex shrink-0 items-center justify-center"
+          style={{ width: size, height: size, fontSize: size * 0.75 }}
         >
           {author?.emoji ?? (realAuthor ? "🎤" : "🎭")}
         </span>

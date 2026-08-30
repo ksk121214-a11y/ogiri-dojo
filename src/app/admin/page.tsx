@@ -112,6 +112,11 @@ export default function AdminHomePage() {
       href: "/admin/schedule",
     },
     {
+      label: "お知らせ配信",
+      description: "全ユーザーのヘッダー通知ベルにお知らせを一斉配信します。",
+      href: "/admin/notifications",
+    },
+    {
       label: "お題管理",
       description: "お題の追加・編集・使用停止・検索ができます。",
       href: "/admin/topics",
