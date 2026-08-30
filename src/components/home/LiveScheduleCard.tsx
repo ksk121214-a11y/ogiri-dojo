@@ -128,12 +128,28 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
   );
 }
 
+// 2026-08-30: 予定がまだ準備されていない（管理画面でライブが作成されていない）
+// 場合の「次回ライブは現在準備中です」を、チケットの枠（scallop装飾・質感）は
+// そのまま保ちつつ中身だけ差し替えて表示する共通パーツ。
+function PreparingTicketBody() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1 px-5 py-8 text-center">
+      <p className="font-sans text-lg font-black leading-snug text-[var(--ink)]">
+        次回ライブは
+        <br />
+        現在準備中です
+      </p>
+    </div>
+  );
+}
+
 export function CurrentLiveCard({
   live,
   reception,
 }: {
-  live: LiveTicketInfo;
-  reception: string;
+  // liveがnullの場合は、まだ今回のライブが準備されていない状態。
+  live: LiveTicketInfo | null;
+  reception?: string;
 }) {
   return (
     <div className="relative">
@@ -148,28 +164,33 @@ export function CurrentLiveCard({
         <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
         <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
-        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
-          <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
-          <DateLine date={live} timeTone="accent" />
-          <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
-            <ClockGlyph />
-            受付 {reception}
-          </p>
-          <Link
-            href="/live"
-            className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
-          >
-            参加する
-          </Link>
-        </div>
-
-        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainAccent} />
+        {live && reception ? (
+          <>
+            <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+              <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
+              <DateLine date={live} timeTone="accent" />
+              <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
+                <ClockGlyph />
+                受付 {reception}
+              </p>
+              <Link
+                href="/live"
+                className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+              >
+                参加する
+              </Link>
+            </div>
+            <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainAccent} />
+          </>
+        ) : (
+          <PreparingTicketBody />
+        )}
       </div>
     </div>
   );
 }
 
-export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
+export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
   return (
     <div className="relative">
       <span className="absolute -top-2.5 left-4 z-10 rounded-sm bg-[var(--stub-gray)] px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none">
@@ -181,20 +202,25 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo }) {
         <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
         <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
-        <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
-          <DateLine date={live} timeTone="ink" />
-          <div className="mt-2 flex items-center gap-2">
-            <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
-              開催予定
-            </span>
-            {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
-            <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
-              詳細を見る ›
-            </span>
-          </div>
-        </div>
-
-        <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDarkGray} />
+        {live ? (
+          <>
+            <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+              <DateLine date={live} timeTone="ink" />
+              <div className="mt-2 flex items-center gap-2">
+                <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+                  開催予定
+                </span>
+                {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
+                <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
+                  詳細を見る ›
+                </span>
+              </div>
+            </div>
+            <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDarkGray} />
+          </>
+        ) : (
+          <PreparingTicketBody />
+        )}
       </div>
     </div>
   );

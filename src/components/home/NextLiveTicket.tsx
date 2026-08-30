@@ -47,7 +47,9 @@ export default function NextLiveTicket({
   isDetaching = false,
   onDetachAnimationEnd,
 }: {
-  live: NextLiveInfo;
+  // 2026-08-30: 運営者専用管理画面の追加に伴い、まだ次回ライブの予定が
+  // 準備されていない（管理画面で作成されていない）状態をnullで表せるようにした。
+  live: NextLiveInfo | null;
   stubVisible?: boolean;
   isDetaching?: boolean;
   onDetachAnimationEnd?: () => void;
@@ -87,6 +89,35 @@ export default function NextLiveTicket({
     }
     onDetachAnimationEnd?.();
   };
+
+  if (!live) {
+    // 2026-08-30: 「次回ライブは現在準備中です」を、普通のカードではなくチケットの
+    // 形（本体側のscallop装飾・質感はそのまま）の上に表示してほしいとの要望。
+    // 半券（stub、参加操作に関わる部分）は準備中は意味を持たないため出さない。
+    return (
+      <div className="relative">
+        <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
+          次回ライブ
+        </span>
+
+        <div className={styles.nextLiveTicketRow}>
+          <div className={`${styles.nextLiveTicketMain} ${styles.grainPaper}`}>
+            <div className={`${styles.scallopDivider} ${styles.scallopDark}`} aria-hidden />
+            <div className={`${styles.scallopCapTop} ${styles.scallopDark}`} aria-hidden />
+            <div className={`${styles.scallopCapBottom} ${styles.scallopDark}`} aria-hidden />
+
+            <div className="flex flex-col items-center justify-center gap-1 px-5 py-8 text-center">
+              <p className="font-sans text-xl font-black leading-snug text-[var(--ink)]">
+                次回ライブは
+                <br />
+                現在準備中です
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     // 「次回ライブ」タグは内側の.nextLiveTicketMain（切り欠き演出のためoverflow:hiddenが

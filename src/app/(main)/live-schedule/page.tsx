@@ -92,26 +92,22 @@ export default function LiveSchedulePage() {
         <>
           {previous && <PreviousLiveCard date={toLiveScheduleDate(previous.scheduled_at)} />}
 
-          {current && currentTicketNo && currentReception ? (
-            <CurrentLiveCard
-              live={{ ...toLiveScheduleDate(current.scheduled_at), ticketNo: currentTicketNo }}
-              reception={currentReception}
-            />
-          ) : (
-            <p className="rounded-xl border border-[var(--ink)]/20 bg-[var(--paper)]/70 px-4 py-3 text-center font-sans text-sm text-[var(--ink)]/70">
-              次回ライブは現在準備中です
-            </p>
-          )}
+          <CurrentLiveCard
+            live={
+              current && currentTicketNo
+                ? { ...toLiveScheduleDate(current.scheduled_at), ticketNo: currentTicketNo }
+                : null
+            }
+            reception={currentReception ?? undefined}
+          />
 
-          {upcoming ? (
-            <UpcomingLiveCard
-              live={{ ...toLiveScheduleDate(upcoming.scheduled_at), ticketNo: formatLiveTicketNo(upcoming.sequence_number) }}
-            />
-          ) : (
-            <p className="rounded-xl border border-[var(--ink)]/20 bg-[var(--paper)]/70 px-4 py-3 text-center font-sans text-sm text-[var(--ink)]/70">
-              次回ライブは現在準備中です
-            </p>
-          )}
+          <UpcomingLiveCard
+            live={
+              upcoming
+                ? { ...toLiveScheduleDate(upcoming.scheduled_at), ticketNo: formatLiveTicketNo(upcoming.sequence_number) }
+                : null
+            }
+          />
         </>
       )}
 

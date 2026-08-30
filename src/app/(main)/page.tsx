@@ -38,22 +38,20 @@ export default function Home() {
       <DarkIndieHero />
 
       <div id="next-live" className="scroll-mt-4">
-        {current ? (
-          <NextLiveTicket
-            live={{
-              ...toLiveScheduleDate(current.scheduled_at),
-              ticketNo: formatLiveTicketNo(current.sequence_number),
-              reception: formatReceptionRange(current.reception_starts_at, current.reception_ends_at),
-            }}
-            stubVisible={stubVisible}
-            isDetaching={isDetaching}
-            onDetachAnimationEnd={handleAnimationEnd}
-          />
-        ) : (
-          <p className="rounded-xl border border-[var(--paper)]/20 px-4 py-3 text-center font-sans text-sm text-[var(--paper)]/80">
-            次回ライブは現在準備中です
-          </p>
-        )}
+        <NextLiveTicket
+          live={
+            current
+              ? {
+                  ...toLiveScheduleDate(current.scheduled_at),
+                  ticketNo: formatLiveTicketNo(current.sequence_number),
+                  reception: formatReceptionRange(current.reception_starts_at, current.reception_ends_at),
+                }
+              : null
+          }
+          stubVisible={stubVisible}
+          isDetaching={isDetaching}
+          onDetachAnimationEnd={handleAnimationEnd}
+        />
       </div>
 
       <JoinLiveButton status={status} error={error} onClick={handleJoinClick} />
