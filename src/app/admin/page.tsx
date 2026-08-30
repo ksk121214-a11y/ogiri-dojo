@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import AdminButton from "@/components/admin/AdminButton";
 import AdminCard from "@/components/admin/AdminCard";
+import AdminShell from "@/components/admin/AdminShell";
 import { supabase } from "@/lib/supabase";
 
 const PHASE_LABEL: Record<string, string> = {
@@ -141,54 +142,52 @@ export default function AdminHomePage() {
   ];
 
   return (
-    <div className="min-h-svh w-full bg-gray-50">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-6 text-left font-sans sm:px-6 lg:px-8">
-        <h1 className="text-lg font-bold text-gray-900">運営者専用管理画面</h1>
+    <AdminShell wide>
+      <h1 className="text-lg font-bold text-gray-900">運営者専用管理画面</h1>
 
-        <AdminCard title="現在のライブ状況">
-          {state.loading ? (
-            <p className="text-sm text-gray-500">読み込み中…</p>
-          ) : state.phase ? (
-            <div className="flex flex-col gap-1 text-sm text-gray-900">
-              <p className="font-bold">{PHASE_LABEL[state.phase] ?? state.phase}</p>
-              {state.scheduledAt && (
-                <p className="text-gray-600">
-                  開催日時：{new Date(state.scheduledAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
-                </p>
-              )}
+      <AdminCard title="現在のライブ状況">
+        {state.loading ? (
+          <p className="text-sm text-gray-500">読み込み中…</p>
+        ) : state.phase ? (
+          <div className="flex flex-col gap-1 text-sm text-gray-900">
+            <p className="font-bold">{PHASE_LABEL[state.phase] ?? state.phase}</p>
+            {state.scheduledAt && (
               <p className="text-gray-600">
-                参加人数：{state.playerCount}
-                {state.maxPlayers != null ? ` / ${state.maxPlayers}人` : "人（上限なし）"}
+                開催日時：{new Date(state.scheduledAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
               </p>
-            </div>
-          ) : (
-            <p className="text-sm text-gray-500">準備中のライブはありません。</p>
-          )}
-          <Link href="/live/host" className="mt-3 inline-block">
-            <AdminButton variant="primary">ライブ準備・操作を開く</AdminButton>
-          </Link>
-        </AdminCard>
+            )}
+            <p className="text-gray-600">
+              参加人数：{state.playerCount}
+              {state.maxPlayers != null ? ` / ${state.maxPlayers}人` : "人（上限なし）"}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">準備中のライブはありません。</p>
+        )}
+        <Link href="/live/host" className="mt-3 inline-block">
+          <AdminButton variant="primary">ライブ準備・操作を開く</AdminButton>
+        </Link>
+      </AdminCard>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {menu.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className="rounded-lg border border-gray-200 bg-white p-4 text-left transition hover:border-gray-300 hover:bg-gray-50"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-bold text-gray-900">{item.label}</p>
-                {item.badge && (
-                  <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-gray-500">{item.description}</p>
-            </Link>
-          ))}
-        </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {menu.map((item) => (
+          <Link
+            key={item.label}
+            href={item.href}
+            className="rounded-lg border border-gray-200 bg-white p-4 text-left transition hover:border-gray-300 hover:bg-gray-50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-bold text-gray-900">{item.label}</p>
+              {item.badge && (
+                <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">
+                  {item.badge}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">{item.description}</p>
+          </Link>
+        ))}
       </div>
-    </div>
+    </AdminShell>
   );
 }
