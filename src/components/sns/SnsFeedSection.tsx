@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
-import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import { isLocallyCreated } from "@/lib/staticContent";
 import { useSnsStore } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
@@ -238,14 +239,11 @@ function TopicFeedList({
         return (
           <div
             key={topic.id}
-            className={`${stadiumStyles.grainPaper} flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge
-                authorId={topic.authorId}
-                reportTarget={{ type: "sns_topic", id: topic.id, body: topic.body }}
-              />
-              <div className="flex shrink-0 flex-col items-end gap-1">
+              <SnsAuthorBadge authorId={topic.authorId} hideReportButton />
+              <div className="flex shrink-0 flex-col items-end gap-1 pr-5">
                 <span className={`${stadiumStyles.grainAccent} rounded-full px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
                   お題
                 </span>
@@ -261,6 +259,13 @@ function TopicFeedList({
                 {body}
               </Link>
             )}
+            <ReportButton
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              targetType="sns_topic"
+              targetId={topic.id}
+              targetAuthorId={reportTargetAuthorId(topic.authorId)}
+              snapshotBody={topic.body}
+            />
           </div>
         );
       })}
@@ -297,14 +302,11 @@ function AnswerFeedList({
         return (
           <div
             key={answer.id}
-            className={`${stadiumStyles.grainPaper} flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge
-                authorId={answer.authorId}
-                reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
-              />
-              <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
+              <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
+              <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/60">
                 {answer.createdAtLabel}
               </span>
             </div>
@@ -329,6 +331,13 @@ function AnswerFeedList({
                 {answerBody}
               </Link>
             )}
+            <ReportButton
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              targetType="sns_answer"
+              targetId={answer.id}
+              targetAuthorId={reportTargetAuthorId(answer.authorId)}
+              snapshotBody={answer.body}
+            />
           </div>
         );
       })}

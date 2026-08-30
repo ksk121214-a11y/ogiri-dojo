@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 
+import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
-import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { useSnsStore } from "@/store/useSnsStore";
@@ -111,16 +112,13 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         </Link>
       )}
 
-      <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
+      <div className={`${stadiumStyles.grainPaper} relative flex flex-col gap-3 rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <SnsAuthorBadge
-              authorId={answer.authorId}
-              reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
-            />
+            <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
             <SnsFollowButton authorId={answer.authorId} size="compact" />
           </div>
-          <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
+          <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/60">
             {answer.createdAtLabel}
           </span>
         </div>
@@ -145,6 +143,13 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>
           )}
         </div>
+        <ReportButton
+          className="absolute right-4 top-1/2 -translate-y-1/2"
+          targetType="sns_answer"
+          targetId={answer.id}
+          targetAuthorId={reportTargetAuthorId(answer.authorId)}
+          snapshotBody={answer.body}
+        />
       </div>
 
       <form
@@ -190,19 +195,22 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         {answerComments.map((comment) => (
           <div
             key={comment.id}
-            className={`${stadiumStyles.grainPaper} flex flex-col gap-1.5 rounded-xl px-4 py-3 text-[var(--ink)]`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-1.5 rounded-xl py-3 pl-4 pr-9 text-[var(--ink)]`}
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge
-                authorId={comment.authorId}
-                size={24}
-                reportTarget={{ type: "sns_comment", id: comment.id, body: comment.body }}
-              />
+              <SnsAuthorBadge authorId={comment.authorId} size={24} hideReportButton />
               <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
                 {comment.createdAtLabel}
               </span>
             </div>
             <p className="font-sans text-sm text-[var(--ink)]">{comment.body}</p>
+            <ReportButton
+              className="absolute right-2 top-1/2 -translate-y-1/2"
+              targetType="sns_comment"
+              targetId={comment.id}
+              targetAuthorId={reportTargetAuthorId(comment.authorId)}
+              snapshotBody={comment.body}
+            />
           </div>
         ))}
       </div>

@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
-import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { isLocallyCreated } from "@/lib/staticContent";
@@ -120,13 +121,10 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
       />
 
-      <div className={`${stadiumStyles.grainPaper} rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
+      <div className={`${stadiumStyles.grainPaper} relative rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
-          <SnsAuthorBadge
-            authorId={topic.authorId}
-            reportTarget={{ type: "sns_topic", id: topic.id, body: topic.body }}
-          />
-          <div className="flex shrink-0 flex-col items-end gap-1">
+          <SnsAuthorBadge authorId={topic.authorId} hideReportButton />
+          <div className="flex shrink-0 flex-col items-end gap-1 pr-5">
             <span className={`${stadiumStyles.grainAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               お題
             </span>
@@ -138,6 +136,13 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         <p className="mt-3 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {topic.body}
         </p>
+        <ReportButton
+          className="absolute right-4 top-1/2 -translate-y-1/2"
+          targetType="sns_topic"
+          targetId={topic.id}
+          targetAuthorId={reportTargetAuthorId(topic.authorId)}
+          snapshotBody={topic.body}
+        />
       </div>
 
       <form
@@ -195,14 +200,11 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           return (
             <div
               key={answer.id}
-              className={`${stadiumStyles.grainPaper} flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-[var(--ink)]`}
+              className={`${stadiumStyles.grainPaper} relative flex items-start justify-between gap-3 rounded-xl py-3 pl-4 pr-9 text-[var(--ink)]`}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
-                  <SnsAuthorBadge
-                    authorId={answer.authorId}
-                    reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
-                  />
+                  <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
                   <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
                     {answer.createdAtLabel}
                   </span>
@@ -242,6 +244,13 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
                   {answer.likes.toLocaleString()}
                 </span>
               </button>
+              <ReportButton
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+                targetType="sns_answer"
+                targetId={answer.id}
+                targetAuthorId={reportTargetAuthorId(answer.authorId)}
+                snapshotBody={answer.body}
+              />
             </div>
           );
         })}

@@ -25,6 +25,7 @@ export default function SnsAuthorBadge({
   authorId,
   size = 32,
   reportTarget,
+  hideReportButton = false,
 }: {
   authorId: string;
   size?: number;
@@ -33,6 +34,9 @@ export default function SnsAuthorBadge({
   // 種別・ID・本文を呼び出し元から渡してもらう。省略時（ダミー投稿等）は
   // 従来どおりの確認のみのダミー通報のままになる。
   reportTarget?: { type: ReportTargetType; id: string; body: string };
+  // 2026-08-31: 「通報の旗をカードの右端中央に置きたい」要望のため、呼び出し元が
+  // カード側で独自にReportButtonを絶対配置する場合、このバッジ内での描画を止める。
+  hideReportButton?: boolean;
 }) {
   const user = useUserStore((s) => s.user);
   // 2026-08-30: 早期returnより前でフックを呼ぶ必要がある（Rules of Hooks）ため、
@@ -106,13 +110,22 @@ export default function SnsAuthorBadge({
           </span>
         </span>
       </Link>
-      <ReportButton
-        size={Math.max(16, size * 0.55)}
-        targetType={reportTarget?.type}
-        targetId={reportTarget?.id}
-        targetAuthorId={authorId.startsWith("author-") ? null : authorId}
-        snapshotBody={reportTarget?.body}
-      />
+      {!hideReportButton && (
+        <ReportButton
+          size={Math.max(16, size * 0.55)}
+          targetType={reportTarget?.type}
+          targetId={reportTarget?.id}
+          targetAuthorId={authorId.startsWith("author-") ? null : authorId}
+          snapshotBody={reportTarget?.body}
+        />
+      )}
     </span>
   );
+}
+
+// カード全体の右端中央にReportButtonを絶対配置したい呼び出し元向けのヘルパー。
+// authorIdが"author-"始まり（ダミー投稿者）の場合はtargetAuthorIdをnullにする
+// SnsAuthorBadge内部と同じ判定を、呼び出し元でも重複させないための共通関数。
+export function reportTargetAuthorId(authorId: string): string | null {
+  return authorId.startsWith("author-") ? null : authorId;
 }
