@@ -81,6 +81,10 @@ interface LiveHostState {
   ) => Promise<void>;
   sendAnnouncement: (message: string, scope: "player" | "all") => Promise<void>;
   clearAnnouncement: () => Promise<void>;
+  // 受付中（interlude/opening）でも組数・最大参加人数を調整できるようにする。
+  // 組数を変えた場合は、既存のgroupsとの整合を取るため「ランダムに振り分ける」を
+  // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
+  updateCapacity: (input: { maxPlayers: number | null; groupCount: number }) => Promise<{ ok: boolean; reason?: string }>;
   beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
   closeLive: () => Promise<void>;
 }
@@ -990,6 +994,28 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     const { live } = get();
     if (!live) return;
     await updateLive(live.id, { announcement_message: null });
+  },
+
+  // 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を
+  // 調整できるようにする。組数を変えても既存のgroups/participantsの割り当ては
+  // 自動では変更しない（randomizeGroupsを呼び直すとplanned_group_countに
+  // 合わせて再割り当てされる）。
+  updateCapacity: async ({ maxPlayers, groupCount }) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    if (groupCount < 1) return { ok: false, reason: "組数は1以上にしてください" };
+    const { error } = await updateLive(live.id, {
+      max_players: maxPlayers,
+      planned_group_count: groupCount,
+    });
+    if (error) return { ok: false, reason: error.message };
+    await logAdminAction({
+      action: "capacity_updated",
+      targetType: "lives",
+      targetId: live.id,
+      detail: { maxPlayers, groupCount },
+    });
+    return { ok: true };
   },
 
   // 「ゲームを開始する」：旧confirmGroupingAndBeginの後半部分。準備画面で既に

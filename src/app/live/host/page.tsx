@@ -11,7 +11,7 @@ import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
-import type { GroupRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
+import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
 
 const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
@@ -182,7 +182,10 @@ export default function LiveHostPage() {
           </div>
 
           {(live.current_phase === "interlude" || live.current_phase === "opening") && (
-            <GroupingPanel participants={participants} groups={groups} topics={topics} />
+            <>
+              <CapacityPanel live={live} />
+              <GroupingPanel participants={participants} groups={groups} topics={topics} />
+            </>
           )}
 
           {(live.current_phase === "interlude" ||
@@ -522,6 +525,77 @@ function ReceptionStartPanel() {
 }
 
 // 組分け確認画面：ランダム振り分け・手動組変更・お題確認変更。
+// 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を
+// 調整するパネル。組数を変えた場合は、既存の組分けとの整合を取るため
+// 「（もう一度）ランダムに振り分ける」を押し直す必要がある旨を案内する。
+function CapacityPanel({ live }: { live: LiveRow }) {
+  const updateCapacity = useLiveHostStore((s) => s.updateCapacity);
+  const [maxPlayers, setMaxPlayers] = useState(live.max_players != null ? String(live.max_players) : "");
+  const [groupCount, setGroupCount] = useState(live.planned_group_count ?? 1);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const groupCountChanged = groupCount !== (live.planned_group_count ?? 1);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage(null);
+    const result = await updateCapacity({
+      maxPlayers: maxPlayers.trim() ? Number(maxPlayers) : null,
+      groupCount,
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setMessage(result.reason ?? "保存に失敗しました");
+      return;
+    }
+    setMessage(
+      groupCountChanged
+        ? "保存しました。組数を変更したので、必要であれば「（もう一度）ランダムに振り分ける」を押してください。"
+        : "保存しました。",
+    );
+  };
+
+  return (
+    <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
+      <p className="font-sans text-xs font-bold text-dojo-ink">受付中の人数・組数調整</p>
+      <div className="mt-2 flex gap-2">
+        <label className="flex flex-1 flex-col gap-1 font-sans text-[10px] text-dojo-dark-brown">
+          最大参加人数
+          <input
+            type="number"
+            min={1}
+            value={maxPlayers}
+            onChange={(e) => setMaxPlayers(e.target.value)}
+            placeholder="無制限"
+            className="rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1 font-sans text-[10px] text-dojo-dark-brown">
+          組数
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={groupCount}
+            onChange={(e) => setGroupCount(Number(e.target.value))}
+            className="rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
+          />
+        </label>
+      </div>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={handleSave}
+        className="mt-2 rounded-full bg-dojo-curtain-red px-4 py-1.5 font-sans text-xs font-bold text-dojo-washi-white disabled:opacity-50"
+      >
+        {saving ? "保存中…" : "保存する"}
+      </button>
+      {message && <p className="mt-1 font-sans text-[11px] text-dojo-dark-brown">{message}</p>}
+    </div>
+  );
+}
+
 function GroupingPanel({
   participants,
   groups,
