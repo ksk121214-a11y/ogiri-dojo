@@ -28,10 +28,11 @@ interface DashboardState {
   openReportCount: number;
   postsNeedingReviewCount: number;
   suspendedUserCount: number;
+  unacknowledgedKickedCount: number;
 }
 
 async function loadDashboard(): Promise<DashboardState> {
-  const [liveRes, reportsOpenRes, reportsForPostsRes, suspendedRes] = await Promise.all([
+  const [liveRes, reportsOpenRes, reportsForPostsRes, suspendedRes, unacknowledgedKickedRes] = await Promise.all([
     supabase
       .from("lives")
       .select("id, current_phase, scheduled_at, max_players")
@@ -44,6 +45,11 @@ async function loadDashboard(): Promise<DashboardState> {
     supabase
       .from("profiles")
       .select("id, is_permanently_suspended, suspended_until"),
+    supabase
+      .from("user_sanctions")
+      .select("id", { count: "exact", head: true })
+      .eq("type", "kicked")
+      .is("acknowledged_at", null),
   ]);
 
   let playerCount = 0;
@@ -77,6 +83,7 @@ async function loadDashboard(): Promise<DashboardState> {
     openReportCount: reportsOpenRes.count ?? 0,
     postsNeedingReviewCount,
     suspendedUserCount,
+    unacknowledgedKickedCount: unacknowledgedKickedRes.count ?? 0,
   };
 }
 
@@ -93,6 +100,7 @@ export default function AdminHomePage() {
     openReportCount: 0,
     postsNeedingReviewCount: 0,
     suspendedUserCount: 0,
+    unacknowledgedKickedCount: 0,
   });
 
   useEffect(() => {
@@ -137,7 +145,12 @@ export default function AdminHomePage() {
       label: "ユーザー管理",
       description: "警告・利用停止・アカウント削除等を行います。",
       href: "/admin/users",
-      badge: state.suspendedUserCount > 0 ? `停止中${state.suspendedUserCount}人` : undefined,
+      badge:
+        state.unacknowledgedKickedCount > 0
+          ? `要確認${state.unacknowledgedKickedCount}件`
+          : state.suspendedUserCount > 0
+            ? `停止中${state.suspendedUserCount}人`
+            : undefined,
     },
     {
       label: "運営操作履歴",

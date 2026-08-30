@@ -15,6 +15,9 @@ import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 // 本人の画面にだけ警告色(赤)のバーとして重ねて表示する。
 // 2026-08-30: 長いメッセージだと1行のtruncateでは右上の音声設定アイコンと
 // 重なって見えていたため、幅を狭めて複数行に折り返すようにした。
+// 2026-08-30: スマホ幅では折り返しても右上の音声設定(SoundToggle、z-[100])と
+// 重なる場合があるため、メッセージ側のz-indexをより高くして、重なった際は
+// メッセージが手前に表示されるようにした。
 export default function AnnouncementBanner() {
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -31,7 +34,7 @@ export default function AnnouncementBanner() {
   if (!showAnnouncement && !privateMessage) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex flex-col items-center gap-1.5 px-3 pt-[max(0.5rem,env(safe-area-inset-top))]">
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-[110] flex flex-col items-center gap-1.5 px-3 pt-[max(0.5rem,env(safe-area-inset-top))]">
       <AnimatePresence>
         {privateMessage && (
           <motion.p

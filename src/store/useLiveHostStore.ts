@@ -1170,9 +1170,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       const { error: sanctionError } = await supabase.from("user_sanctions").insert({
         user_id: target.user_id,
         type: "kicked",
-        reason: target.host_message
-          ? `ライブからの退場（直前の個別メッセージ：${target.host_message}）`
-          : "ライブからの退場",
+        // reasonは種別ラベル「ライブからの退場」と表示上重複させないため、
+        // 直前の個別メッセージがあればそれだけを補足として入れる（無ければ空）。
+        reason: target.host_message ?? "",
         target_ref: live.id,
         created_by: actorId,
       });

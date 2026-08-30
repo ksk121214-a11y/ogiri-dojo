@@ -30,6 +30,7 @@ interface SanctionRow {
   detail: string | null;
   target_ref: string | null;
   created_at: string;
+  acknowledged_at: string | null;
 }
 interface ReportedRow {
   id: string;
@@ -142,11 +143,24 @@ export default function AdminUserDetailPage() {
     setProfile(profileData as ProfileDetail | null);
     setPostCount(topicsCount ?? 0);
     setAnswerCount(answersCount ?? 0);
-    setSanctions((sanctionData ?? []) as SanctionRow[]);
+    const sanctionRows = (sanctionData ?? []) as SanctionRow[];
+    setSanctions(sanctionRows);
     setReported((reportData ?? []) as ReportedRow[]);
     setParticipations((participationData ?? []) as ParticipationRow[]);
     setMemoDraft((profileData as ProfileDetail | null)?.admin_memo ?? "");
     setLoading(false);
+
+    // 2026-08-30:「退場させられたら要確認として出て、詳細を確認したら消える」
+    // 対応。このユーザーの詳細を開いた時点で、未確認の退場記録を確認済みにする。
+    const unacknowledgedKickedIds = sanctionRows
+      .filter((s) => s.type === "kicked" && !s.acknowledged_at)
+      .map((s) => s.id);
+    if (unacknowledgedKickedIds.length > 0) {
+      await supabase
+        .from("user_sanctions")
+        .update({ acknowledged_at: new Date().toISOString() })
+        .in("id", unacknowledgedKickedIds);
+    }
   };
 
   useEffect(() => {
@@ -379,7 +393,8 @@ export default function AdminUserDetailPage() {
           {sanctions.map((s) => (
             <li key={s.id} className="border-b border-gray-100 py-1 last:border-0">
               {new Date(s.created_at).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}：
-              {SANCTION_TYPE_LABEL[s.type] ?? s.type} - {s.reason}
+              {SANCTION_TYPE_LABEL[s.type] ?? s.type}
+              {s.reason && ` - ${s.reason}`}
             </li>
           ))}
           {sanctions.length === 0 && <li>対応履歴はありません。</li>}

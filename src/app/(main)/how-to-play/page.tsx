@@ -79,11 +79,11 @@ export default function HowToPlayPage() {
       </StepCard>
 
       <Link
-        href="/#next-live"
+        href="/live-schedule"
         className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:opacity-90`}
       >
         <CalendarGlyph />
-        次回ライブを見る
+        次回のライブを見る
         <span aria-hidden>›</span>
       </Link>
     </StadiumPageShell>

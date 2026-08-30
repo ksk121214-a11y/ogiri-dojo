@@ -43,18 +43,23 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<ProfileRow[]>([]);
   const [reportedCounts, setReportedCounts] = useState<Map<string, number>>(new Map());
   const [warningCounts, setWarningCounts] = useState<Map<string, number>>(new Map());
+  const [kickedCounts, setKickedCounts] = useState<Map<string, number>>(new Map());
+  // 未確認（acknowledged_at未設定）の退場記録があるユーザーID集合。
+  // 名前の横に赤い印を出し、詳細を開く(=確認する)と消える（/admin/users/[id]参照）。
+  const [unacknowledgedKickedUserIds, setUnacknowledgedKickedUserIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
 
   useEffect(() => {
     const load = async () => {
-      const [{ data: profiles }, { data: reportRows }, { data: warnRows }] = await Promise.all([
+      const [{ data: profiles }, { data: reportRows }, { data: warnRows }, { data: kickRows }] = await Promise.all([
         supabase
           .from("profiles")
           .select("id, display_name, created_at, role, is_permanently_suspended, suspended_until")
           .order("created_at", { ascending: false }),
         supabase.from("reports").select("target_author_id").not("target_author_id", "is", null),
         supabase.from("user_sanctions").select("user_id").eq("type", "warning"),
+        supabase.from("user_sanctions").select("user_id, acknowledged_at").eq("type", "kicked"),
       ]);
       setUsers((profiles ?? []) as ProfileRow[]);
       setReportedCounts(
@@ -62,6 +67,11 @@ export default function AdminUsersPage() {
       );
       setWarningCounts(
         countBy(((warnRows ?? []) as { user_id: string }[]).map((r) => ({ key: r.user_id }))),
+      );
+      const kickRowsTyped = (kickRows ?? []) as { user_id: string; acknowledged_at: string | null }[];
+      setKickedCounts(countBy(kickRowsTyped.map((r) => ({ key: r.user_id }))));
+      setUnacknowledgedKickedUserIds(
+        new Set(kickRowsTyped.filter((r) => !r.acknowledged_at).map((r) => r.user_id)),
       );
       setLoading(false);
     };
@@ -102,6 +112,7 @@ export default function AdminUsersPage() {
                   <th className="py-1.5 pr-2 font-normal">利用状態</th>
                   <th className="py-1.5 pr-2 font-normal">通報された件数</th>
                   <th className="py-1.5 pr-2 font-normal">警告件数</th>
+                  <th className="py-1.5 pr-2 font-normal">ライブからの退場</th>
                   <th className="py-1.5 pl-2 font-normal">詳細</th>
                 </tr>
               </thead>
@@ -109,6 +120,13 @@ export default function AdminUsersPage() {
                 {filtered.map((u) => (
                   <tr key={u.id} className="border-b border-gray-100">
                     <td className="py-2 pr-2 font-bold text-gray-900">
+                      {unacknowledgedKickedUserIds.has(u.id) && (
+                        <span
+                          className="mr-1 inline-block h-2 w-2 rounded-full bg-red-600"
+                          title="要確認：ライブから退場させられました"
+                          aria-label="要確認"
+                        />
+                      )}
                       {u.display_name}
                       {u.role === "admin" && (
                         <span className="ml-1.5 rounded bg-blue-100 px-1 py-0.5 text-[10px] font-bold text-blue-700">
@@ -119,6 +137,7 @@ export default function AdminUsersPage() {
                     <td className="py-2 pr-2 text-gray-700">{statusLabel(u)}</td>
                     <td className="py-2 pr-2 text-gray-700">{reportedCounts.get(u.id) ?? 0}件</td>
                     <td className="py-2 pr-2 text-gray-700">{warningCounts.get(u.id) ?? 0}件</td>
+                    <td className="py-2 pr-2 text-gray-700">{kickedCounts.get(u.id) ?? 0}回</td>
                     <td className="py-2 pl-2">
                       <Link href={`/admin/users/${u.id}`}>
                         <AdminButton>詳細確認</AdminButton>

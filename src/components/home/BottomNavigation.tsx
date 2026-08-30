@@ -25,12 +25,14 @@ function CalendarIcon({ active }: { active: boolean }) {
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
       <rect x="4" y="5.5" width="16" height="14" rx="1.5" stroke={color} strokeWidth={active ? 2.2 : 1.8} />
       <path d="M4 9.5h16M8 4v3M16 4v3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
-      {/* 日付を表す点。丸カレンダーの中身が空だと「単なる四角」に見えるため追加。 */}
+      {/* 日付を表す点。丸カレンダーの中身が空だと「単なる四角」に見えるため追加。
+          2026-08-30:「点5個を6個に、右下にも点を」の要望で3x2に揃えた。 */}
       <circle cx="8" cy="13.3" r="1" fill={color} />
       <circle cx="12" cy="13.3" r="1" fill={color} />
       <circle cx="16" cy="13.3" r="1" fill={color} />
       <circle cx="8" cy="16.8" r="1" fill={color} />
       <circle cx="12" cy="16.8" r="1" fill={color} />
+      <circle cx="16" cy="16.8" r="1" fill={color} />
     </svg>
   );
 }

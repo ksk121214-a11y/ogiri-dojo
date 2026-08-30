@@ -151,9 +151,15 @@ export default function LivePage() {
         <p className="mb-2 font-sans text-base font-bold text-dojo-ink">
           運営により退場となりました
         </p>
-        <p className="font-sans text-xs text-dojo-dark-brown/70">
+        <p className="mb-4 font-sans text-xs text-dojo-dark-brown/70">
           このライブへの参加はできません。
         </p>
+        <Link
+          href="/"
+          className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+        >
+          ホームに戻る
+        </Link>
       </CenterMessage>
     );
   }

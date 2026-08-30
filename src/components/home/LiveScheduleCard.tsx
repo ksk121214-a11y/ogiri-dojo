@@ -185,8 +185,12 @@ export function CurrentLiveCard({
               <ClockGlyph />
               受付 {reception}
             </p>
+            {/* 2026-08-30:「参加するを押したら参加してしまう」対策。ここから直接
+                /liveへ遷移すると、ホームの正式な入場フロー（useLiveJoinFlow、
+                半券アニメーション等）を経ずにいきなり参加扱いになってしまうため、
+                ホームへ誘導し、そちらの「参加する」から正式に入場してもらう。 */}
             <Link
-              href="/live"
+              href="/"
               className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
             >
               参加する
