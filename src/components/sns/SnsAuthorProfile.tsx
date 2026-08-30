@@ -3,31 +3,69 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import AvatarGlyph from "@/components/app/AvatarGlyph";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import ReportButton from "@/components/app/ReportButton";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
+import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { useSnsStore } from "@/store/useSnsStore";
 
 type Tab = "answers" | "topics";
 
-// ダミー投稿者の簡易プロフィールページ。大喜利SNS本家のProfileDetail相当を道場流に作り直したもの。
+// プロフィールヘッダーに出す情報をダミー投稿者/実ユーザーで共通の形に揃えたもの。
+// ダミー投稿者は段位・フォロー数・楽屋（装備データ）を持つが、実ユーザーは
+// プロフィール（アイコン・名前）と過去の回答・お題のみ表示できる
+// （段位・フォロー関係はDBに保存していないため、実ユーザーについては出さない）。
+type ProfileAuthor =
+  | {
+      kind: "dummy";
+      displayName: string;
+      emoji: string;
+      rankLabel: string;
+      followerCount: number;
+      followingCount: number;
+    }
+  | { kind: "real"; displayName: string; avatarIcon: string; avatarColor: string };
+
+// ダミー投稿者・実ユーザー投稿者どちらも同じ構成（プロフィール＋過去の回答＋出題したお題）で
+// 見られる簡易プロフィールページ。大喜利SNS本家のProfileDetail相当を道場流に作り直したもの。
 // 自分自身のプロフィールは寄合帳トップ（/sns）に直接埋め込まれているため、ここでは扱わない。
 // static export対応のため、useParamsではなくpage.tsx（generateStaticParams）からauthorIdを受け取る。
-// なお、ここに表示するお題/回答はダミー投稿者(authorId)のものに限られ、ブラウザ上で
-// ローカル作成されるお題/回答は必ずauthorId==="me"になるため、このページには現れない
-// （isLocallyCreatedによるリンク無効化は不要）。
+// なお、ここに表示するお題/回答はauthorId（ダミー投稿者 or 実ユーザーのUUID）のものに限られ、
+// ブラウザ上でローカル作成されるお題/回答は必ずauthorId==="me"になるため、このページには
+// 現れない（isLocallyCreatedによるリンク無効化は不要）。
 // 2026-08-30: 寄合帳全体を新デザイン（StadiumPageShell）に統一した。
+// 2026-08-30: 実ユーザー（DB投稿者）をタップした際に「演者が見つかりませんでした」に
+// なっていたのを、ダミー投稿者と同じくプロフィール・過去の回答・お題を見られるようにした。
 export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
+  const realAuthor = useSnsStore((s) => s.realAuthorNames[authorId]);
 
   const [tab, setTab] = useState<Tab>("answers");
 
-  const author = getDummySnsAuthor(authorId);
+  const dummyAuthor = getDummySnsAuthor(authorId);
+  const author: ProfileAuthor | null = dummyAuthor
+    ? {
+        kind: "dummy",
+        displayName: dummyAuthor.displayName,
+        emoji: dummyAuthor.emoji,
+        rankLabel: dummyAuthor.rankLabel,
+        followerCount: dummyAuthor.followerCount,
+        followingCount: dummyAuthor.followingCount,
+      }
+    : realAuthor
+      ? {
+          kind: "real",
+          displayName: realAuthor.displayName,
+          avatarIcon: realAuthor.avatarIcon,
+          avatarColor: realAuthor.avatarColor,
+        }
+      : null;
 
   const ownAnswers = useMemo(
     () => answers.filter((a) => a.authorId === authorId),
@@ -70,25 +108,42 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
         <div className="absolute right-4 top-4">
           <ReportButton />
         </div>
-        <span className="flex h-16 w-16 shrink-0 items-center justify-center text-5xl">
-          {author.emoji}
-        </span>
+        {author.kind === "dummy" ? (
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center text-5xl">
+            {author.emoji}
+          </span>
+        ) : (
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center">
+            <AvatarGlyph
+              iconSrc={getAvatarIconSrc(author.avatarIcon)}
+              silhouetteSrc={getAvatarSilhouetteSrc(author.avatarIcon)}
+              color={author.avatarColor}
+              size={56}
+            />
+          </span>
+        )}
         <div>
           <p className="font-sans text-2xl font-black text-[var(--ink)]">{author.displayName}</p>
-          <p className="mt-1 font-sans text-xs font-bold text-[var(--ink)]">
-            段位：{author.rankLabel}
-          </p>
+          {author.kind === "dummy" && (
+            <p className="mt-1 font-sans text-xs font-bold text-[var(--ink)]">
+              段位：{author.rankLabel}
+            </p>
+          )}
         </div>
 
         <div className="flex gap-6 font-sans text-sm">
-          <Link href={`/sns/u/${authorId}/following`} className="flex flex-col items-center">
-            <span className="font-bold text-[var(--ink)]">{author.followingCount}</span>
-            <span className="text-[11px] text-[var(--ink)]/70">フォロー中</span>
-          </Link>
-          <Link href={`/sns/u/${authorId}/followers`} className="flex flex-col items-center">
-            <span className="font-bold text-[var(--ink)]">{author.followerCount}</span>
-            <span className="text-[11px] text-[var(--ink)]/70">フォロワー</span>
-          </Link>
+          {author.kind === "dummy" && (
+            <>
+              <Link href={`/sns/u/${authorId}/following`} className="flex flex-col items-center">
+                <span className="font-bold text-[var(--ink)]">{author.followingCount}</span>
+                <span className="text-[11px] text-[var(--ink)]/70">フォロー中</span>
+              </Link>
+              <Link href={`/sns/u/${authorId}/followers`} className="flex flex-col items-center">
+                <span className="font-bold text-[var(--ink)]">{author.followerCount}</span>
+                <span className="text-[11px] text-[var(--ink)]/70">フォロワー</span>
+              </Link>
+            </>
+          )}
           <div className="flex flex-col items-center">
             <span className="font-bold text-[var(--ink)]">{ownAnswers.length}</span>
             <span className="text-[11px] text-[var(--ink)]/70">回答</span>
@@ -101,13 +156,15 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
 
         <div className="flex flex-wrap items-center justify-center gap-2">
           <SnsFollowButton authorId={authorId} />
-          <Link
-            href={`/sns/u/${authorId}/backstage`}
-            className="flex items-center gap-1.5 rounded-full border border-[var(--ink)]/25 bg-[var(--ink)]/5 px-4 py-2 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/10"
-          >
-            <span aria-hidden>🙇</span>
-            楽屋に挨拶
-          </Link>
+          {author.kind === "dummy" && (
+            <Link
+              href={`/sns/u/${authorId}/backstage`}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--ink)]/25 bg-[var(--ink)]/5 px-4 py-2 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/10"
+            >
+              <span aria-hidden>🙇</span>
+              楽屋に挨拶
+            </Link>
+          )}
         </div>
       </div>
 
