@@ -77,6 +77,7 @@ const SANCTION_TYPE_LABEL: Record<string, string> = {
   suspend_permanent: "永久停止",
   lift: "停止解除",
   delete: "アカウント削除",
+  kicked: "ライブからの退場",
 };
 
 // ユーザー詳細・対応画面（運営者専用管理画面）。
@@ -371,7 +372,10 @@ export default function AdminUserDetailPage() {
       </AdminCard>
 
       <AdminCard title={`警告・対応履歴（${sanctions.length}件）`}>
-        <ul className="max-h-32 overflow-y-auto text-xs text-gray-600">
+        <p className="text-xs font-bold text-gray-700">
+          ライブからの退場：{sanctions.filter((s) => s.type === "kicked").length}回
+        </p>
+        <ul className="mt-1 max-h-32 overflow-y-auto text-xs text-gray-600">
           {sanctions.map((s) => (
             <li key={s.id} className="border-b border-gray-100 py-1 last:border-0">
               {new Date(s.created_at).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}：

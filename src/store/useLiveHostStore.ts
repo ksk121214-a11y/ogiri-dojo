@@ -17,6 +17,7 @@ import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
 import { assignParticipantsToGroups, pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { supabase } from "@/lib/supabase";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
 import type {
   AnswerRow,
@@ -1147,8 +1148,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   kickParticipant: async (participantId) => {
-    const { live } = get();
+    const { live, participants } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
+    const target = participants.find((p) => p.id === participantId);
     const { error } = await supabase
       .from("participants")
       .update({ kicked_at: new Date().toISOString() })
@@ -1159,6 +1161,25 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetType: "participants",
       targetId: participantId,
     });
+    // 2026-08-30:「退場させられたらユーザー管理に通知（記録）が行くようにして、
+    // 退場させられた件数をユーザー詳細に入れておいて」の要望対応。
+    // /admin/users/[id]の「警告・対応履歴」と同じuser_sanctionsに記録することで、
+    // 新規の通知経路を増やさずユーザー詳細ページにそのまま反映される。
+    if (target) {
+      const actorId = useAuthStore.getState().user?.id ?? null;
+      const { error: sanctionError } = await supabase.from("user_sanctions").insert({
+        user_id: target.user_id,
+        type: "kicked",
+        reason: target.host_message
+          ? `ライブからの退場（直前の個別メッセージ：${target.host_message}）`
+          : "ライブからの退場",
+        target_ref: live.id,
+        created_by: actorId,
+      });
+      if (sanctionError) {
+        console.warn("[useLiveHostStore] 退場のuser_sanctions記録に失敗", sanctionError);
+      }
+    }
     const children = await fetchLiveChildren(live.id);
     set({ participants: children.participants });
     return { ok: true };

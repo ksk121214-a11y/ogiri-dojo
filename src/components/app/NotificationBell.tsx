@@ -77,19 +77,24 @@ export default function NotificationBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+          {/* 2026-08-30:「文字が薄い、タイトルは見えない」不具合対策。
+              var(--paper)/var(--text-on-dark)はStadiumテーマでは両方とも同じ
+              明るいクリーム色に定義されており、「暗い背景に明るい文字」という
+              このドロップダウンの意図に反して「明るい背景に明るい文字」になって
+              読めなくなっていた。テーマ変数に左右されない固定の配色に変更する。 */}
           <div
             role="dialog"
             aria-label="お知らせ"
-            className="absolute top-full right-0 z-50 mt-2 max-h-80 w-64 overflow-y-auto rounded-xl border border-[var(--border-dark)] bg-[var(--paper,#1a1a1a)] p-2 text-left shadow-xl"
+            className="absolute top-full right-0 z-50 mt-2 max-h-80 w-64 overflow-y-auto rounded-xl border border-white/15 bg-[#1f1f1f] p-2 text-left shadow-xl"
           >
             {notifications.length === 0 ? (
-              <p className="p-2 font-sans text-xs text-[var(--muted-on-dark)]">お知らせはありません</p>
+              <p className="p-2 font-sans text-xs text-white/60">お知らせはありません</p>
             ) : (
               notifications.map((n) => (
-                <div key={n.id} className="border-b border-[var(--border-dark)]/50 p-2 last:border-0">
-                  <p className="font-sans text-xs font-bold text-[var(--text-on-dark)]">{n.title}</p>
-                  <p className="mt-0.5 font-sans text-[11px] text-[var(--muted-on-dark)]">{n.body}</p>
-                  <p className="mt-0.5 font-sans text-[10px] text-[var(--muted-on-dark)]">
+                <div key={n.id} className="border-b border-white/10 p-2 last:border-0">
+                  <p className="font-sans text-xs font-bold text-white">{n.title}</p>
+                  <p className="mt-0.5 font-sans text-[11px] text-white/70">{n.body}</p>
+                  <p className="mt-0.5 font-sans text-[10px] text-white/50">
                     {new Date(n.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
                   </p>
                 </div>

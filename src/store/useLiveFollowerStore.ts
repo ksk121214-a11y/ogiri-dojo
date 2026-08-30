@@ -464,7 +464,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         ? "参加人数が上限に達しました"
         : error.message.includes("PLAYER_JOIN_CLOSED")
           ? "ゲームが始まったため、プレイヤーとしての参加登録はできません。観客として参加してください。"
-          : error.message;
+          : error.message.includes("PARTICIPANT_KICKED")
+            ? "このライブへの参加はできません。"
+            : error.message;
       set({ error: reason });
       return;
     }

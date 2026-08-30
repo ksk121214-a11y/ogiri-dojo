@@ -107,15 +107,11 @@ export function useLiveJoinFlow() {
       return;
     }
 
-    // 2026-08-30: 運営者専用管理画面の追加（第1段階）。current_phase==='scheduled'は
-    // 運営者がまだ「参加受付を開始する」を押していない準備中の状態。この間は
-    // 参加ボタンを押せないようにする（要件：「準備が完了するまでは参加ボタンを
-    // 押せないようにする」）。
-    if (live.current_phase === "scheduled") {
-      clearLiveEntry();
-      if (!isBusy()) setStatus("preparing");
-      return;
-    }
+    // 2026-08-30: 「準備中（受付前）でも入場はできるようにして」の要望により、
+    // current_phase==='scheduled'（運営者がまだ「参加受付を開始する」を押していない
+    // 準備中の状態）でも参加ボタンを押して/liveへ入場できるようにした（以前は
+    // ボタンを押せなくしていたが、その制限を撤廃した）。実際の参加登録
+    // （プレイヤー/観客選択）は従来どおりopeningフェーズになってから行う。
 
     if (!authUser) {
       setStatus("idle");
