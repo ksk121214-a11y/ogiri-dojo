@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Link from "next/link";
 
@@ -29,17 +29,19 @@ const START_TIME_OPTIONS = buildStartTimeOptions();
 
 // ライブ予定管理画面（運営者専用管理画面）。
 // 実際にゲームが進行するlivesテーブルとは完全に切り離した、表示専用の
-// 予定データ(live_schedule_entries)を扱う。1件の予定を
-// 「準備中/前回/今回/次回/ホームの次回ライブ」のどこに表示するか手動で選べる。
-// 新規のライブ実施（お題選定・受付開始等）は引き続き/live/host（ライブ準備画面）で行う
-// （このページはあくまで公開画面に出す日付・番号の告知データを管理するだけ）。
-// 2026-08-30（デザイン整理）：管理操作のロジックは変更せず、共通の
-// AdminShell/AdminCard/AdminButton/AdminNoticeに置き換えて表示だけ整理した。
+// 予定データ(live_schedule_entries)を扱う。
+//
+// 2026-08-30（一覧UIの廃止）：「前回/今回/次回/ホームの次回ライブ」の4枠を
+// 一覧テーブルから選ぶ方式だと、使うほど過去の予定が溜まって見づらくなるため、
+// 4枠のカードを直接編集する方式に変更した。各カードの「編集する」/「予定を
+// 作成する」から、その場でフォームを開いて保存すると、そのままそのカードの
+// 表示が更新される。使わなくなった予定は完全削除ではなく「未設定に戻す」
+// （display_role='preparing'に戻すだけ）にすることで、データ自体は失われない。
+// 新規のライブ実施（お題選定・受付開始等）は引き続き/live/host（ライブ準備画面）で行う。
 export default function AdminSchedulePage() {
   const [entries, setEntries] = useState<LiveScheduleEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<LiveScheduleDisplayRole | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
@@ -67,72 +69,27 @@ export default function AdminSchedulePage() {
     return map;
   }, [entries]);
 
-  const handleChangeRole = async (entry: LiveScheduleEntry, role: LiveScheduleDisplayRole) => {
-    const { error: rpcError } = await supabase.rpc("set_live_schedule_role", {
+  const handleClear = async (entry: LiveScheduleEntry) => {
+    const confirmed = window.confirm(
+      `「${DISPLAY_ROLE_LABEL[entry.display_role]}」の予定を未設定に戻しますか？（データ自体は削除されません）`,
+    );
+    if (!confirmed) return;
+    const { error } = await supabase.rpc("set_live_schedule_role", {
       p_entry_id: entry.id,
-      p_role: role,
+      p_role: "preparing",
     });
-    if (rpcError) {
-      notifyError(rpcError.message);
+    if (error) {
+      notifyError(error.message);
       return;
     }
     await logAdminAction({
       action: "schedule_entry_role_changed",
       targetType: "live_schedule_entries",
       targetId: entry.id,
-      detail: { role },
+      detail: { role: "preparing" },
     });
-    notifySuccess(`表示先を「${DISPLAY_ROLE_LABEL[role]}」に変更しました。`);
-    await load();
-  };
-
-  const handleDuplicate = async (entry: LiveScheduleEntry) => {
-    const ticketNo = nextTicketNoCandidate(entries);
-    const { data, error: insertError } = await supabase
-      .from("live_schedule_entries")
-      .insert({
-        event_date: entry.event_date,
-        start_time: entry.start_time,
-        reception_time: entry.reception_time,
-        ticket_no: ticketNo,
-        display_role: "preparing",
-      })
-      .select()
-      .single();
-    if (insertError || !data) {
-      notifyError(insertError?.message ?? "複製に失敗しました");
-      return;
-    }
-    await logAdminAction({
-      action: "schedule_entry_duplicated",
-      targetType: "live_schedule_entries",
-      targetId: (data as LiveScheduleEntry).id,
-      detail: { fromId: entry.id },
-    });
-    notifySuccess("複製しました。必要に応じて開催日を調整してください。");
-    await load();
-    setEditingId((data as LiveScheduleEntry).id);
-  };
-
-  const handleDelete = async (entry: LiveScheduleEntry) => {
-    const confirmed = window.confirm(
-      `${entry.ticket_no}（${entry.event_date}）を削除しますか？この操作は取り消せません。`,
-    );
-    if (!confirmed) return;
-    const { error: deleteError } = await supabase
-      .from("live_schedule_entries")
-      .delete()
-      .eq("id", entry.id);
-    if (deleteError) {
-      notifyError(deleteError.message);
-      return;
-    }
-    await logAdminAction({
-      action: "schedule_entry_deleted",
-      targetType: "live_schedule_entries",
-      targetId: entry.id,
-    });
-    notifySuccess("削除しました。");
+    notifySuccess(`「${DISPLAY_ROLE_LABEL[entry.display_role]}」を未設定に戻しました。`);
+    setEditingRole(null);
     await load();
   };
 
@@ -150,154 +107,88 @@ export default function AdminSchedulePage() {
 
       <AdminNotice notice={notice} onClose={clear} />
 
-      {/* 現在の割当一覧 */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {ASSIGNABLE_DISPLAY_ROLES.map((role) => {
-          const entry = byRole[role];
-          return (
-            <AdminCard key={role} title={DISPLAY_ROLE_LABEL[role]}>
-              {entry ? (
-                <>
-                  <p className="text-sm font-bold text-gray-900">{entry.ticket_no}</p>
-                  <p className="text-xs text-gray-500">
-                    {entry.event_date} {entry.start_time.slice(0, 5)}
-                  </p>
-                </>
-              ) : (
-                <p className="text-sm text-gray-400">未割当</p>
-              )}
-            </AdminCard>
-          );
-        })}
-      </div>
+      {loading ? (
+        <p className="text-sm text-gray-500">読み込み中…</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {ASSIGNABLE_DISPLAY_ROLES.map((role) => {
+            const entry = byRole[role];
+            const isEditing = editingRole === role;
+            const otherEntries = ASSIGNABLE_DISPLAY_ROLES.filter((r) => r !== role)
+              .map((r) => byRole[r])
+              .filter((e): e is LiveScheduleEntry => !!e);
 
-      <AdminButton
-        variant="primary"
-        onClick={() => setCreating((v) => !v)}
-        className="self-start"
-      >
-        {creating ? "キャンセル" : "＋ 新しい予定を作成"}
-      </AdminButton>
-
-      {creating && (
-        <ScheduleEntryForm
-          entries={entries}
-          onCancel={() => setCreating(false)}
-          onSave={async (input) => {
-            const { data, error: insertError } = await supabase
-              .from("live_schedule_entries")
-              .insert(input)
-              .select()
-              .single();
-            if (insertError || !data) return { ok: false, reason: insertError?.message };
-            await logAdminAction({
-              action: "schedule_entry_created",
-              targetType: "live_schedule_entries",
-              targetId: (data as LiveScheduleEntry).id,
-              detail: { ...input },
-            });
-            setCreating(false);
-            notifySuccess("新しい予定を作成しました。");
-            await load();
-            return { ok: true };
-          }}
-        />
-      )}
-
-      <AdminCard title={`ライブ予定一覧（${entries.length}件）`}>
-        {loading ? (
-          <p className="text-sm text-gray-500">読み込み中…</p>
-        ) : entries.length === 0 ? (
-          <p className="text-sm text-gray-500">まだライブ予定がありません。</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
-                  <th className="py-1.5 pr-2 font-normal">番号</th>
-                  <th className="py-1.5 pr-2 font-normal">日付</th>
-                  <th className="py-1.5 pr-2 font-normal">開始</th>
-                  <th className="py-1.5 pr-2 font-normal">状態</th>
-                  <th className="py-1.5 pr-2 font-normal">操作</th>
-                  <th className="py-1.5 pl-4 font-normal">削除</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <Fragment key={entry.id}>
-                    <tr className="border-b border-gray-100 align-top">
-                      <td className="py-2 pr-2 font-bold text-gray-900">{entry.ticket_no}</td>
-                      <td className="py-2 pr-2 text-gray-700">{entry.event_date}</td>
-                      <td className="py-2 pr-2 text-gray-700">{entry.start_time.slice(0, 5)}</td>
-                      <td className="py-2 pr-2">
-                        <select
-                          value={entry.display_role}
-                          onChange={(e) =>
-                            handleChangeRole(entry, e.target.value as LiveScheduleDisplayRole)
-                          }
-                          className="rounded border border-gray-300 px-1 py-0.5 text-xs"
-                        >
-                          <option value="preparing">{DISPLAY_ROLE_LABEL.preparing}</option>
-                          {ASSIGNABLE_DISPLAY_ROLES.map((role) => (
-                            <option key={role} value={role}>
-                              {DISPLAY_ROLE_LABEL[role]}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-2 pr-2">
-                        <div className="flex flex-wrap gap-1.5">
-                          <AdminButton
-                            onClick={() =>
-                              setEditingId((prev) => (prev === entry.id ? null : entry.id))
-                            }
-                          >
-                            {editingId === entry.id ? "閉じる" : "編集"}
-                          </AdminButton>
-                          <AdminButton onClick={() => handleDuplicate(entry)}>複製</AdminButton>
-                        </div>
-                      </td>
-                      <td className="py-2 pl-4">
-                        <AdminButton variant="danger" onClick={() => handleDelete(entry)}>
-                          削除
+            return (
+              <AdminCard key={role} title={DISPLAY_ROLE_LABEL[role]}>
+                {!isEditing &&
+                  (entry ? (
+                    <>
+                      <p className="text-lg font-bold text-gray-900">{entry.ticket_no}</p>
+                      <p className="text-sm text-gray-700">
+                        {entry.event_date} {entry.start_time.slice(0, 5)}開演
+                      </p>
+                      <p className="text-xs text-gray-500">受付 {entry.reception_time.slice(0, 5)}〜</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <AdminButton variant="primary" onClick={() => setEditingRole(role)}>
+                          編集する
                         </AdminButton>
-                      </td>
-                    </tr>
-                    {editingId === entry.id && (
-                      <tr className="border-b border-gray-100">
-                        <td colSpan={6} className="py-2">
-                          <ScheduleEntryForm
-                            entries={entries}
-                            initial={entry}
-                            onCancel={() => setEditingId(null)}
-                            onSave={async (input) => {
-                              const { error: updateError } = await supabase
-                                .from("live_schedule_entries")
-                                .update(input)
-                                .eq("id", entry.id);
-                              if (updateError) return { ok: false, reason: updateError.message };
-                              await logAdminAction({
-                                action: "schedule_entry_updated",
-                                targetType: "live_schedule_entries",
-                                targetId: entry.id,
-                                detail: { ...input },
-                              });
-                              setEditingId(null);
-                              notifySuccess("保存しました。");
-                              await load();
-                              return { ok: true };
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </AdminCard>
+                        <AdminButton onClick={() => handleClear(entry)}>未設定に戻す</AdminButton>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-400">未設定</p>
+                      <AdminButton variant="primary" onClick={() => setEditingRole(role)} className="mt-2">
+                        予定を作成する
+                      </AdminButton>
+                    </>
+                  ))}
+
+                {isEditing && (
+                  <ScheduleEntryForm
+                    entries={entries}
+                    initial={entry}
+                    otherEntries={otherEntries}
+                    onCancel={() => setEditingRole(null)}
+                    onSave={async (input) => {
+                      if (entry) {
+                        const { error } = await supabase
+                          .from("live_schedule_entries")
+                          .update(input)
+                          .eq("id", entry.id);
+                        if (error) return { ok: false, reason: error.message };
+                        await logAdminAction({
+                          action: "schedule_entry_updated",
+                          targetType: "live_schedule_entries",
+                          targetId: entry.id,
+                          detail: { ...input },
+                        });
+                      } else {
+                        const { data, error } = await supabase
+                          .from("live_schedule_entries")
+                          .insert({ ...input, display_role: role })
+                          .select()
+                          .single();
+                        if (error || !data) return { ok: false, reason: error?.message };
+                        await logAdminAction({
+                          action: "schedule_entry_created",
+                          targetType: "live_schedule_entries",
+                          targetId: (data as LiveScheduleEntry).id,
+                          detail: { ...input, display_role: role },
+                        });
+                      }
+                      notifySuccess("保存しました。");
+                      setEditingRole(null);
+                      await load();
+                      return { ok: true };
+                    }}
+                  />
+                )}
+              </AdminCard>
+            );
+          })}
+        </div>
+      )}
 
       <ResultsPublishSection notifySuccess={notifySuccess} />
     </AdminShell>
@@ -309,20 +200,23 @@ interface ScheduleEntryInput {
   start_time: string;
   reception_time: string;
   ticket_no: string;
-  display_role: LiveScheduleDisplayRole;
 }
 
-// 新規作成・編集で共用する入力フォーム。開催日→カレンダーピッカー、開始時刻→選択欄、
-// 受付時刻→開始時刻の5分前を自動入力しつつ手動変更も可能、ライブ番号→自動候補＋手動編集、
-// 表示先→選択欄、という要件どおりのシンプルな1画面構成にしている。
+// 各枠カード共通の入力フォーム。開催日→カレンダーピッカー、開始時刻→選択欄、
+// 受付時刻→開始時刻の5分前を自動入力しつつ手動変更も可能、ライブ番号→自動候補＋
+// 手動編集、という要件どおりのシンプルな構成。表示先はカード側で固定済みのため
+// このフォームでは選ばせない。他の枠に既に予定があれば、その内容をコピーして
+// 使えるようにしている（複製に相当する操作）。
 function ScheduleEntryForm({
   entries,
   initial,
+  otherEntries,
   onSave,
   onCancel,
 }: {
   entries: LiveScheduleEntry[];
   initial?: LiveScheduleEntry;
+  otherEntries: LiveScheduleEntry[];
   onSave: (input: ScheduleEntryInput) => Promise<{ ok: boolean; reason?: string }>;
   onCancel: () => void;
 }) {
@@ -333,15 +227,23 @@ function ScheduleEntryForm({
   );
   const [receptionEdited, setReceptionEdited] = useState(!!initial);
   const [ticketNo, setTicketNo] = useState(initial?.ticket_no ?? nextTicketNoCandidate(entries));
-  const [displayRole, setDisplayRole] = useState<LiveScheduleDisplayRole>(
-    initial?.display_role ?? "preparing",
-  );
+  const [copyFromId, setCopyFromId] = useState("");
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleStartTimeChange = (value: string) => {
     setStartTime(value);
     if (!receptionEdited) setReceptionTime(defaultReceptionTime(value));
+  };
+
+  const handleCopy = (id: string) => {
+    setCopyFromId(id);
+    const source = otherEntries.find((e) => e.id === id);
+    if (!source) return;
+    setEventDate(source.event_date);
+    setStartTime(source.start_time.slice(0, 5));
+    setReceptionTime(source.reception_time.slice(0, 5));
+    setReceptionEdited(true);
   };
 
   const handleSave = async () => {
@@ -356,7 +258,6 @@ function ScheduleEntryForm({
       start_time: startTime,
       reception_time: receptionTime,
       ticket_no: ticketNo,
-      display_role: displayRole,
     });
     setSaving(false);
     if (!result.ok) setLocalError(result.reason ?? "保存に失敗しました");
@@ -365,100 +266,96 @@ function ScheduleEntryForm({
   const preview = eventDate ? toScheduleEntryDate(eventDate, startTime) : null;
 
   return (
-    <AdminCard className="border-blue-200 bg-blue-50/40">
-      <div className="flex flex-col gap-2">
+    <div className="mt-2 flex flex-col gap-2 border-t border-gray-100 pt-3">
+      {otherEntries.length > 0 && (
         <label className="flex flex-col gap-0.5 text-[11px] text-gray-600">
-          開催日
+          他の予定をコピーして使う（任意）
+          <select
+            value={copyFromId}
+            onChange={(e) => handleCopy(e.target.value)}
+            className="rounded border border-gray-300 px-2 py-1 text-sm"
+          >
+            <option value="">選択してください</option>
+            {otherEntries.map((e) => (
+              <option key={e.id} value={e.id}>
+                {DISPLAY_ROLE_LABEL[e.display_role]}（{e.ticket_no}・{e.event_date}）
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <label className="flex flex-col gap-0.5 text-[11px] text-gray-600">
+        開催日
+        <input
+          type="date"
+          value={eventDate}
+          onChange={(e) => setEventDate(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1 text-sm"
+        />
+      </label>
+
+      <div className="flex gap-2">
+        <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
+          開始時刻
+          <select
+            value={startTime}
+            onChange={(e) => handleStartTimeChange(e.target.value)}
+            className="rounded border border-gray-300 px-2 py-1 text-sm"
+          >
+            {START_TIME_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
+          受付時刻（開始5分前を自動入力）
           <input
-            type="date"
-            value={eventDate}
-            onChange={(e) => setEventDate(e.target.value)}
+            type="time"
+            value={receptionTime}
+            onChange={(e) => {
+              setReceptionEdited(true);
+              setReceptionTime(e.target.value);
+            }}
             className="rounded border border-gray-300 px-2 py-1 text-sm"
           />
         </label>
-
-        <div className="flex gap-2">
-          <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
-            開始時刻
-            <select
-              value={startTime}
-              onChange={(e) => handleStartTimeChange(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            >
-              {START_TIME_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
-            受付時刻（開始5分前を自動入力）
-            <input
-              type="time"
-              value={receptionTime}
-              onChange={(e) => {
-                setReceptionEdited(true);
-                setReceptionTime(e.target.value);
-              }}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            />
-          </label>
-        </div>
-
-        <div className="flex gap-2">
-          <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
-            ライブ番号
-            <input
-              type="text"
-              value={ticketNo}
-              onChange={(e) => setTicketNo(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            />
-          </label>
-          <label className="flex flex-1 flex-col gap-0.5 text-[11px] text-gray-600">
-            表示先
-            <select
-              value={displayRole}
-              onChange={(e) => setDisplayRole(e.target.value as LiveScheduleDisplayRole)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
-            >
-              <option value="preparing">{DISPLAY_ROLE_LABEL.preparing}</option>
-              {ASSIGNABLE_DISPLAY_ROLES.map((role) => (
-                <option key={role} value={role}>
-                  {DISPLAY_ROLE_LABEL[role]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {preview && (
-          <p className="text-[11px] text-gray-500">
-            プレビュー：{preview.year}年{preview.month}月{preview.day}日（{preview.weekday}）
-            {preview.time}開演
-          </p>
-        )}
-
-        {initial && (
-          <AdminButton
-            onClick={() => setEventDate((d) => (d ? addOneWeek(d) : d))}
-            className="self-start"
-          >
-            開催日を1週間後にする
-          </AdminButton>
-        )}
-
-        {localError && <p className="text-xs text-red-600">{localError}</p>}
-
-        <div className="flex gap-2">
-          <AdminButton variant="primary" disabled={saving} onClick={handleSave}>
-            {saving ? "保存中…" : "保存する"}
-          </AdminButton>
-          <AdminButton onClick={onCancel}>キャンセル</AdminButton>
-        </div>
       </div>
-    </AdminCard>
+
+      <label className="flex flex-col gap-0.5 text-[11px] text-gray-600">
+        ライブ番号
+        <input
+          type="text"
+          value={ticketNo}
+          onChange={(e) => setTicketNo(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1 text-sm"
+        />
+      </label>
+
+      {preview && (
+        <p className="text-[11px] text-gray-500">
+          プレビュー：{preview.year}年{preview.month}月{preview.day}日（{preview.weekday}）
+          {preview.time}開演
+        </p>
+      )}
+
+      {eventDate && (
+        <AdminButton onClick={() => setEventDate((d) => (d ? addOneWeek(d) : d))} className="self-start">
+          開催日を1週間後にする
+        </AdminButton>
+      )}
+
+      {localError && <p className="text-xs text-red-600">{localError}</p>}
+
+      <div className="flex gap-2">
+        <AdminButton variant="primary" disabled={saving} onClick={handleSave}>
+          {saving ? "保存中…" : "保存する"}
+        </AdminButton>
+        <AdminButton onClick={onCancel}>キャンセル</AdminButton>
+      </div>
+    </div>
   );
 }
 
