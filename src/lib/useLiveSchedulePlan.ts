@@ -22,14 +22,28 @@ export interface LiveSchedulePlanResult {
 // 不具合対応（src/components/home/useLiveJoinFlow.ts参照）を踏襲し、ここでも
 // Realtime購読はせず、マウント時の取得＋画面フォーカス復帰・オンライン復帰時の
 // 再取得のみに留める。
+//
+// 2026-08-30:「ホームから/liveに行く時などの画面転換で、チケットの形が一瞬
+// 変わって戻る」ちらつき対策。/liveから戻る等でこのフックが再マウントされる
+// たびにloading:true・homeUpcoming:nullから始まっていたため、取得が終わるまでの
+// 一瞬だけNextLiveTicketが「準備中」の形で表示され、データが揃うと本来のチケット
+// 形に切り替わる、という2段階の見た目変化が毎回の画面遷移で見えていた。
+// モジュールスコープに前回の取得結果をキャッシュし、次回以降のマウント時は
+// それを初期値として使うことで、同一セッション内での再訪問時は最初から正しい
+// 見た目で表示できるようにする（キャッシュが無い初回訪問時だけは従来どおり）。
+let cachedPlan: LiveSchedulePlanResult | null = null;
+
 export function useLiveSchedulePlan(): LiveSchedulePlanResult {
-  const [state, setState] = useState<LiveSchedulePlanResult>({
-    previous: null,
-    current: null,
-    upcoming: null,
-    homeUpcoming: null,
-    loading: true,
-  });
+  const [state, setState] = useState<LiveSchedulePlanResult>(
+    () =>
+      cachedPlan ?? {
+        previous: null,
+        current: null,
+        upcoming: null,
+        homeUpcoming: null,
+        loading: true,
+      },
+  );
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -38,13 +52,15 @@ export function useLiveSchedulePlan(): LiveSchedulePlanResult {
       .in("display_role", ["previous", "current", "upcoming", "home_upcoming"]);
     const rows = (data ?? []) as LiveScheduleEntry[];
     const byRole = (role: string) => rows.find((r) => r.display_role === role) ?? null;
-    setState({
+    const next: LiveSchedulePlanResult = {
       previous: byRole("previous"),
       current: byRole("current"),
       upcoming: byRole("upcoming"),
       homeUpcoming: byRole("home_upcoming"),
       loading: false,
-    });
+    };
+    cachedPlan = next;
+    setState(next);
   }, []);
 
   useEffect(() => {
