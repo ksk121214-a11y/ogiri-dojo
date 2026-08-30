@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
 import AdminShell from "@/components/admin/AdminShell";
+import { formatActionLabel, formatTargetTypeLabel } from "@/lib/adminActionLabels";
 import { supabase } from "@/lib/supabase";
 
 interface LogRow {
@@ -70,7 +71,7 @@ export default function AdminLogsPage() {
           <option value="all">すべての操作</option>
           {actionTypes.map((a) => (
             <option key={a} value={a}>
-              {a}
+              {formatActionLabel(a)}
             </option>
           ))}
         </select>
@@ -99,9 +100,9 @@ export default function AdminLogsPage() {
                     <td className="whitespace-nowrap py-1.5 pr-2 text-gray-600">
                       {new Date(l.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
                     </td>
-                    <td className="py-1.5 pr-2 font-bold text-gray-900">{l.action}</td>
+                    <td className="py-1.5 pr-2 font-bold text-gray-900">{formatActionLabel(l.action)}</td>
                     <td className="py-1.5 pr-2 text-gray-600">
-                      {l.target_type ?? "-"}
+                      {formatTargetTypeLabel(l.target_type)}
                       {l.target_id ? `（${l.target_id.slice(0, 8)}）` : ""}
                     </td>
                     <td className="py-1.5 pr-2 text-gray-600">{l.reason ?? "-"}</td>
