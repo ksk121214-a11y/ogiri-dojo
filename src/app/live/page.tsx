@@ -20,6 +20,7 @@ import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { useTickingNow } from "@/lib/useTickingNow";
+import { useVisualViewportVar } from "@/lib/useVisualViewportVar";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
@@ -58,6 +59,11 @@ export default function LivePage() {
 
   const now = useTickingNow();
   const [joining, setJoining] = useState(false);
+
+  // 回答入力欄でソフトウェアキーボードが開いた際、レイアウトビューポート基準の
+  // 100dvhがキーボードの高さぶんに追従せず、入力欄が隠れる・キーボードを閉じても
+  // 画面が元に戻らないことがある対策（詳細はuseVisualViewportVar参照）。
+  useVisualViewportVar();
 
   // 2026-08-29:「お題発表・回答・審査で使う必須素材が、表示される瞬間に読み込み待ち
   // にならないようにする」対応。ページに滞在している間ずっと（フェーズがどう変わっても
@@ -176,7 +182,11 @@ export default function LivePage() {
 
   if (showImmersive && live) {
     return (
-      <main className="relative h-dvh w-full overflow-hidden bg-dojo-stage-dark">
+      // fixedにして画面上端に固定することで、iOS Safariでキーボード表示中に
+      // visualViewportがスクロール（offsetTopが変化）しても位置がずれない。
+      // 高さはh-dvhではなくuseVisualViewportVarが反映するCSS変数を使い、
+      // キーボードの開閉に追従させる（未対応ブラウザ・SSR時はh-dvh相当にフォールバック）。
+      <main className="fixed inset-x-0 top-0 h-[var(--live-vvh,100dvh)] w-full overflow-hidden bg-dojo-stage-dark">
         <DisplayNameSetupModal />
         <AnnouncementBanner />
         <AudienceHomeButton />

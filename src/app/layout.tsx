@@ -32,8 +32,12 @@ export const metadata: Metadata = {
 
 // ホームの下部固定ナビでenv(safe-area-inset-bottom)を効かせるにはviewport-fit=coverが必要
 // （iOS Safariの仕様。無いとセーフエリア変数が常に0扱いになる）。
+// interactiveWidget: "resizes-content"は、ソフトウェアキーボード表示時にvisual
+// viewportではなくレイアウトビューポート自体をキーボード分縮めさせる指定
+// （2026-08-31: ライブ画面の回答入力でキーボード表示時にレイアウトが崩れる対策の一環）。
 export const viewport: Viewport = {
   viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

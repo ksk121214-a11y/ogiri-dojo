@@ -46,6 +46,7 @@ export default function StageAnsweringView() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 回答フリップが消えたあと(猶予表示が切れたあと)にその人の回答席で見えるように、
   // 回答フリップの猶予(useJudgingDisplayの既定3600ms)より長く持たせる。
@@ -200,6 +201,9 @@ export default function StageAnsweringView() {
     if (result.ok) {
       setDraft("");
       setError(null);
+      // 送信後にソフトウェアキーボードを閉じる。開いたままだと次の演出（採点ボード等）が
+      // キーボードの下に隠れたり、iOS Safariで画面の高さ・位置が元に戻らないことがある。
+      textareaRef.current?.blur();
     } else {
       setError(result.reason ?? "送信できませんでした");
     }
@@ -326,6 +330,7 @@ export default function StageAnsweringView() {
           className="relative z-10 mx-auto w-full max-w-xl"
         >
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={overLimit}
