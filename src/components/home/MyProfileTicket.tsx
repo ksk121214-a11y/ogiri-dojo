@@ -6,7 +6,6 @@ import Link from "next/link";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import { getRankByMeter } from "@/data/collectionData";
-import { MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
@@ -43,6 +42,7 @@ export default function MyProfileTicket({
   const rank = getRankByMeter(user.masteryMeter);
   const profile = useProfileStore((s) => s.profile);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
+  const followerCount = useSnsStore((s) => s.myFollowerCount);
   const displayName = profile?.displayName ?? user.displayName;
 
   const ticketCount = useTicketStore((s) => s.count);
@@ -106,7 +106,7 @@ export default function MyProfileTicket({
               </span>
               <Link href="/sns/u/me/followers" className="flex items-center gap-1.5">
                 <span className="font-sans text-base font-bold tabular-nums text-[var(--ink)]">
-                  {MY_FOLLOWER_DISPLAY_COUNT}
+                  {followerCount ?? "…"}
                 </span>
                 <span className="font-sans text-xs text-[var(--ink)]/70 hover:underline">フォロワー</span>
               </Link>

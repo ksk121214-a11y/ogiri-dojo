@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import AvatarGlyph from "@/components/app/AvatarGlyph";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -11,6 +11,7 @@ import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { supabase } from "@/lib/supabase";
 import { useSnsStore } from "@/store/useSnsStore";
 
 type Tab = "answers" | "topics";
@@ -45,10 +46,39 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
   const realAuthor = useSnsStore((s) => s.realAuthorNames[authorId]);
+  const resolveAuthorName = useSnsStore((s) => s.resolveAuthorName);
+  const fetchAuthorPosts = useSnsStore((s) => s.fetchAuthorPosts);
 
   const [tab, setTab] = useState<Tab>("answers");
+  // 実ユーザーのフォロー中数・フォロワー数（sns_followsの実カウント）。ダミー投稿者は
+  // 従来どおりsnsAuthors.tsの固定値をそのまま使う。
+  const [realCounts, setRealCounts] = useState<{ followers: number; following: number } | null>(null);
 
   const dummyAuthor = getDummySnsAuthor(authorId);
+
+  // 投稿に一度も登場していない実ユーザー（フォロー関係だけで辿り着いた場合等）でも
+  // プロフィールが表示できるよう、まだ解決していなければその場で表示名を取得する。
+  useEffect(() => {
+    if (dummyAuthor) return;
+    resolveAuthorName(authorId);
+    fetchAuthorPosts(authorId);
+  }, [authorId, dummyAuthor, resolveAuthorName, fetchAuthorPosts]);
+
+  useEffect(() => {
+    if (dummyAuthor) return;
+    let cancelled = false;
+    Promise.all([
+      supabase.from("sns_follows").select("id", { count: "exact", head: true }).eq("following_id", authorId),
+      supabase.from("sns_follows").select("id", { count: "exact", head: true }).eq("follower_id", authorId),
+    ]).then(([followersRes, followingRes]) => {
+      if (cancelled) return;
+      setRealCounts({ followers: followersRes.count ?? 0, following: followingRes.count ?? 0 });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authorId, dummyAuthor]);
+
   const author: ProfileAuthor | null = dummyAuthor
     ? {
         kind: "dummy",
@@ -132,18 +162,18 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
         </div>
 
         <div className="flex gap-6 font-sans text-sm">
-          {author.kind === "dummy" && (
-            <>
-              <Link href={`/sns/u/${authorId}/following`} className="flex flex-col items-center">
-                <span className="font-bold text-[var(--ink)]">{author.followingCount}</span>
-                <span className="text-[11px] text-[var(--ink)]/70">フォロー中</span>
-              </Link>
-              <Link href={`/sns/u/${authorId}/followers`} className="flex flex-col items-center">
-                <span className="font-bold text-[var(--ink)]">{author.followerCount}</span>
-                <span className="text-[11px] text-[var(--ink)]/70">フォロワー</span>
-              </Link>
-            </>
-          )}
+          <Link href={`/sns/u/${authorId}/following`} className="flex flex-col items-center">
+            <span className="font-bold text-[var(--ink)]">
+              {author.kind === "dummy" ? author.followingCount : (realCounts?.following ?? "…")}
+            </span>
+            <span className="text-[11px] text-[var(--ink)]/70">フォロー中</span>
+          </Link>
+          <Link href={`/sns/u/${authorId}/followers`} className="flex flex-col items-center">
+            <span className="font-bold text-[var(--ink)]">
+              {author.kind === "dummy" ? author.followerCount : (realCounts?.followers ?? "…")}
+            </span>
+            <span className="text-[11px] text-[var(--ink)]/70">フォロワー</span>
+          </Link>
           <div className="flex flex-col items-center">
             <span className="font-bold text-[var(--ink)]">{ownAnswers.length}</span>
             <span className="text-[11px] text-[var(--ink)]/70">回答</span>

@@ -24,10 +24,16 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
   const likedAnswerIds = useSnsStore((s) => s.likedAnswerIds);
+  const likePending = useSnsStore((s) => s.likePending);
   const addAnswer = useSnsStore((s) => s.addAnswer);
   const toggleLike = useSnsStore((s) => s.toggleLike);
+  const fetchTopicById = useSnsStore((s) => s.fetchTopicById);
 
   const [body, setBody] = useState("");
+  const [likeError, setLikeError] = useState<string | null>(null);
+  // 取得を試みて完了したか（true になるまでは「読み込み中」、完了してもtopicが
+  // 無ければ「見つかりませんでした」を出す）。
+  const [loadAttempted, setLoadAttempted] = useState(false);
 
   const ticketCount = useTicketStore((s) => s.count);
   const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
@@ -39,6 +45,19 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   }, [recalculateTickets]);
 
   const topic = topics.find((t) => t.id === topicId);
+
+  // ページネーション導入により、1ページ目のロード範囲に無いお題（直リンク・共有URL経由等）
+  // へのアクセス時は、その場で個別に取得を試みる。
+  useEffect(() => {
+    if (topic) return;
+    let cancelled = false;
+    fetchTopicById(topicId).finally(() => {
+      if (!cancelled) setLoadAttempted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [topic, topicId, fetchTopicById]);
 
   const topicAnswers = useMemo(
     () =>
@@ -61,7 +80,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
       <StadiumPageShell contentTheme="kraft">
         <div className="flex flex-col items-center gap-4 py-16 text-center">
           <p className="font-sans text-sm text-[var(--ink)]/70">
-            お題が見つかりませんでした。
+            {loadAttempted ? "お題が見つかりませんでした。" : "読み込み中…"}
           </p>
           <SnsBackButton
             fallbackHref="/mypage"
@@ -82,6 +101,15 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
     if (!consumeTicket()) return;
     addAnswer(topic.id, trimmed);
     setBody("");
+  };
+
+  const handleToggleLike = async (answerId: string) => {
+    if (likePending[answerId]) return;
+    const result = await toggleLike(answerId);
+    if (!result.ok && result.message) {
+      setLikeError(result.message);
+      setTimeout(() => setLikeError(null), 3000);
+    }
   };
 
   return (
@@ -152,6 +180,9 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         <h2 className="font-sans text-sm font-bold text-[var(--ink)]">
           回答 {topicAnswers.length}件
         </h2>
+        {likeError && (
+          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</p>
+        )}
         {topicAnswers.length === 0 && (
           <p className={`${stadiumStyles.grainPaper} rounded-xl p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
             まだ回答がありません。最初の回答を投稿してみましょう。
@@ -197,8 +228,9 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
               </div>
               <button
                 type="button"
-                onClick={() => toggleLike(answer.id)}
-                className={`mt-1 flex shrink-0 items-center gap-1 self-start rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 ${
+                disabled={likePending[answer.id]}
+                onClick={() => handleToggleLike(answer.id)}
+                className={`mt-1 flex shrink-0 items-center gap-1 self-start rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
                   liked
                     ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
                     : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"

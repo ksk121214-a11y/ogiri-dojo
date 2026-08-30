@@ -6,7 +6,6 @@ import { useState } from "react";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import { getRankByMeter } from "@/data/collectionData";
-import { MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -21,6 +20,8 @@ export default function SnsMyProfileCard() {
   const updateBio = useUserStore((s) => s.updateBio);
   const answers = useSnsStore((s) => s.answers);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
+  // 自分のフォロワー数（sns_followsの実カウント、init()時にstoreがまとめて取得済み）。
+  const followerCount = useSnsStore((s) => s.myFollowerCount);
 
   const [editing, setEditing] = useState(false);
   const [bioDraft, setBioDraft] = useState(user.bio);
@@ -100,7 +101,7 @@ export default function SnsMyProfileCard() {
           <span className="text-[11px] text-[var(--ink)]/70">フォロー中</span>
         </Link>
         <Link href="/sns/u/me/followers" className="flex flex-col items-center">
-          <span className="font-bold text-[var(--ink)]">{MY_FOLLOWER_DISPLAY_COUNT}</span>
+          <span className="font-bold text-[var(--ink)]">{followerCount ?? "…"}</span>
           <span className="text-[11px] text-[var(--ink)]/70">フォロワー</span>
         </Link>
         <div className="flex flex-col items-center">

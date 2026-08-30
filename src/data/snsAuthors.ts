@@ -35,39 +35,8 @@ export const DUMMY_SNS_AUTHORS: SnsAuthorProfile[] = [
   { id: "author-yuu", displayName: "高座のユウ", rankLabel: "真打", emoji: "🎭", bgColorClass: "bg-dojo-cheer-pink", followerCount: 298, followingCount: 84, equippedCostumeId: "costume-keiko-maekake", equippedIconPartId: "icon-zabuton-badge", equippedBgPatternId: "bg-chochin" },
 ];
 
-// 自分（"me"）のフォロワー一覧を仮表示する際に使う人数（マイページのサマリー表示とも一致させる）。
-export const MY_FOLLOWER_DISPLAY_COUNT = 6;
-
 const AUTHOR_MAP = new Map(DUMMY_SNS_AUTHORS.map((author) => [author.id, author]));
 
 export function getDummySnsAuthor(authorId: string): SnsAuthorProfile | undefined {
   return AUTHOR_MAP.get(authorId);
-}
-
-// seed文字列から決定的な擬似シャッフルを行う（Math.random()だとSSR/CSRで結果が
-// 変わりハイドレーション不一致になるため、フォロー中/フォロワー一覧の簡易表示に使う）。
-function seededShuffle<T>(items: T[], seed: string): T[] {
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i -= 1) {
-    h = (h * 1103515245 + 12345) >>> 0;
-    const j = h % (i + 1);
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
-// ダミー投稿者のフォロー中/フォロワー一覧の簡易表示用に、指定人数分だけ
-// 他のダミー投稿者を（seedに応じて決定的に）ランダム抽出する。
-// 厳密なフォロー関係は管理しないため、雰囲気が出れば十分という簡易実装。
-export function getRandomOtherAuthors(
-  excludeId: string,
-  count: number,
-  seed: string = excludeId,
-): SnsAuthorProfile[] {
-  const pool = DUMMY_SNS_AUTHORS.filter((author) => author.id !== excludeId);
-  return seededShuffle(pool, seed).slice(0, Math.min(count, pool.length));
 }

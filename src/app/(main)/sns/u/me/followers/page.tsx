@@ -1,16 +1,34 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
-import { DUMMY_SNS_AUTHORS, MY_FOLLOWER_DISPLAY_COUNT } from "@/data/snsAuthors";
+import { supabase } from "@/lib/supabase";
+import { useAuthStore } from "@/store/useAuthStore";
 
-// 自分（マイページ）のフォロワー一覧。厳密なフォロワー管理はしていないため、
-// フォロワー数の多いダミー投稿者を「あなたをフォローしています」として仮表示する簡易実装。
-const MY_FOLLOWERS = [...DUMMY_SNS_AUTHORS]
-  .sort((a, b) => b.followerCount - a.followerCount)
-  .slice(0, MY_FOLLOWER_DISPLAY_COUNT);
-
+// 自分（マイページ）のフォロワー一覧。
+// 2026-08-30（いいね・フォローの実データ化）：以前はダミー投稿者から「あなたをフォロー
+// しています」として仮表示していたが、sns_followsテーブルの実データ（following_id=自分
+// のuserIdの行のfollower_id一覧）に置き換えた。
 export default function MyFollowersPage() {
+  const userId = useAuthStore((s) => s.user?.id);
+  const [followerIds, setFollowerIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const query = userId
+      ? supabase.from("sns_follows").select("follower_id").eq("following_id", userId)
+      : Promise.resolve({ data: [] as { follower_id: string }[] });
+    query.then(({ data }) => {
+      if (cancelled) return;
+      setFollowerIds((data ?? []).map((r) => (r as { follower_id: string }).follower_id));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
       <SnsBackButton />
@@ -20,15 +38,18 @@ export default function MyFollowersPage() {
         <h1 className="mt-1 font-brush text-2xl text-dojo-dark-brown">
           あなたのフォロワー
         </h1>
-        <p className="mt-2 font-sans text-[11px] text-dojo-dark-brown">
-          ※ダミーデータのため、道場で人気の演者を仮に表示しています
-        </p>
       </div>
 
       <div className="flex flex-col gap-2">
-        {MY_FOLLOWERS.map((a) => (
-          <SnsFollowListRow key={a.id} author={a} />
-        ))}
+        {followerIds === null ? (
+          <p className="text-center font-sans text-xs text-dojo-dark-brown">読み込み中…</p>
+        ) : followerIds.length === 0 ? (
+          <p className="text-center font-sans text-xs text-dojo-dark-brown">
+            まだ誰にもフォローされていません。
+          </p>
+        ) : (
+          followerIds.map((id) => <SnsFollowListRow key={id} authorId={id} />)
+        )}
       </div>
     </div>
   );

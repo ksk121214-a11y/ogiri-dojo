@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
@@ -23,11 +24,30 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const likedAnswerIds = useSnsStore((s) => s.likedAnswerIds);
   const toggleLike = useSnsStore((s) => s.toggleLike);
   const addComment = useSnsStore((s) => s.addComment);
+  const fetchAnswerById = useSnsStore((s) => s.fetchAnswerById);
 
   const [body, setBody] = useState("");
+  const [likePending, setLikePending] = useState(false);
+  const [likeError, setLikeError] = useState<string | null>(null);
+  // 取得を試みて完了したか（true になるまでは「読み込み中」、完了してもanswerが
+  // 無ければ「見つかりませんでした」を出す）。
+  const [loadAttempted, setLoadAttempted] = useState(false);
 
   const answer = answers.find((a) => a.id === answerId);
   const topic = answer ? topics.find((t) => t.id === answer.topicId) : undefined;
+
+  // ページネーション導入により、1ページ目のロード範囲に無い回答（直リンク・共有URL等）
+  // へのアクセス時は、その場で個別に取得を試みる（対応するお題・ツッコミもまとめて取得）。
+  useEffect(() => {
+    if (answer) return;
+    let cancelled = false;
+    fetchAnswerById(answerId).finally(() => {
+      if (!cancelled) setLoadAttempted(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [answer, answerId, fetchAnswerById]);
 
   const answerComments = useMemo(
     () => comments.filter((c) => c.answerId === answerId).slice().reverse(),
@@ -39,7 +59,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
       <StadiumPageShell contentTheme="kraft">
         <div className="flex flex-col items-center gap-4 py-16 text-center">
           <p className="font-sans text-sm text-[var(--ink)]/70">
-            回答が見つかりませんでした。
+            {loadAttempted ? "回答が見つかりませんでした。" : "読み込み中…"}
           </p>
           <SnsBackButton
             fallbackHref="/mypage"
@@ -59,6 +79,19 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
     if (!trimmed || overLimit) return;
     addComment(answer.id, trimmed);
     setBody("");
+  };
+
+  const handleToggleLike = async (e: MouseEvent) => {
+    e.preventDefault();
+    if (likePending) return;
+    setLikePending(true);
+    setLikeError(null);
+    const result = await toggleLike(answer.id);
+    setLikePending(false);
+    if (!result.ok && result.message) {
+      setLikeError(result.message);
+      setTimeout(() => setLikeError(null), 3000);
+    }
   };
 
   return (
@@ -93,18 +126,24 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         <p className="font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {answer.body}
         </p>
-        <button
-          type="button"
-          onClick={() => toggleLike(answer.id)}
-          className={`flex w-fit items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 ${
-            liked
-              ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
-              : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
-          }`}
-        >
-          {liked ? "❤" : "🤍"}
-          <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={likePending}
+            onClick={handleToggleLike}
+            className={`flex w-fit items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
+              liked
+                ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
+                : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
+            }`}
+          >
+            {liked ? "❤" : "🤍"}
+            <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
+          </button>
+          {likeError && (
+            <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>
+          )}
+        </div>
       </div>
 
       <form

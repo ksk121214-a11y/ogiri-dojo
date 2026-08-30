@@ -38,6 +38,12 @@ export default function SnsFeedSection() {
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
+  const topicsHasMore = useSnsStore((s) => s.topicsHasMore);
+  const loadingMoreTopics = useSnsStore((s) => s.loadingMoreTopics);
+  const loadMoreTopics = useSnsStore((s) => s.loadMoreTopics);
+  const answersHasMore = useSnsStore((s) => s.answersHasMore);
+  const loadingMoreAnswers = useSnsStore((s) => s.loadingMoreAnswers);
+  const loadMoreAnswers = useSnsStore((s) => s.loadMoreAnswers);
 
   const [feed, setFeed] = useState<FeedKind>("topics");
   const [audience, setAudience] = useState<AudienceKind>("forYou");
@@ -72,12 +78,12 @@ export default function SnsFeedSection() {
   }, [topics, audience, sort, answerCountByTopic, followingAuthorIds]);
 
   const visibleAnswers = useMemo(() => {
-    // answersはaddAnswerで末尾に追加される配列のため、新着順にするには逆順にする必要がある。
-    const newestFirst = [...answers].reverse();
+    // answersは常に「先頭が最新」の並びで保持している（addAnswerが先頭に追加、
+    // DB取得分も新着順のまま連結しているため）。
     const base =
       audience === "forYou"
-        ? newestFirst
-        : newestFirst.filter((a) => a.authorId === "me" || followingAuthorIds.includes(a.authorId));
+        ? answers
+        : answers.filter((a) => a.authorId === "me" || followingAuthorIds.includes(a.authorId));
     if (sort !== "popular") return base;
     return [...base].sort((a, b) => b.likes - a.likes);
   }, [answers, audience, sort, followingAuthorIds]);
@@ -168,14 +174,42 @@ export default function SnsFeedSection() {
           </button>
         </div>
       ) : feed === "topics" ? (
-        <TopicFeedList topics={visibleTopics} answerCountByTopic={answerCountByTopic} />
+        <>
+          <TopicFeedList topics={visibleTopics} answerCountByTopic={answerCountByTopic} />
+          {audience === "forYou" && topicsHasMore && (
+            <LoadMoreButton loading={loadingMoreTopics} onClick={loadMoreTopics} />
+          )}
+        </>
       ) : (
-        <AnswerFeedList
-          answers={visibleAnswers}
-          topics={topics}
-          commentCountByAnswer={commentCountByAnswer}
-        />
+        <>
+          <AnswerFeedList
+            answers={visibleAnswers}
+            topics={topics}
+            commentCountByAnswer={commentCountByAnswer}
+          />
+          {audience === "forYou" && answersHasMore && (
+            <LoadMoreButton loading={loadingMoreAnswers} onClick={loadMoreAnswers} />
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+// 一覧の下部に置く「もっと見る」ボタン。全件を一度に取得せず、押されたときだけ
+// 次のページ分を取得する（無料枠での通信量・DB負荷対策）。フォロー中タブは
+// ロード済み範囲内のクライアント側フィルタのため、ここでは「おすすめ」タブのみに出す。
+function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
+  return (
+    <div className="flex justify-center pt-1">
+      <button
+        type="button"
+        disabled={loading}
+        onClick={onClick}
+        className="rounded-full border border-[var(--ink)]/25 bg-[var(--ink)]/5 px-6 py-2 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "読み込み中…" : "もっと見る"}
+      </button>
     </div>
   );
 }
