@@ -3,6 +3,7 @@
 // 組結果発表/最終結果発表のランキング集計までを扱う。
 import { create } from "zustand";
 
+import { MAX_ANSWER_BODY_LENGTH } from "@/data/liveRoomTiming";
 import {
   getBestAnswer,
   getGroupTurnRanking,
@@ -478,6 +479,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     if (!currentTurn || !myParticipant) return { ok: false, reason: "参加登録がまだです" };
     const trimmed = body.trim();
     if (!trimmed) return { ok: false, reason: "回答を入力してください" };
+    if (trimmed.length > MAX_ANSWER_BODY_LENGTH) {
+      return { ok: false, reason: `${MAX_ANSWER_BODY_LENGTH}文字以上は送信できないよ` };
+    }
 
     const { error } = await supabase.from("answers").insert({
       turn_id: currentTurn.id,

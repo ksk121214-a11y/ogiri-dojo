@@ -70,3 +70,6 @@ export const REVEAL_SEQUENCE_MS =
 
 export const MAX_ANSWERS_PER_PLAYER = 5;
 export const ROUNDS_PER_LIVE_DEFAULT = 1; // 2026-08-27改訂：2周→1周
+// ライブ本番の回答入力の文字数上限。入力欄自体に文字数カウンター等は出さず、
+// 上限を超えた状態で送信しようとした時だけエラーメッセージで知らせる。
+export const MAX_ANSWER_BODY_LENGTH = 50;
