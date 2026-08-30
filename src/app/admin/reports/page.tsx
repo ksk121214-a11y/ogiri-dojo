@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import Link from "next/link";
-
+import AdminButton from "@/components/admin/AdminButton";
+import AdminCard from "@/components/admin/AdminCard";
+import AdminHeader from "@/components/admin/AdminHeader";
+import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
+import AdminShell from "@/components/admin/AdminShell";
 import { supabase } from "@/lib/supabase";
 
 interface ReportRow {
@@ -27,28 +30,44 @@ const STATUS_LABEL: Record<ReportRow["status"], string> = {
   no_action: "問題なし",
 };
 
+const STATUS_ORDER: ReportRow["status"][] = ["open", "reviewing", "resolved", "no_action"];
+
 const TARGET_TYPE_LABEL: Record<string, string> = {
   sns_topic: "お題投稿",
   sns_answer: "回答",
   sns_comment: "コメント",
 };
 
-// 通報管理画面（運営者専用管理画面・第3段階）。通報数だけで自動非表示・自動削除は
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// 通報管理画面（運営者専用管理画面）。通報数だけで自動非表示・自動削除は
 // 行わず、運営者が内容を見て対応状態・運営メモを記録する（実際の非表示操作は
-// /admin/postsで行う）。投稿者・通報者の表示名はここでは出さず、IDのみ表示する
-// （profilesのSELECTは本人限定のため、必要ならsns_author_names等の解決を別途追加する）。
+// /admin/postsで行う）。投稿者・通報者の表示名はsns_author_names RPCで解決する。
+// 2026-08-30（デザイン整理）：一覧は概要のみのコンパクト表示にし、対応状態の
+// 変更・運営メモの記入は「詳細確認」を押した後にだけ表示するようにした。
+// 管理操作のロジック自体（クエリ・更新内容）は変更していない。
 export default function AdminReportsPage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [names, setNames] = useState<Record<string, string>>({});
   const [memoDrafts, setMemoDrafts] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<ReportRow["status"] | "all">("all");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("reports")
       .select("*")
       .order("created_at", { ascending: false });
+    if (error) {
+      notifyError(error.message);
+      setLoading(false);
+      return;
+    }
     const rows = (data ?? []) as ReportRow[];
     setReports(rows);
 
@@ -71,93 +90,136 @@ export default function AdminReportsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const filtered = useMemo(
+    () => (statusFilter === "all" ? reports : reports.filter((r) => r.status === statusFilter)),
+    [reports, statusFilter],
+  );
+
   const handleStatusChange = async (report: ReportRow, status: ReportRow["status"]) => {
-    await supabase.from("reports").update({ status, updated_at: new Date().toISOString() }).eq("id", report.id);
+    const { error } = await supabase
+      .from("reports")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", report.id);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
+    notifySuccess(`対応状態を「${STATUS_LABEL[status]}」に変更しました。`);
     await load();
   };
 
   const handleSaveMemo = async (report: ReportRow) => {
     const memo = memoDrafts[report.id] ?? report.admin_memo ?? "";
-    await supabase
+    const { error } = await supabase
       .from("reports")
       .update({ admin_memo: memo, updated_at: new Date().toISOString() })
       .eq("id", report.id);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
+    notifySuccess("運営メモを保存しました。");
     await load();
   };
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col gap-4 px-4 py-8">
-      <Link href="/admin" className="font-sans text-xs text-dojo-dark-brown underline">
-        ← 管理画面トップへ戻る
-      </Link>
-      <h1 className="font-brush text-2xl text-dojo-curtain-red">通報管理</h1>
+    <AdminShell wide>
+      <AdminHeader title="通報管理" />
+      <AdminNotice notice={notice} onClose={clear} />
 
-      {loading ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">読み込み中…</p>
-      ) : reports.length === 0 ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">通報はまだありません。</p>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {reports.map((r) => (
-            <li key={r.id} className="rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-sans text-xs font-bold text-dojo-ink">
-                  {TARGET_TYPE_LABEL[r.target_type] ?? r.target_type}への通報
-                </span>
-                <span className="rounded bg-dojo-dark-brown/10 px-1.5 py-0.5 font-sans text-[10px] font-bold text-dojo-dark-brown">
-                  {STATUS_LABEL[r.status]}
-                </span>
-              </div>
-              <p className="mt-1 font-sans text-[11px] text-dojo-dark-brown">
-                {new Date(r.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
-                　通報者：{names[r.reporter_id] ?? r.reporter_id.slice(0, 8)}
-                　被通報者：{r.target_author_id ? (names[r.target_author_id] ?? r.target_author_id.slice(0, 8)) : "（不明）"}
-              </p>
-              <p className="mt-1 font-sans text-xs text-dojo-ink">理由：{r.reason}</p>
-              {r.detail && <p className="mt-0.5 font-sans text-xs text-dojo-dark-brown">詳細：{r.detail}</p>}
-              <div className="mt-2 rounded bg-dojo-dark-brown/5 p-2 font-sans text-xs text-dojo-dark-brown">
-                通報時点の内容：「{r.snapshot_body}」
-              </div>
+      <div className="flex flex-wrap gap-1.5">
+        {(["all", ...STATUS_ORDER] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setStatusFilter(s)}
+            className={`rounded-full border px-3 py-1 text-xs font-bold ${
+              statusFilter === s ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 text-gray-600"
+            }`}
+          >
+            {s === "all" ? "すべて" : STATUS_LABEL[s]}
+          </button>
+        ))}
+      </div>
 
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {(Object.keys(STATUS_LABEL) as ReportRow["status"][]).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => handleStatusChange(r, s)}
-                    className={`rounded-full border px-2 py-0.5 font-sans text-[10px] font-bold ${
-                      r.status === s
-                        ? "border-dojo-curtain-red bg-dojo-curtain-red text-dojo-washi-white"
-                        : "border-dojo-dark-brown/30 text-dojo-dark-brown"
-                    }`}
-                  >
-                    {STATUS_LABEL[s]}
-                  </button>
-                ))}
-              </div>
+      <AdminCard title={`通報一覧（${filtered.length}件）`}>
+        {loading ? (
+          <p className="text-sm text-gray-500">読み込み中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-gray-500">該当する通報はありません。</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {filtered.map((r) => (
+              <li key={r.id} className="rounded border border-gray-200 p-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 text-xs text-gray-600">
+                    <p>
+                      {new Date(r.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                      　被通報者：
+                      <span className="font-bold text-gray-900">
+                        {r.target_author_id ? (names[r.target_author_id] ?? r.target_author_id.slice(0, 8)) : "（不明）"}
+                      </span>
+                    </p>
+                    <p className="mt-0.5">
+                      理由：{r.reason}　対象：{TARGET_TYPE_LABEL[r.target_type] ?? r.target_type}
+                      「{truncate(r.snapshot_body, 24)}」
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-[11px] font-bold text-gray-700">
+                    {STATUS_LABEL[r.status]}
+                  </span>
+                  <AdminButton onClick={() => setOpenId((prev) => (prev === r.id ? null : r.id))}>
+                    {openId === r.id ? "閉じる" : "詳細確認"}
+                  </AdminButton>
+                </div>
 
-              <div className="mt-2 flex gap-2">
-                <input
-                  type="text"
-                  value={memoDrafts[r.id] ?? r.admin_memo ?? ""}
-                  onChange={(e) => setMemoDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                  placeholder="運営メモ"
-                  className="flex-1 rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleSaveMemo(r)}
-                  className="shrink-0 rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-[11px]"
-                >
-                  保存
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                {openId === r.id && (
+                  <div className="mt-3 border-t border-gray-100 pt-3">
+                    <p className="text-xs text-gray-600">
+                      通報者：{names[r.reporter_id] ?? r.reporter_id.slice(0, 8)}
+                    </p>
+                    {r.detail && <p className="mt-1 text-xs text-gray-600">詳細：{r.detail}</p>}
+                    <div className="mt-2 rounded bg-gray-50 p-2 text-xs text-gray-700">
+                      通報時点の内容：「{r.snapshot_body}」
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {STATUS_ORDER.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => handleStatusChange(r, s)}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                            r.status === s
+                              ? "border-blue-600 bg-blue-600 text-white"
+                              : "border-gray-300 text-gray-600"
+                          }`}
+                        >
+                          {STATUS_LABEL[s]}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="text"
+                        value={memoDrafts[r.id] ?? r.admin_memo ?? ""}
+                        onChange={(e) => setMemoDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                        placeholder="運営メモ"
+                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+                      />
+                      <AdminButton onClick={() => handleSaveMemo(r)}>保存</AdminButton>
+                    </div>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </AdminCard>
+    </AdminShell>
   );
 }

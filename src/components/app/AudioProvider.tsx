@@ -2,10 +2,21 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
+import { usePathname } from "next/navigation";
+
 import * as audioManager from "@/lib/audio/audioManager";
 import type { AudioManagerState } from "@/lib/audio/audioManager";
 
 import BgmConsentModal from "./BgmConsentModal";
+
+// 運営者専用管理画面(/admin配下)・司会コンソール(/live/host)はBGMを使用しない
+// 方針のため、この配下を開いた場合は「BGMを使用しますか？」の確認モーダル自体を
+// 出さない（要件どおり）。1ブート1回というモーダル表示のルールは変えず、
+// 判定のタイミング（マウント時点のパス）だけこの配下かどうかで分岐させる。
+const NO_BGM_PROMPT_PREFIXES = ["/admin", "/live/host"];
+function isNoBgmPromptPath(pathname: string): boolean {
+  return NO_BGM_PROMPT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 // アプリ全体の音声状態（AudioManagerState）をコンポーネントツリーに配布するだけの
 // 薄いContextレイヤー。実体（AudioContext・BGMプレイヤー・SEバッファ等）は
@@ -24,6 +35,7 @@ export function useAudioState(): AudioManagerState {
 }
 
 export default function AudioProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [state, setState] = useState<AudioManagerState>(() => audioManager.getState());
   const [showBgmPrompt, setShowBgmPrompt] = useState(false);
 
@@ -55,16 +67,21 @@ export default function AudioProvider({ children }: { children: React.ReactNode 
     if (!audioManager.hasShownBgmPrompt()) {
       audioManager.markBgmPromptShown();
       flaggedByThisRun = true;
-      // マウント時に一度だけモーダル表示を確定させるための意図的な同期setState
-      // （起動ごとに1回だけ、という要件上ここでしか判定できない）。
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShowBgmPrompt(true);
+      if (!isNoBgmPromptPath(pathname)) {
+        // マウント時に一度だけモーダル表示を確定させるための意図的な同期setState
+        // （起動ごとに1回だけ、という要件上ここでしか判定できない）。
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setShowBgmPrompt(true);
+      }
     }
     return () => {
       if (flaggedByThisRun) {
         audioManager.unmarkBgmPromptShown();
       }
     };
+    // pathnameは意図的に依存配列へ入れない：「1ブートにつき1回」の判定は
+    // マウント時点のパスだけで行い、SPA遷移のたびに再評価しない設計を維持する。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

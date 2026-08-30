@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import Link from "next/link";
-
+import AdminCard from "@/components/admin/AdminCard";
+import AdminHeader from "@/components/admin/AdminHeader";
+import AdminShell from "@/components/admin/AdminShell";
 import { supabase } from "@/lib/supabase";
 
 interface LogRow {
@@ -17,8 +18,10 @@ interface LogRow {
   created_at: string;
 }
 
-// 運営操作履歴の一覧画面（運営者専用管理画面・第3段階）。第1段階から記録している
-// admin_action_logsを一覧表示する。操作種別での簡易フィルタのみのシンプルな構成。
+// 運営操作履歴の一覧画面（運営者専用管理画面）。admin_action_logsを一覧表示する
+// 閲覧専用ページ（編集・削除ボタンは持たない）。操作種別での簡易フィルタのみ。
+// 2026-08-30（デザイン整理）：カード一覧から表形式に変更し、操作日時・操作内容・
+// 操作対象・理由を1行ずつ短く見せるようにした。取得ロジックは変更していない。
 export default function AdminLogsPage() {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -55,48 +58,63 @@ export default function AdminLogsPage() {
   );
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col gap-4 px-4 py-8">
-      <Link href="/admin" className="font-sans text-xs text-dojo-dark-brown underline">
-        ← 管理画面トップへ戻る
-      </Link>
-      <h1 className="font-brush text-2xl text-dojo-curtain-red">運営操作履歴</h1>
+    <AdminShell wide>
+      <AdminHeader title="運営操作履歴" />
 
-      <select
-        value={actionFilter}
-        onChange={(e) => setActionFilter(e.target.value)}
-        className="rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-xs"
-      >
-        <option value="all">すべての操作</option>
-        {actionTypes.map((a) => (
-          <option key={a} value={a}>
-            {a}
-          </option>
-        ))}
-      </select>
-
-      {loading ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">読み込み中…</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {filtered.map((l) => (
-            <li key={l.id} className="rounded-lg border border-dojo-dark-brown/15 p-2 text-left font-sans text-[11px] text-dojo-dark-brown">
-              <p>
-                {new Date(l.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
-                <span className="font-bold text-dojo-ink">{l.action}</span>
-                　操作者：{l.actor_id ? (names[l.actor_id] ?? l.actor_id.slice(0, 8)) : "（不明）"}
-              </p>
-              {l.target_type && (
-                <p>
-                  対象：{l.target_type}
-                  {l.target_id ? `（${l.target_id.slice(0, 8)}）` : ""}
-                </p>
-              )}
-              {l.reason && <p>理由：{l.reason}</p>}
-            </li>
+      <AdminCard>
+        <select
+          value={actionFilter}
+          onChange={(e) => setActionFilter(e.target.value)}
+          className="rounded border border-gray-300 px-2 py-1.5 text-xs"
+        >
+          <option value="all">すべての操作</option>
+          {actionTypes.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
           ))}
-          {filtered.length === 0 && <p className="font-sans text-sm text-dojo-dark-brown">履歴がありません。</p>}
-        </ul>
-      )}
-    </div>
+        </select>
+      </AdminCard>
+
+      <AdminCard title={`履歴（${filtered.length}件・閲覧専用）`}>
+        {loading ? (
+          <p className="text-sm text-gray-500">読み込み中…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-gray-500">履歴がありません。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-500">
+                  <th className="py-1.5 pr-2 font-normal">操作日時</th>
+                  <th className="py-1.5 pr-2 font-normal">操作内容</th>
+                  <th className="py-1.5 pr-2 font-normal">操作対象</th>
+                  <th className="py-1.5 pr-2 font-normal">理由</th>
+                  <th className="py-1.5 pl-2 font-normal">操作者</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((l) => (
+                  <tr key={l.id} className="border-b border-gray-100 align-top">
+                    <td className="whitespace-nowrap py-1.5 pr-2 text-gray-600">
+                      {new Date(l.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                    </td>
+                    <td className="py-1.5 pr-2 font-bold text-gray-900">{l.action}</td>
+                    <td className="py-1.5 pr-2 text-gray-600">
+                      {l.target_type ?? "-"}
+                      {l.target_id ? `（${l.target_id.slice(0, 8)}）` : ""}
+                    </td>
+                    <td className="py-1.5 pr-2 text-gray-600">{l.reason ?? "-"}</td>
+                    <td className="py-1.5 pl-2 text-gray-600">
+                      {l.actor_id ? (names[l.actor_id] ?? l.actor_id.slice(0, 8)) : "（不明）"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </AdminCard>
+    </AdminShell>
   );
 }

@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
+import AdminButton from "@/components/admin/AdminButton";
+import AdminCard from "@/components/admin/AdminCard";
+import AdminHeader from "@/components/admin/AdminHeader";
+import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
+import AdminShell from "@/components/admin/AdminShell";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { supabase } from "@/lib/supabase";
 import { useTickingNow } from "@/lib/useTickingNow";
@@ -48,9 +52,12 @@ const SANCTION_TYPE_LABEL: Record<string, string> = {
   delete: "アカウント削除",
 };
 
-// ユーザー詳細・対応画面（運営者専用管理画面・第3段階）。
+// ユーザー詳細・対応画面（運営者専用管理画面）。
 // 「問題なし→投稿を非表示→警告→期限付き利用停止→永久停止→（必要な場合のみ）完全削除」
 // の順に進められるよう、強い操作ほど下・目立たない位置に置く。
+// 2026-08-30（デザイン整理）：共通のAdmin*コンポーネントに置き換え、各操作の
+// 成否を画面上部のAdminNoticeにまとめて表示するようにした。管理操作のロジック
+// 自体（クエリ・更新内容・prompt/confirmでの入力）は変更していない。
 export default function AdminUserDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -65,6 +72,7 @@ export default function AdminUserDetailPage() {
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [memoDraft, setMemoDraft] = useState("");
+  const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
     setLoading(true);
@@ -127,7 +135,12 @@ export default function AdminUserDetailPage() {
   };
 
   const handleSaveMemo = async () => {
-    await supabase.from("profiles").update({ admin_memo: memoDraft }).eq("id", userId);
+    const { error } = await supabase.from("profiles").update({ admin_memo: memoDraft }).eq("id", userId);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
+    notifySuccess("運営メモを保存しました。");
     await load();
   };
 
@@ -144,6 +157,7 @@ export default function AdminUserDetailPage() {
       title: "運営からの警告",
       body: body || reason,
     });
+    notifySuccess("警告を送りました。");
     await load();
   };
 
@@ -154,8 +168,13 @@ export default function AdminUserDetailPage() {
     if (!Number.isFinite(days) || days <= 0) return;
     const reason = window.prompt("利用停止理由を入力してください", "") ?? "";
     const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from("profiles").update({ suspended_until: until }).eq("id", userId);
+    const { error } = await supabase.from("profiles").update({ suspended_until: until }).eq("id", userId);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
     await recordSanction("suspend_temporary", reason, `${days}日間`, null);
+    notifySuccess(`${days}日間の利用停止にしました。`);
     await load();
   };
 
@@ -163,17 +182,27 @@ export default function AdminUserDetailPage() {
     const confirmed = window.confirm("永久停止しますか？");
     if (!confirmed) return;
     const reason = window.prompt("永久停止理由を入力してください", "") ?? "";
-    await supabase.from("profiles").update({ is_permanently_suspended: true }).eq("id", userId);
+    const { error } = await supabase.from("profiles").update({ is_permanently_suspended: true }).eq("id", userId);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
     await recordSanction("suspend_permanent", reason, null, null);
+    notifySuccess("永久停止にしました。");
     await load();
   };
 
   const handleLift = async () => {
-    await supabase
+    const { error } = await supabase
       .from("profiles")
       .update({ is_permanently_suspended: false, suspended_until: null })
       .eq("id", userId);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
     await recordSanction("lift", "利用停止の解除", null, null);
+    notifySuccess("停止を解除しました。");
     await load();
   };
 
@@ -192,127 +221,111 @@ export default function AdminUserDetailPage() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      window.alert(`削除に失敗しました：${body.error ?? res.statusText}`);
+      notifyError(`削除に失敗しました：${body.error ?? res.statusText}`);
       return;
     }
     await logAdminAction({ action: "user_deleted", targetType: "profiles", targetId: userId });
     router.push("/admin/users");
   };
 
-  if (loading) return <p className="p-8 text-center font-sans text-sm text-dojo-dark-brown">読み込み中…</p>;
-  if (!profile) return <p className="p-8 text-center font-sans text-sm text-dojo-dark-brown">ユーザーが見つかりません。</p>;
+  if (loading) {
+    return (
+      <AdminShell>
+        <p className="text-sm text-gray-500">読み込み中…</p>
+      </AdminShell>
+    );
+  }
+  if (!profile) {
+    return (
+      <AdminShell>
+        <AdminHeader title="ユーザーが見つかりません" backHref="/admin/users" backLabel="ユーザー一覧へ戻る" />
+      </AdminShell>
+    );
+  }
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col gap-4 px-4 py-8">
-      <Link href="/admin/users" className="font-sans text-xs text-dojo-dark-brown underline">
-        ← ユーザー一覧へ戻る
-      </Link>
-      <h1 className="font-brush text-2xl text-dojo-curtain-red">{profile.display_name}</h1>
-      <p className="font-sans text-xs text-dojo-dark-brown">
-        登録日時：{new Date(profile.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
-      </p>
-      <p className="font-sans text-xs text-dojo-dark-brown">
-        現在の利用状態：
-        {profile.is_permanently_suspended
-          ? "永久停止"
-          : profile.suspended_until && new Date(profile.suspended_until).getTime() > now
-            ? `利用停止中（${new Date(profile.suspended_until).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}まで）`
-            : "問題なし"}
-      </p>
+    <AdminShell>
+      <AdminHeader title={profile.display_name} backHref="/admin/users" backLabel="ユーザー一覧へ戻る" />
+      <AdminNotice notice={notice} onClose={clear} />
 
-      <div className="rounded-xl border border-dojo-dark-brown/20 p-3 text-left font-sans text-xs text-dojo-dark-brown">
-        <p>投稿履歴：お題{postCount}件・回答{answerCount}件</p>
-        <p className="mt-1">ライブ参加履歴：{participations.length}件</p>
-        <ul className="mt-1 max-h-24 overflow-y-auto">
+      <AdminCard>
+        <p className="text-xs text-gray-500">
+          登録日時：{new Date(profile.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+        </p>
+        <p className="mt-1 text-sm font-bold text-gray-900">
+          現在の利用状態：
+          {profile.is_permanently_suspended
+            ? "永久停止"
+            : profile.suspended_until && new Date(profile.suspended_until).getTime() > now
+              ? `利用停止中（${new Date(profile.suspended_until).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}まで）`
+              : "問題なし"}
+        </p>
+      </AdminCard>
+
+      <AdminCard title="投稿・参加履歴">
+        <p className="text-xs text-gray-600">投稿履歴：お題{postCount}件・回答{answerCount}件</p>
+        <p className="mt-1 text-xs text-gray-600">ライブ参加履歴：{participations.length}件</p>
+        <ul className="mt-1 max-h-24 overflow-y-auto text-xs text-gray-600">
           {participations.map((p) => (
             <li key={p.id}>
               {new Date(p.joined_at).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}（{p.role === "player" ? "プレイヤー" : "観客"}）
             </li>
           ))}
         </ul>
-      </div>
+      </AdminCard>
 
-      <div className="rounded-xl border border-dojo-dark-brown/20 p-3 text-left font-sans text-xs text-dojo-dark-brown">
-        <p className="font-bold text-dojo-ink">通報された履歴（{reported.length}件）</p>
-        <ul className="mt-1 max-h-32 overflow-y-auto">
+      <AdminCard title={`通報された履歴（${reported.length}件）`}>
+        <ul className="max-h-32 overflow-y-auto text-xs text-gray-600">
           {reported.map((r) => (
-            <li key={r.id}>
+            <li key={r.id} className="border-b border-gray-100 py-1 last:border-0">
               {new Date(r.created_at).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}：{r.reason}（{r.status}）
             </li>
           ))}
           {reported.length === 0 && <li>通報はありません。</li>}
         </ul>
-      </div>
+      </AdminCard>
 
-      <div className="rounded-xl border border-dojo-dark-brown/20 p-3 text-left font-sans text-xs text-dojo-dark-brown">
-        <p className="font-bold text-dojo-ink">警告・対応履歴（{sanctions.length}件）</p>
-        <ul className="mt-1 max-h-32 overflow-y-auto">
+      <AdminCard title={`警告・対応履歴（${sanctions.length}件）`}>
+        <ul className="max-h-32 overflow-y-auto text-xs text-gray-600">
           {sanctions.map((s) => (
-            <li key={s.id} className="border-b border-dojo-dark-brown/10 py-1 last:border-0">
+            <li key={s.id} className="border-b border-gray-100 py-1 last:border-0">
               {new Date(s.created_at).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}：
               {SANCTION_TYPE_LABEL[s.type] ?? s.type} - {s.reason}
             </li>
           ))}
           {sanctions.length === 0 && <li>対応履歴はありません。</li>}
         </ul>
-      </div>
+      </AdminCard>
 
-      <div className="rounded-xl border border-dojo-dark-brown/20 p-3">
-        <p className="font-sans text-xs font-bold text-dojo-ink">運営メモ</p>
+      <AdminCard title="運営メモ">
         <textarea
           value={memoDraft}
           onChange={(e) => setMemoDraft(e.target.value)}
           rows={3}
-          className="mt-1 w-full rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
+          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
         />
-        <button
-          type="button"
-          onClick={handleSaveMemo}
-          className="mt-1 rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-[11px]"
-        >
+        <AdminButton onClick={handleSaveMemo} className="mt-1">
           保存
-        </button>
-      </div>
+        </AdminButton>
+      </AdminCard>
 
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={handleWarning}
-          className="rounded-full border border-dojo-dark-brown/30 px-4 py-2 font-sans text-xs font-bold text-dojo-dark-brown"
-        >
-          警告を送る
-        </button>
-        <button
-          type="button"
-          onClick={handleSuspendTemporary}
-          className="rounded-full border border-dojo-curtain-gold/60 px-4 py-2 font-sans text-xs font-bold text-dojo-dark-brown"
-        >
-          期限付きで利用停止する
-        </button>
-        <button
-          type="button"
-          onClick={handleSuspendPermanent}
-          className="rounded-full border border-dojo-deep-crimson/60 px-4 py-2 font-sans text-xs font-bold text-dojo-deep-crimson"
-        >
-          永久停止する
-        </button>
-        {(profile.is_permanently_suspended || profile.suspended_until) && (
-          <button
-            type="button"
-            onClick={handleLift}
-            className="rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-xs font-bold text-dojo-washi-white"
-          >
-            停止を解除する
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleDelete}
-          className="rounded-full border border-dojo-deep-crimson px-4 py-2 font-sans text-xs font-bold text-dojo-deep-crimson opacity-70"
-        >
-          アカウントを完全に削除する（最終手段）
-        </button>
-      </div>
-    </div>
+      <AdminCard title="対応操作（下にいくほど強い対応です）">
+        <div className="flex flex-col items-start gap-2">
+          <AdminButton onClick={handleWarning}>警告を送る</AdminButton>
+          <AdminButton onClick={handleSuspendTemporary}>期限付きで利用停止する</AdminButton>
+          <AdminButton variant="danger" onClick={handleSuspendPermanent}>
+            永久停止する
+          </AdminButton>
+          {(profile.is_permanently_suspended || profile.suspended_until) && (
+            <AdminButton variant="primary" onClick={handleLift}>
+              停止を解除する
+            </AdminButton>
+          )}
+          <AdminButton variant="danger" onClick={handleDelete}>
+            アカウントを完全に削除する（最終手段）
+          </AdminButton>
+        </div>
+      </AdminCard>
+    </AdminShell>
   );
 }

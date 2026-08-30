@@ -1,5 +1,6 @@
 "use client";
 
+import AdminButton from "@/components/admin/AdminButton";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -23,13 +24,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return (
       <CenterMessage>
         <p className="mb-4">管理画面を開くにはXログインが必要です。</p>
-        <button
-          type="button"
-          onClick={() => signInWithX()}
-          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
-        >
+        <AdminButton variant="primary" onClick={() => signInWithX()} className="px-5 py-2.5 text-sm">
           Xでログイン
-        </button>
+        </AdminButton>
       </CenterMessage>
     );
   }
@@ -41,9 +38,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return <>{children}</>;
 }
 
+// 2026-08-30：運営者専用管理画面のデザイン統一。背景を薄いグレーに揃え、
+// BGM同意モーダル等の後ろで見えても不自然にならないようにした。
 function CenterMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-svh w-full flex-col items-center justify-center px-4 text-center font-sans text-sm text-dojo-dark-brown">
+    <div className="flex min-h-svh w-full flex-col items-center justify-center bg-gray-50 px-4 text-center font-sans text-sm text-gray-600">
       {children}
     </div>
   );

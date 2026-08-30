@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import Link from "next/link";
-
 import BotSetupPanel from "@/components/live-demo/host/BotSetupPanel";
+import AdminButton from "@/components/admin/AdminButton";
+import AdminCard from "@/components/admin/AdminCard";
+import AdminHeader from "@/components/admin/AdminHeader";
+import AdminShell from "@/components/admin/AdminShell";
 import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
@@ -38,13 +40,13 @@ function fromDatetimeLocalValue(value: string): string | null {
   return d.toISOString();
 }
 
-// 司会コンソール（運営者専用管理画面・第1段階）。
+// 司会コンソール（運営者専用管理画面）。
 // 「ライブ準備 → 参加受付開始 → 組分け確認・お題確認 → ゲーム開始 → 進行監視 → 終了」の
 // 一連の流れをこの1画面（/live/host）で扱う。ゲーム進行中の表示・操作（お題発表〜最終結果、
 // 終了ボタン）は既存の実装をそのまま維持している。
-// 2026-08-30（追記）：この画面は運営者しか見ないため、公開サイトの装飾的なトンマナ
-// （筆文字フォント・ブランドカラー・中央寄せの縦長レイアウト）をやめ、操作内容が
-// 一目で分かるニュートラルな管理画面調のデザインに変更した（ロジックは無変更）。
+// 2026-08-30（デザイン整理）：この画面は運営者しか見ないため、公開サイトの装飾的な
+// トンマナをやめ、共通のAdmin*コンポーネント（/admin配下と共有）でニュートラルな
+// 管理画面調のデザインに統一した（ロジックは無変更）。
 export default function LiveHostPage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
@@ -92,13 +94,9 @@ export default function LiveHostPage() {
     return (
       <CenterMessage>
         <p className="mb-4">司会コンソールを開くにはXログインが必要です。</p>
-        <button
-          type="button"
-          onClick={() => signInWithX()}
-          className="rounded bg-gray-900 px-5 py-2.5 font-sans text-sm font-bold text-white"
-        >
+        <AdminButton variant="primary" onClick={() => signInWithX()}>
           Xでログイン
-        </button>
+        </AdminButton>
       </CenterMessage>
     );
   }
@@ -126,13 +124,8 @@ export default function LiveHostPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-3 bg-gray-50 px-4 py-6 text-left font-sans">
-      <div className="flex items-center justify-between">
-        <Link href="/admin" className="text-xs text-gray-500 underline">
-          ← 運営者専用管理画面トップへ
-        </Link>
-        <p className="text-xs font-bold tracking-wide text-gray-400">司会コンソール</p>
-      </div>
+    <AdminShell>
+      <AdminHeader title="司会コンソール（ライブ準備・操作）" />
 
       {loading ? (
         <p className="text-sm text-gray-500">状態を確認中…</p>
@@ -140,7 +133,7 @@ export default function LiveHostPage() {
         <PreparationForm />
       ) : (
         <>
-          <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <AdminCard>
             <p className="text-lg font-bold text-gray-900">
               {live.sequence_number ? `${formatLiveTicketNo(live.sequence_number)} ` : ""}
               {PHASE_LABEL[live.current_phase] ?? live.current_phase}
@@ -152,11 +145,11 @@ export default function LiveHostPage() {
                 {live.answering_paused && "（審査中は一時停止）"}
               </p>
             )}
-          </div>
+          </AdminCard>
 
           {live.current_phase === "scheduled" && <ReceptionStartPanel />}
 
-          <Panel title={`参加者：${participants.length}人`}>
+          <AdminCard title={`参加者：${participants.length}人`}>
             {live.max_players != null && (
               <p className="text-xs text-gray-500">
                 プレイヤー{participants.filter((p) => p.preferred_role === "player").length}/
@@ -181,7 +174,7 @@ export default function LiveHostPage() {
                 );
               })}
             </ul>
-          </Panel>
+          </AdminCard>
 
           {(live.current_phase === "interlude" || live.current_phase === "opening") && (
             <>
@@ -198,26 +191,22 @@ export default function LiveHostPage() {
             live.current_phase === "final_result") && <AnnouncementPanel />}
 
           {live.current_phase === "opening" && turns.length === 0 && (
-            <Panel title="ゲーム開始">
+            <AdminCard title="ゲーム開始">
               <BotSetupPanel liveId={live.id} />
-              <button
-                type="button"
-                onClick={() => beginGame()}
-                className="mt-2 rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
-              >
+              <AdminButton variant="primary" onClick={() => beginGame()} className="mt-2">
                 ゲームを開始する
-              </button>
-            </Panel>
+              </AdminButton>
+            </AdminCard>
           )}
 
           {currentTopic && (
-            <Panel title="お題">
+            <AdminCard title="お題">
               <p className="text-base font-bold text-gray-900">{currentTopic.body}</p>
-            </Panel>
+            </AdminCard>
           )}
 
           {live.current_phase === "answering" && (
-            <Panel title="回答状況">
+            <AdminCard title="回答状況">
               <p className="text-xs text-gray-600">未表示の回答：{queuedCount}件</p>
               {activeAnswer ? (
                 <>
@@ -232,11 +221,11 @@ export default function LiveHostPage() {
               ) : (
                 <p className="mt-1 text-xs text-gray-500">表示中の回答はありません</p>
               )}
-            </Panel>
+            </AdminCard>
           )}
 
           {resolvedAnswers.length > 0 && (
-            <Panel title={`確定済みの回答ログ（${resolvedAnswers.length}件）`}>
+            <AdminCard title={`確定済みの回答ログ（${resolvedAnswers.length}件）`}>
               <ul className="max-h-56 overflow-y-auto text-xs text-gray-700">
                 {[...resolvedAnswers].reverse().map((a) => {
                   const participant = participants.find((p) => p.id === a.participant_id);
@@ -270,32 +259,22 @@ export default function LiveHostPage() {
                   );
                 })}
               </ul>
-            </Panel>
+            </AdminCard>
           )}
 
-          <button
-            type="button"
+          <AdminButton
+            variant="danger"
             disabled={closing}
             onClick={handleCloseLive}
-            className="self-start rounded border border-red-300 px-5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+            className="self-start px-5 py-2"
           >
             {closing ? "終了処理中…" : "ライブを終了する"}
-          </button>
+          </AdminButton>
         </>
       )}
 
       {error && <p className="text-xs text-red-600">{error}</p>}
-    </div>
-  );
-}
-
-// セクションを見出し＋境界線で区切る共通パネル。
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3">
-      <p className="text-xs font-bold text-gray-500">{title}</p>
-      <div className="mt-1.5">{children}</div>
-    </div>
+    </AdminShell>
   );
 }
 
@@ -345,7 +324,7 @@ function PreparationForm() {
   };
 
   return (
-    <Panel title="ライブ準備（次回ライブの設定）">
+    <AdminCard title="ライブ準備（次回ライブの設定）">
       <div className="flex flex-col gap-3">
         <LabeledInput label="タイトル">
           <input
@@ -468,16 +447,11 @@ function PreparationForm() {
 
         {localError && <p className="text-xs text-red-600">{localError}</p>}
 
-        <button
-          type="button"
-          disabled={submitting}
-          onClick={handleSubmit}
-          className="self-start rounded bg-blue-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-        >
+        <AdminButton variant="primary" disabled={submitting} onClick={handleSubmit} className="self-start px-6 py-2.5 text-sm">
           {submitting ? "保存中…" : "この内容でライブを準備する"}
-        </button>
+        </AdminButton>
       </div>
-    </Panel>
+    </AdminCard>
   );
 }
 
@@ -515,14 +489,9 @@ function ReceptionStartPanel() {
   };
 
   return (
-    <button
-      type="button"
-      disabled={submitting}
-      onClick={handleClick}
-      className="self-start rounded bg-blue-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-    >
+    <AdminButton variant="primary" disabled={submitting} onClick={handleClick} className="self-start px-6 py-2.5 text-sm">
       {submitting ? "処理中…" : "参加受付を開始する"}
-    </button>
+    </AdminButton>
   );
 }
 
@@ -535,7 +504,7 @@ function CapacityPanel({ live }: { live: LiveRow }) {
   const [maxPlayers, setMaxPlayers] = useState(live.max_players != null ? String(live.max_players) : "");
   const [groupCount, setGroupCount] = useState(live.planned_group_count ?? 1);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const groupCountChanged = groupCount !== (live.planned_group_count ?? 1);
 
@@ -548,18 +517,19 @@ function CapacityPanel({ live }: { live: LiveRow }) {
     });
     setSaving(false);
     if (!result.ok) {
-      setMessage(result.reason ?? "保存に失敗しました");
+      setMessage({ ok: false, text: result.reason ?? "保存に失敗しました" });
       return;
     }
-    setMessage(
-      groupCountChanged
+    setMessage({
+      ok: true,
+      text: groupCountChanged
         ? "保存しました。組数を変更したので、必要であれば「（もう一度）ランダムに振り分ける」を押してください。"
         : "保存しました。",
-    );
+    });
   };
 
   return (
-    <Panel title="受付中の人数・組数調整">
+    <AdminCard title="受付中の人数・組数調整">
       <div className="flex gap-2">
         <label className="flex flex-1 flex-col gap-1 text-[10px] text-gray-600">
           最大参加人数
@@ -584,16 +554,15 @@ function CapacityPanel({ live }: { live: LiveRow }) {
           />
         </label>
       </div>
-      <button
-        type="button"
-        disabled={saving}
-        onClick={handleSave}
-        className="mt-2 rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-      >
+      <AdminButton variant="primary" disabled={saving} onClick={handleSave} className="mt-2">
         {saving ? "保存中…" : "保存する"}
-      </button>
-      {message && <p className="mt-1 text-[11px] text-gray-600">{message}</p>}
-    </Panel>
+      </AdminButton>
+      {message && (
+        <p className={`mt-2 rounded border px-2 py-1 text-[11px] ${message.ok ? "border-green-300 bg-green-50 text-green-800" : "border-red-300 bg-red-50 text-red-800"}`}>
+          {message.text}
+        </p>
+      )}
+    </AdminCard>
   );
 }
 
@@ -642,15 +611,10 @@ function GroupingPanel({
   };
 
   return (
-    <Panel title="組分け確認">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={handleRandomize}
-        className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-      >
+    <AdminCard title="組分け確認">
+      <AdminButton variant="primary" disabled={busy} onClick={handleRandomize}>
         {hasManualGrouping ? "もう一度ランダムに振り分ける" : "ランダムに振り分ける"}
-      </button>
+      </AdminButton>
 
       <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-gray-700">
         {participants
@@ -689,13 +653,9 @@ function GroupingPanel({
                     {t.body}
                     {t.locked && <span className="ml-1 text-red-600">（公開済み）</span>}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => handleChangeTopic(t)}
-                    className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[10px]"
-                  >
+                  <AdminButton onClick={() => handleChangeTopic(t)} className="shrink-0 px-1.5 py-0.5 text-[10px]">
                     変更
-                  </button>
+                  </AdminButton>
                 </div>
                 {openTopicPicker === t.id && (
                   <div className="mt-1 max-h-32 overflow-y-auto rounded border border-gray-200 bg-white">
@@ -719,7 +679,7 @@ function GroupingPanel({
           </ul>
         </div>
       )}
-    </Panel>
+    </AdminCard>
   );
 }
 
@@ -744,7 +704,7 @@ function AnnouncementPanel() {
   };
 
   return (
-    <Panel title="プレイヤー全員への運営メッセージ">
+    <AdminCard title="プレイヤー全員への運営メッセージ">
       <div className="flex gap-2">
         <input
           type="text"
@@ -763,32 +723,21 @@ function AnnouncementPanel() {
         </select>
       </div>
       <div className="mt-2 flex gap-2">
-        <button
-          type="button"
-          disabled={sending || !message.trim()}
-          onClick={handleSend}
-          className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-        >
+        <AdminButton variant="primary" disabled={sending || !message.trim()} onClick={handleSend}>
           送信する
-        </button>
+        </AdminButton>
         {live?.announcement_message && (
-          <button
-            type="button"
-            onClick={() => clearAnnouncement()}
-            className="rounded border border-gray-300 px-4 py-1.5 text-xs font-bold text-gray-600"
-          >
-            表示を消す
-          </button>
+          <AdminButton onClick={() => clearAnnouncement()}>表示を消す</AdminButton>
         )}
       </div>
       {live?.announcement_message && (
-        <p className="mt-2 text-[11px] text-gray-600">
+        <p className="mt-2 rounded border border-green-300 bg-green-50 px-2 py-1 text-[11px] text-green-800">
           現在表示中：「{live.announcement_message}」
           {live.announcement_sent_at &&
             `（${new Date(live.announcement_sent_at).toLocaleString("ja-JP")}送信）`}
         </p>
       )}
-    </Panel>
+    </AdminCard>
   );
 }
 
