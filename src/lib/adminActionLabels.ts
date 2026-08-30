@@ -11,6 +11,9 @@ export const ACTION_LABEL: Record<string, string> = {
   participant_group_changed: "参加者の組を変更した",
   topic_changed: "お題を変更した",
   announcement_sent: "運営メッセージを送信した",
+  announcement_broadcast: "お知らせを全ユーザーへ配信した",
+  announcement_hidden: "お知らせを非公開にした",
+  announcement_unhidden: "お知らせを再公開した",
   capacity_updated: "最大人数・組数を変更した",
   game_started: "ゲームを開始した",
   live_closed: "ライブを終了した",
@@ -66,6 +69,7 @@ export const TARGET_TYPE_LABEL: Record<string, string> = {
   sns_comment: "コメント",
   sns_live_results: "ライブ結果(SNS)",
   sns_live_result_comment: "ライブ結果コメント",
+  notifications: "お知らせ",
 };
 
 export function formatActionLabel(action: string): string {

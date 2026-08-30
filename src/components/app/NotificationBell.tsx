@@ -32,6 +32,7 @@ export default function NotificationBell() {
       .from("notifications")
       .select("*")
       .eq("user_id", authUser.id)
+      .eq("is_hidden", false)
       .order("created_at", { ascending: false })
       .limit(20);
     setNotifications((data ?? []) as NotificationRow[]);

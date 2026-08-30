@@ -16,6 +16,7 @@ interface SentAnnouncement {
   title: string;
   body: string;
   created_at: string;
+  is_hidden: boolean;
 }
 
 // よく使うお知らせの定型文。クリックするとタイトル・本文にセットされ、
@@ -55,6 +56,7 @@ export default function AdminNotificationsPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<SentAnnouncement[]>([]);
   const [loadingSent, setLoadingSent] = useState(true);
+  const [togglingKey, setTogglingKey] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const loadSent = async () => {
@@ -63,7 +65,7 @@ export default function AdminNotificationsPage() {
     // 組み合わせを表示用に間引く（1配信＝多数行のうち先頭1件だけ見せる）。
     const { data } = await supabase
       .from("notifications")
-      .select("id, title, body, created_at")
+      .select("id, title, body, created_at, is_hidden")
       .eq("type", "announcement")
       .order("created_at", { ascending: false })
       .limit(200);
@@ -132,6 +134,36 @@ export default function AdminNotificationsPage() {
     await loadSent();
   };
 
+  // 1回の配信は全ユーザーぶんの行として保存されているため、(title, body, created_at)
+  // が一致する行をまとめて更新する（created_at は同一INSERT文内でnow()が固定される
+  // ため、1回の配信に属する行だけを正しく特定できる）。
+  const handleToggleHidden = async (row: SentAnnouncement) => {
+    if (togglingKey) return;
+    const nextHidden = !row.is_hidden;
+    if (nextHidden && !window.confirm("このお知らせを非公開にしますか？全ユーザーの通知から見えなくなります。")) {
+      return;
+    }
+    setTogglingKey(row.id);
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_hidden: nextHidden })
+      .eq("title", row.title)
+      .eq("body", row.body)
+      .eq("created_at", row.created_at);
+    setTogglingKey(null);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
+    await logAdminAction({
+      action: nextHidden ? "announcement_hidden" : "announcement_unhidden",
+      targetType: "notifications",
+      detail: { title: row.title, created_at: row.created_at },
+    });
+    notifySuccess(nextHidden ? "非公開にしました。" : "再公開しました。");
+    await loadSent();
+  };
+
   return (
     <AdminShell>
       <AdminHeader title="お知らせ配信" />
@@ -191,11 +223,29 @@ export default function AdminNotificationsPage() {
           <ul className="flex flex-col gap-2">
             {sent.map((s) => (
               <li key={s.id} className="rounded border border-gray-200 p-2.5">
-                <p className="text-xs text-gray-500">
-                  {new Date(s.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    {new Date(s.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                  </p>
+                  {s.is_hidden && (
+                    <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
+                      非公開中
+                    </span>
+                  )}
+                </div>
+                <p className={`mt-0.5 text-sm font-bold ${s.is_hidden ? "text-gray-400" : "text-gray-900"}`}>
+                  {s.title}
                 </p>
-                <p className="mt-0.5 text-sm font-bold text-gray-900">{s.title}</p>
-                <p className="mt-0.5 text-xs text-gray-600">{s.body}</p>
+                <p className={`mt-0.5 text-xs ${s.is_hidden ? "text-gray-400" : "text-gray-600"}`}>{s.body}</p>
+                <div className="mt-1.5">
+                  <AdminButton
+                    variant={s.is_hidden ? "secondary" : "danger"}
+                    disabled={togglingKey === s.id}
+                    onClick={() => handleToggleHidden(s)}
+                  >
+                    {togglingKey === s.id ? "処理中…" : s.is_hidden ? "再公開する" : "非公開にする"}
+                  </AdminButton>
+                </div>
               </li>
             ))}
           </ul>

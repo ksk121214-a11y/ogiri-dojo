@@ -106,21 +106,25 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
         ))}
         {cells.map((day, i) => {
           const col = i % 7;
-          if (day == null) return <div key={i} className="py-1" />;
-          const mark = findMark(day);
+          const mark = day == null ? undefined : findMark(day);
           const baseColor = col === 0 ? "text-[var(--accent)]" : col === 6 ? "text-blue-600" : "text-[var(--ink)]";
+          // マークの有無・空白セルの有無に関わらず、数字＋ラベルの2段構造を常に同じ形で
+          // 描画する（ラベル行はmarkが無い時もinvisibleで場所だけ確保する）ことで、
+          // マーク付きの日がある月と無い月とで行の高さがずれないようにする。
           return (
             <div key={i} className="flex flex-col items-center gap-0.5 py-1">
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-full font-sans text-sm ${
-                  mark ? MARK_STYLE[mark.kind] : `${baseColor} font-bold`
+                  day == null ? "" : mark ? MARK_STYLE[mark.kind] : `${baseColor} font-bold`
                 }`}
               >
-                {day}
+                {day ?? ""}
               </span>
-              {mark && (
-                <span className="font-sans text-[9px] font-bold text-[var(--ink)]/60">{mark.label}</span>
-              )}
+              <span
+                className={`font-sans text-[9px] font-bold text-[var(--ink)]/60 ${mark ? "" : "invisible"}`}
+              >
+                {mark ? mark.label : " "}
+              </span>
             </div>
           );
         })}

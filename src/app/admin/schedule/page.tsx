@@ -376,9 +376,81 @@ function ScheduleEntryForm({
 // 公開するページ）に一本化した。ここでは公開状態の確認と、その設定画面への
 // 導線のみを残す（同じlives.results_publishedを見ているだけで、公開フラグ自体は
 // 増やしていない）。
+// カードをタップした時に、遷移せずその場で見られる簡易サマリー。
+// 「設定」ページのプレビューのような重い作りにはせず、既に保存済みの掲載内容
+// （sns_live_result_answers等）を読むだけの軽いクエリに留める。
+interface QuickResultSummary {
+  hasResult: boolean;
+  podiumNames: { rank: 1 | 2 | 3; name: string }[];
+  perfectCount: number;
+  managerBestSet: boolean;
+}
+
+async function fetchQuickResultSummary(liveId: string): Promise<QuickResultSummary> {
+  const { data: resultData } = await supabase
+    .from("sns_live_results")
+    .select("id, manager_best_answer_id")
+    .eq("live_id", liveId)
+    .maybeSingle();
+  if (!resultData) return { hasResult: false, podiumNames: [], perfectCount: 0, managerBestSet: false };
+
+  const { data: raData } = await supabase
+    .from("sns_live_result_answers")
+    .select("answer_id, rank")
+    .eq("live_result_id", resultData.id)
+    .eq("included", true);
+  const rows = (raData ?? []) as { answer_id: string; rank: 1 | 2 | 3 | null }[];
+  const answerIds = rows.map((r) => r.answer_id);
+
+  const { data: answersData } = answerIds.length
+    ? await supabase.from("answers").select("id, participant_id, judge_count, top_score_votes").in("id", answerIds)
+    : { data: [] as { id: string; participant_id: string; judge_count: number; top_score_votes: number }[] };
+  const answerById = new Map((answersData ?? []).map((a) => [a.id, a]));
+
+  const podiumParticipantIds = [
+    ...new Set(
+      rows
+        .filter((r) => r.rank !== null)
+        .map((r) => answerById.get(r.answer_id)?.participant_id)
+        .filter((v): v is string => !!v),
+    ),
+  ];
+  const { data: participantsData } = podiumParticipantIds.length
+    ? await supabase.from("participants").select("id, user_id").in("id", podiumParticipantIds)
+    : { data: [] as { id: string; user_id: string }[] };
+  const userIdByParticipantId = new Map((participantsData ?? []).map((p) => [p.id, p.user_id]));
+  const profileIds = [...new Set([...userIdByParticipantId.values()])];
+  let names: Record<string, string> = {};
+  if (profileIds.length > 0) {
+    const { data: namesData } = await supabase.rpc("sns_author_names", { p_ids: profileIds });
+    names = Object.fromEntries(
+      ((namesData ?? []) as { id: string; display_name: string }[]).map((n) => [n.id, n.display_name]),
+    );
+  }
+
+  const podiumNames = ([1, 2, 3] as const)
+    .map((rank) => {
+      const row = rows.find((r) => r.rank === rank);
+      const participantId = row ? answerById.get(row.answer_id)?.participant_id : undefined;
+      const userId = participantId ? userIdByParticipantId.get(participantId) : undefined;
+      if (!userId) return null;
+      return { rank, name: names[userId] ?? "（名前未設定）" };
+    })
+    .filter((v): v is { rank: 1 | 2 | 3; name: string } => v !== null);
+
+  const perfectCount = rows.filter((r) => {
+    const a = answerById.get(r.answer_id);
+    return a && a.judge_count > 0 && a.top_score_votes === a.judge_count;
+  }).length;
+
+  return { hasResult: true, podiumNames, perfectCount, managerBestSet: !!resultData.manager_best_answer_id };
+}
+
 function ResultsPublishSection() {
   const [lives, setLives] = useState<LiveRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, QuickResultSummary | "loading">>({});
 
   useEffect(() => {
     (async () => {
@@ -392,33 +464,82 @@ function ResultsPublishSection() {
     })();
   }, []);
 
+  const handleToggleExpand = async (liveId: string) => {
+    if (expandedId === liveId) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(liveId);
+    if (summaries[liveId]) return;
+    setSummaries((s) => ({ ...s, [liveId]: "loading" }));
+    const summary = await fetchQuickResultSummary(liveId);
+    setSummaries((s) => ({ ...s, [liveId]: summary }));
+  };
+
   if (loading || lives.length === 0) return null;
 
   return (
     <AdminCard title="終了したライブの結果公開">
       <ul className="flex flex-col gap-1.5">
-        {lives.map((live) => (
-          <li
-            key={live.id}
-            className="flex items-center justify-between gap-2 rounded border border-gray-200 p-2"
-          >
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-gray-700">
-                {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
-              </p>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                  live.results_published ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-                }`}
+        {lives.map((live) => {
+          const expanded = expandedId === live.id;
+          const summary = summaries[live.id];
+          return (
+            <li key={live.id} className="rounded border border-gray-200">
+              <button
+                type="button"
+                onClick={() => handleToggleExpand(live.id)}
+                className="flex w-full items-center justify-between gap-2 p-2 text-left"
               >
-                {live.results_published ? "SNS公開中" : "未公開"}
-              </span>
-            </div>
-            <Link href={`/admin/live-results/${live.id}`}>
-              <AdminButton>ライブ結果の設定・公開はこちら →</AdminButton>
-            </Link>
-          </li>
-        ))}
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-gray-700">
+                    {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
+                  </p>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      live.results_published ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                    }`}
+                  >
+                    {live.results_published ? "SNS公開中" : "未公開"}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[11px] text-gray-400">{expanded ? "閉じる ▲" : "結果を見る ▼"}</span>
+              </button>
+              {expanded && (
+                <div className="border-t border-gray-100 px-2.5 py-2 text-xs text-gray-700">
+                  {summary === "loading" || !summary ? (
+                    <p className="text-gray-400">読み込み中…</p>
+                  ) : !summary.hasResult ? (
+                    <p className="text-gray-400">まだライブ結果を設定していません。</p>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {summary.podiumNames.length === 0 ? (
+                        <p className="text-gray-400">掲載中の1〜3位代表がありません。</p>
+                      ) : (
+                        <p className="flex flex-wrap gap-x-3">
+                          {summary.podiumNames.map(({ rank, name }) => (
+                            <span key={rank}>
+                              {rank}位：{name}
+                            </span>
+                          ))}
+                        </p>
+                      )}
+                      <p className="text-gray-500">
+                        満点 {summary.perfectCount}件　運営ベスト
+                        {summary.managerBestSet ? "：設定済み" : "：未設定"}
+                      </p>
+                    </div>
+                  )}
+                  <div className="mt-2">
+                    <Link href={`/admin/live-results/${live.id}`}>
+                      <AdminButton>ライブ結果の設定・公開はこちら →</AdminButton>
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </AdminCard>
   );
