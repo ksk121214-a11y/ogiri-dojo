@@ -224,16 +224,15 @@ export function HeartGlyph({ className, filled = false }: { className?: string; 
   );
 }
 
-// 通報ボタン用の旗アイコン。
+// 通報ボタン用の旗アイコン。旗の布部分は塗りつぶしにして、線画だけより
+// 小さいサイズでもはっきり見えるようにしている。
 export function FlagGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
-      <path d="M6 3.5v17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M6 3v18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
       <path
-        d="M6 4.5c2-1.2 4-1.2 6 0s4 1.2 6 0v9c-2 1.2-4 1.2-6 0s-4-1.2-6 0Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
+        d="M6 4c2-1.1 4-1.1 6 0s4 1.1 6 0v8.2c-2 1.1-4 1.1-6 0s-4-1.1-6 0Z"
+        fill="currentColor"
       />
     </svg>
   );
@@ -243,7 +242,7 @@ export function FlagGlyph({ className }: { className?: string }) {
 export function CheckGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
-      <path d="M4.5 12.5 9.5 17.5 19.5 6.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 12.5 9.5 17.5 19.5 6.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

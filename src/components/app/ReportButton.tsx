@@ -89,14 +89,14 @@ export default function ReportButton({
       className={`flex shrink-0 items-center justify-center rounded-full transition ${
         reported
           ? "text-dojo-curtain-red"
-          : "text-dojo-gray-purple/70 hover:text-dojo-curtain-red"
+          : "text-dojo-gray-purple hover:text-dojo-curtain-red"
       } ${className}`}
       style={{ width: size, height: size }}
     >
       {reported ? (
-        <CheckGlyph className="h-[60%] w-[60%]" />
+        <CheckGlyph className="h-[75%] w-[75%]" />
       ) : (
-        <FlagGlyph className="h-[60%] w-[60%]" />
+        <FlagGlyph className="h-[75%] w-[75%]" />
       )}
     </button>
   );
