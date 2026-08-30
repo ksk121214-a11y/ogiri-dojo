@@ -40,12 +40,13 @@ const PHASE_DURATIONS_MS: Partial<Record<LivePhase, number>> = {
 };
 
 // 運営者専用管理画面の追加（第1段階）：ライブ準備画面のフォーム入力値。
+// 2026-08-30：「簡単な説明」「受付開始/終了時刻」はどの画面にも表示に使われて
+// いなかった（ホーム画面・次回ライブ画面は/admin/scheduleの別データを見るため）
+// ことが判明し、フォームから削除した。lives.description/reception_starts_at/
+// reception_ends_at列自体は残し、createLivePreparationでnullを渡す。
 export interface LivePreparationInput {
   title: string;
-  description: string;
   scheduledAt: string; // ISO文字列
-  receptionStartsAt: string | null;
-  receptionEndsAt: string | null;
   maxPlayers: number | null;
   groupCount: number;
   // お題の選び方："random"ならtopic_bankから必要数(groupCount×ROUNDS_PER_LIVE_DEFAULT)を
@@ -786,11 +787,11 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         scheduled_at: input.scheduledAt,
         current_phase: "scheduled",
         title: input.title || null,
-        description: input.description || null,
+        description: null,
         max_players: input.maxPlayers,
         planned_group_count: input.groupCount,
-        reception_starts_at: input.receptionStartsAt,
-        reception_ends_at: input.receptionEndsAt,
+        reception_starts_at: null,
+        reception_ends_at: null,
         created_by: actorId,
       })
       .select()

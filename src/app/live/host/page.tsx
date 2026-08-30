@@ -283,10 +283,7 @@ function PreparationForm() {
   const createLivePreparation = useLiveHostStore((s) => s.createLivePreparation);
   const topicBank = useLiveHostStore((s) => s.topicBank);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
-  const [receptionStartsAt, setReceptionStartsAt] = useState("");
-  const [receptionEndsAt, setReceptionEndsAt] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(15);
   const [groupCount, setGroupCount] = useState(3);
   const [topicMode, setTopicMode] = useState<"random" | "manual">("random");
@@ -300,10 +297,7 @@ function PreparationForm() {
     setLocalError(null);
     const input: LivePreparationInput = {
       title,
-      description,
       scheduledAt: fromDatetimeLocalValue(scheduledAt) ?? new Date().toISOString(),
-      receptionStartsAt: fromDatetimeLocalValue(receptionStartsAt),
-      receptionEndsAt: fromDatetimeLocalValue(receptionEndsAt),
       maxPlayers: maxPlayers > 0 ? maxPlayers : null,
       groupCount,
       topicSelection:
@@ -336,15 +330,6 @@ function PreparationForm() {
           />
         </LabeledInput>
 
-        <LabeledInput label="簡単な説明">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-          />
-        </LabeledInput>
-
         <LabeledInput label="開始日時">
           <input
             type="datetime-local"
@@ -353,25 +338,6 @@ function PreparationForm() {
             className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
         </LabeledInput>
-
-        <div className="flex gap-2">
-          <LabeledInput label="受付開始時刻" className="flex-1">
-            <input
-              type="datetime-local"
-              value={receptionStartsAt}
-              onChange={(e) => setReceptionStartsAt(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-            />
-          </LabeledInput>
-          <LabeledInput label="受付終了時刻" className="flex-1">
-            <input
-              type="datetime-local"
-              value={receptionEndsAt}
-              onChange={(e) => setReceptionEndsAt(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-            />
-          </LabeledInput>
-        </div>
 
         <div className="flex gap-2">
           <LabeledInput label="最大参加人数（プレイヤー）" className="flex-1">
