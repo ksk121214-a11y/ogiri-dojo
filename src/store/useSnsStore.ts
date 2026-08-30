@@ -675,6 +675,22 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   isFollowing: (authorId) => get().followingAuthorIds.includes(authorId),
 }));
 
+// 2026-08-30（不具合修正）：モジュールロード直後に即座にinit()を呼んでいたため、
+// useAuthStore側のセッション復元（supabase.auth.getSession()、非同期）がまだ完了して
+// おらず、ログイン済みなのに「未ログイン」と誤判定してlikedAnswerIds/followingAuthorIds/
+// myFollowerCountをDBから取得できないレースコンディションがあった（リロードのたびに
+// フォロー中・フォロワー数が0に見えたり、フォローボタンの状態が戻ったりする不具合の原因）。
+// useAuthStoreのセッション確定（loading:falseになった時点）を待ってからinit()を呼ぶ。
 if (typeof window !== "undefined") {
-  useSnsStore.getState().init();
+  const authState = useAuthStore.getState();
+  if (!authState.loading) {
+    useSnsStore.getState().init();
+  } else {
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (!state.loading) {
+        unsubscribe();
+        useSnsStore.getState().init();
+      }
+    });
+  }
 }

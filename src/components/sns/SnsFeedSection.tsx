@@ -158,7 +158,6 @@ export default function SnsFeedSection() {
 
       {showFollowingEmpty ? (
         <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 rounded-2xl px-6 py-16 text-center text-[var(--ink)]`}>
-          <span className="text-3xl">🥋</span>
           <p className="font-sans text-sm font-bold text-[var(--ink)]">
             フォロー中の演者の投稿はまだありません
           </p>

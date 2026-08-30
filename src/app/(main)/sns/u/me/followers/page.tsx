@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
 import { supabase } from "@/lib/supabase";
@@ -11,6 +12,8 @@ import { useAuthStore } from "@/store/useAuthStore";
 // 2026-08-30（いいね・フォローの実データ化）：以前はダミー投稿者から「あなたをフォロー
 // しています」として仮表示していたが、sns_followsテーブルの実データ（following_id=自分
 // のuserIdの行のfollower_id一覧）に置き換えた。
+// 2026-08-30（デザイン統一）：他の寄合帳サブページ（SnsAuthorFollowers等）と同じ
+// StadiumPageShell（地下ライブハウス風トンマナ）に合わせた。
 export default function MyFollowersPage() {
   const userId = useAuthStore((s) => s.user?.id);
   const [followerIds, setFollowerIds] = useState<string[] | null>(null);
@@ -30,27 +33,27 @@ export default function MyFollowersPage() {
   }, [userId]);
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <SnsBackButton />
+    <StadiumPageShell contentTheme="kraft">
+      <SnsBackButton fallbackHref="/sns" />
 
       <div className="text-center">
-        <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">FOLLOWERS</p>
-        <h1 className="mt-1 font-brush text-2xl text-dojo-dark-brown">
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">FOLLOWERS</p>
+        <h1 className="mt-1 font-sans text-2xl font-black text-[var(--ink)]">
           あなたのフォロワー
         </h1>
       </div>
 
       <div className="flex flex-col gap-2">
         {followerIds === null ? (
-          <p className="text-center font-sans text-xs text-dojo-dark-brown">読み込み中…</p>
+          <p className="text-center font-sans text-xs text-[var(--ink)]/70">読み込み中…</p>
         ) : followerIds.length === 0 ? (
-          <p className="text-center font-sans text-xs text-dojo-dark-brown">
+          <p className="text-center font-sans text-xs text-[var(--ink)]/70">
             まだ誰にもフォローされていません。
           </p>
         ) : (
           followerIds.map((id) => <SnsFollowListRow key={id} authorId={id} />)
         )}
       </div>
-    </div>
+    </StadiumPageShell>
   );
 }
