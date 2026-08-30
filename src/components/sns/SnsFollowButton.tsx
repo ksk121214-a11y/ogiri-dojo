@@ -28,8 +28,8 @@ export default function SnsFollowButton({
         size === "compact" ? "px-3 py-1 text-[11px]" : "px-5 py-2 text-xs"
       } ${
         following
-          ? "border border-dojo-dark-brown/30 text-dojo-dark-brown hover:border-dojo-curtain-red hover:text-dojo-curtain-red"
-          : "bg-dojo-curtain-red text-dojo-washi-white shadow-[0_0_14px_rgba(192,38,63,0.35)] hover:bg-dojo-deep-crimson"
+          ? "border border-[var(--ink)]/30 text-[var(--ink)]/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          : "bg-[var(--accent)] text-[var(--paper)] shadow-[0_0_14px_rgba(192,38,63,0.35)] hover:opacity-90"
       }`}
     >
       {following ? "フォロー中" : size === "compact" ? "フォロー" : "フォローする"}

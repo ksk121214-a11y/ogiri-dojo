@@ -36,7 +36,7 @@ export default function MyPage() {
         </p>
       </div>
 
-      <SnsFeedSection variant="stadium" />
+      <SnsFeedSection />
 
       {/*
         2026-08-28: モーダルは.shell（StadiumAppShellのルート要素）の外側に置くと

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 // ない場合のみ、フォールバック先（既定は寄合帳トップ）へ遷移する。
 export default function SnsBackButton({
   fallbackHref = "/sns",
-  className = "w-fit font-sans text-xs font-bold text-dojo-dark-brown hover:underline",
+  className = "w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]",
 }: {
   fallbackHref?: string;
   className?: string;

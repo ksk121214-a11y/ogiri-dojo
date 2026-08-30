@@ -50,10 +50,10 @@ export default function SnsAuthorBadge({
         >
           <MyIconAvatar size={size} bare />
           <span className="flex min-w-0 flex-col">
-            <span className="truncate font-sans text-xs font-bold text-dojo-ink hover:underline">
+            <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
               {user.displayName}
             </span>
-            <span className="font-sans text-[10px] text-dojo-dark-brown">
+            <span className="font-sans text-[10px] text-[var(--ink)]/60">
               {rank.label}
             </span>
           </span>
@@ -82,10 +82,10 @@ export default function SnsAuthorBadge({
           {author?.emoji ?? (realAuthor ? "🎤" : "🎭")}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate font-sans text-xs font-bold text-dojo-ink hover:underline">
+          <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
             {author?.displayName ?? realAuthor?.displayName ?? "名無しの演者"}
           </span>
-          <span className="font-sans text-[10px] text-dojo-dark-brown">
+          <span className="font-sans text-[10px] text-[var(--ink)]/60">
             {author?.rankLabel ?? "見習い"}
           </span>
         </span>
