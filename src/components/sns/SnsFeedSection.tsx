@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
@@ -9,25 +9,21 @@ import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsLiveResultsFeedList from "@/components/sns/SnsLiveResultsFeedList";
 import { isLocallyCreated } from "@/lib/staticContent";
-import { useSnsStore } from "@/store/useSnsStore";
+import { useSnsStore, type SnsAudienceKind, type SnsFeedKind, type SnsSortKind } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
 
-type FeedKind = "topics" | "answers" | "results";
-type AudienceKind = "forYou" | "following";
-type SortKind = "new" | "popular";
-
-const FEED_TABS: { key: FeedKind; label: string }[] = [
+const FEED_TABS: { key: SnsFeedKind; label: string }[] = [
   { key: "topics", label: "お題" },
   { key: "answers", label: "回答" },
   { key: "results", label: "ライブ結果" },
 ];
 
-const AUDIENCE_TABS: { key: AudienceKind; label: string }[] = [
+const AUDIENCE_TABS: { key: SnsAudienceKind; label: string }[] = [
   { key: "forYou", label: "おすすめ" },
   { key: "following", label: "フォロー中" },
 ];
 
-const SORT_TABS: { key: SortKind; label: string }[] = [
+const SORT_TABS: { key: SnsSortKind; label: string }[] = [
   { key: "new", label: "新着" },
   { key: "popular", label: "人気" },
 ];
@@ -49,9 +45,15 @@ export default function SnsFeedSection() {
   const loadingMoreAnswers = useSnsStore((s) => s.loadingMoreAnswers);
   const loadMoreAnswers = useSnsStore((s) => s.loadMoreAnswers);
 
-  const [feed, setFeed] = useState<FeedKind>("topics");
-  const [audience, setAudience] = useState<AudienceKind>("forYou");
-  const [sort, setSort] = useState<SortKind>("new");
+  // タブ選択はコンポーネントのローカルstateではなくuseSnsStoreに持たせている
+  // （ライブ結果の詳細ページ等へ移動して「戻る」で戻ってきた時に、選んでいたタブへ
+  // 戻れるようにするため。ローカルstateだと再マウントのたびにお題/おすすめへ戻ってしまう）。
+  const feed = useSnsStore((s) => s.feedTab);
+  const setFeed = useSnsStore((s) => s.setFeedTab);
+  const audience = useSnsStore((s) => s.audienceTab);
+  const setAudience = useSnsStore((s) => s.setAudienceTab);
+  const sort = useSnsStore((s) => s.sortTab);
+  const setSort = useSnsStore((s) => s.setSortTab);
 
   const answerCountByTopic = useMemo(() => {
     const map = new Map<string, number>();
@@ -110,13 +112,15 @@ export default function SnsFeedSection() {
       </div>
 
       <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 rounded-2xl p-3 text-[var(--ink)] sm:p-4`}>
-        <div className="flex justify-center gap-6 border-b border-[var(--ink)]/15 pb-2.5">
+        {/* 3タブを均等幅にし、ラベルの文字数差（「ライブ結果」が長い等）に関わらず
+            中央のタブ（回答）が常に画面中央に来るようにする。 */}
+        <div className="flex w-full border-b border-[var(--ink)]/15 pb-2.5">
           {FEED_TABS.map((tab) => (
             <button
               key={tab.key}
               type="button"
               onClick={() => setFeed(tab.key)}
-              className={`border-b-2 pb-1 font-sans text-sm font-bold transition ${
+              className={`flex-1 border-b-2 pb-1 font-sans text-sm font-bold transition ${
                 feed === tab.key
                   ? "border-[var(--accent)] text-[var(--accent)]"
                   : "border-transparent text-[var(--ink)]/55 hover:text-[var(--ink)]"

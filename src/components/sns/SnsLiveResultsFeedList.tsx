@@ -56,9 +56,13 @@ export default function SnsLiveResultsFeedList() {
             {formatLiveTicketNo(summary.sequenceNumber)}
             {summary.title ? `　${summary.title}` : ""}
           </p>
-          {summary.topAnswerPreview && (
-            <p className="line-clamp-2 font-sans text-sm text-[var(--ink)]/85">
-              1位：{summary.topAnswerPreview}
+          {summary.podiumNames.length > 0 && (
+            <p className="flex flex-wrap gap-x-3 font-sans text-sm text-[var(--ink)]/85">
+              {summary.podiumNames.map(({ rank, name }) => (
+                <span key={rank}>
+                  {rank}位：{name}
+                </span>
+              ))}
             </p>
           )}
           <p className="flex flex-wrap items-center gap-3 font-sans text-[11px] text-[var(--ink)]/70">

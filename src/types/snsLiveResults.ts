@@ -8,8 +8,8 @@ export interface SnsLiveResultSummary {
   sequenceNumber: number;
   title: string | null;
   endedAtLabel: string;
-  // 1位の最高得点回答のプレビュー（同点が複数ある場合は先頭の1件のみ）。0件なら null。
-  topAnswerPreview: string | null;
+  // 1〜3位のプレイヤー名（そのライブに該当順位のプレイヤーがいない場合は含まれない）。
+  podiumNames: { rank: 1 | 2 | 3; name: string }[];
   perfectCount: number;
   likeCount: number;
   commentCount: number;

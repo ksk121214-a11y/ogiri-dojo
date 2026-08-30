@@ -108,7 +108,7 @@ interface SnsLiveResultsState {
 }
 
 // 公開済みライブ一覧（ended_at降順）をPAGE_SIZE件取得し、sns_live_results・要約値
-// （1位プレビュー・満点件数・いいね数・コメント数）まで組み立てる。
+// （1〜3位のプレイヤー名・満点件数・いいね数・コメント数）まで組み立てる。
 // N+1を避けるため、対象ページ分のlive_result_idをまとめて使って各テーブルへ
 // 一度ずつ問い合わせる（1ライブごとに問い合わせ直したりしない）。
 async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
@@ -151,9 +151,29 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
   const answerIds = resultAnswers.map((ra) => ra.answer_id);
 
   const { data: answersData } = answerIds.length
-    ? await supabase.from("answers").select("id, body, judge_count, top_score_votes").in("id", answerIds)
-    : { data: [] as { id: string; body: string; judge_count: number; top_score_votes: number }[] };
+    ? await supabase.from("answers").select("id, participant_id, judge_count, top_score_votes").in("id", answerIds)
+    : { data: [] as { id: string; participant_id: string; judge_count: number; top_score_votes: number }[] };
   const answerById = new Map((answersData ?? []).map((a) => [a.id, a]));
+
+  // 1〜3位の代表回答のプレイヤー名解決用。rankが同じ行は必ず同一プレイヤーのため
+  // （タイは「そのプレイヤー自身の複数回答が同点」の意味で、順位を複数人が共有することはない）、
+  // 順位ごとに代表行を1つ選べば十分。
+  const podiumRows = resultAnswers.filter((ra) => ra.rank !== null);
+  const podiumParticipantIds = [
+    ...new Set(podiumRows.map((ra) => answerById.get(ra.answer_id)?.participant_id).filter((v): v is string => !!v)),
+  ];
+  const { data: participantsData } = podiumParticipantIds.length
+    ? await supabase.from("participants").select("id, user_id").in("id", podiumParticipantIds)
+    : { data: [] as { id: string; user_id: string }[] };
+  const userIdByParticipantId = new Map((participantsData ?? []).map((p) => [p.id, p.user_id]));
+  const profileIds = [...new Set([...userIdByParticipantId.values()])];
+  await resolveAuthorNamesIntoSnsStore(profileIds);
+  const realAuthorNames = useSnsStore.getState().realAuthorNames;
+  const nameOfParticipant = (participantId: string): string => {
+    const userId = userIdByParticipantId.get(participantId);
+    if (!userId) return "（不明）";
+    return realAuthorNames[userId]?.displayName ?? "（名前未設定）";
+  };
 
   const resultAnswerIds = resultAnswers.map((ra) => ra.id);
   const { data: commentsData } = resultAnswerIds.length
@@ -174,8 +194,14 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
       const result = results.find((r) => r.live_id === live.id);
       if (!result) return null;
       const ownRows = resultAnswers.filter((ra) => ra.live_result_id === result.id);
-      const rank1Row = ownRows.find((ra) => ra.rank === 1);
-      const topAnswerPreview = rank1Row ? answerById.get(rank1Row.answer_id)?.body ?? null : null;
+      const podiumNames = ([1, 2, 3] as const)
+        .map((rank) => {
+          const row = ownRows.find((ra) => ra.rank === rank);
+          const participantId = row ? answerById.get(row.answer_id)?.participant_id : undefined;
+          if (!participantId) return null;
+          return { rank, name: nameOfParticipant(participantId) };
+        })
+        .filter((v): v is { rank: 1 | 2 | 3; name: string } => v !== null);
       const perfectCount = ownRows.filter((ra) => {
         const a = answerById.get(ra.answer_id);
         return a && a.judge_count > 0 && a.top_score_votes === a.judge_count;
@@ -188,7 +214,7 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
         sequenceNumber: live.sequence_number,
         title: live.title,
         endedAtLabel: formatEndedAtLabel(live.ended_at),
-        topAnswerPreview,
+        podiumNames,
         perfectCount,
         likeCount,
         commentCount,

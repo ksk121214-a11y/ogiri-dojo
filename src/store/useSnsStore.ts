@@ -78,6 +78,14 @@ export interface RealAuthorInfo {
 
 export type ActionResult = { ok: true } | { ok: false; message?: string };
 
+// 寄合帳フィード（SnsFeedSection.tsx）のタブ選択状態。コンポーネントのローカルstate
+// ではなくこのストアに持たせることで、「ライブ結果の詳細を見て戻るボタンで戻る」
+// といった画面遷移でSnsFeedSectionが再マウントされても、選んでいたタブが
+// お題/おすすめにリセットされず元の状態のまま復元される。
+export type SnsFeedKind = "topics" | "answers" | "results";
+export type SnsAudienceKind = "forYou" | "following";
+export type SnsSortKind = "new" | "popular";
+
 interface SnsState {
   topics: SnsTopic[];
   answers: SnsAnswer[];
@@ -102,6 +110,14 @@ interface SnsState {
   // 連打・二重送信防止（対象IDごとに処理中かどうか）。
   likePending: Record<string, boolean>;
   followPending: Record<string, boolean>;
+
+  // フィードのタブ選択状態（上記コメント参照）。
+  feedTab: SnsFeedKind;
+  audienceTab: SnsAudienceKind;
+  sortTab: SnsSortKind;
+  setFeedTab: (tab: SnsFeedKind) => void;
+  setAudienceTab: (tab: SnsAudienceKind) => void;
+  setSortTab: (tab: SnsSortKind) => void;
 
   init: () => Promise<void>;
   loadMoreTopics: () => Promise<void>;
@@ -215,6 +231,13 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   loadingMoreAnswers: false,
   likePending: {},
   followPending: {},
+
+  feedTab: "topics",
+  audienceTab: "forYou",
+  sortTab: "new",
+  setFeedTab: (tab) => set({ feedTab: tab }),
+  setAudienceTab: (tab) => set({ audienceTab: tab }),
+  setSortTab: (tab) => set({ sortTab: tab }),
 
   // Supabaseから実データ（is_hidden=falseのみ、新着順にPAGE_SIZE件）を取得し、開発環境では
   // 既存のダミーデータの前に差し込む（新着優先）。本番環境ではダミーデータ自体を持たない。
