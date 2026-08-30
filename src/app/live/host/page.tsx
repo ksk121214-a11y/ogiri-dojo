@@ -198,13 +198,30 @@ export default function LiveHostPage() {
             <ReceptionStartPanel onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))} />
           )}
 
-          <ParticipantsPanel
-            participants={participants}
-            groups={groups}
-            hostProfiles={hostProfiles}
-            maxPlayers={live.max_players}
-            onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
-          />
+          {/* 2026-08-30: 受付前(scheduled)はまだ参加者が誰もいないため「プレイヤー
+              全員への運営メッセージ」のみを置き、参加者への個別メッセージ・退場
+              （参加者一覧を伴う）は受付が始まってから表示するようにした。 */}
+          {(live.current_phase === "scheduled" ||
+            live.current_phase === "interlude" ||
+            live.current_phase === "opening" ||
+            live.current_phase === "topic_reveal" ||
+            live.current_phase === "answering" ||
+            live.current_phase === "group_result" ||
+            live.current_phase === "final_result") && (
+            <AnnouncementPanel
+              onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+            />
+          )}
+
+          {live.current_phase !== "scheduled" && (
+            <ParticipantsPanel
+              participants={participants}
+              groups={groups}
+              hostProfiles={hostProfiles}
+              maxPlayers={live.max_players}
+              onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+            />
+          )}
 
           {(live.current_phase === "interlude" || live.current_phase === "opening") && (
             <>
@@ -219,17 +236,6 @@ export default function LiveHostPage() {
                 onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
               />
             </>
-          )}
-
-          {(live.current_phase === "interlude" ||
-            live.current_phase === "opening" ||
-            live.current_phase === "topic_reveal" ||
-            live.current_phase === "answering" ||
-            live.current_phase === "group_result" ||
-            live.current_phase === "final_result") && (
-            <AnnouncementPanel
-              onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
-            />
           )}
 
           {live.current_phase === "opening" && turns.length === 0 && (

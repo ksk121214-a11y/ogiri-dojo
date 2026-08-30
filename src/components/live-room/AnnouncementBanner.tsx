@@ -13,6 +13,8 @@ import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 // 2026-08-30: 司会コンソールから参加者個別に送る警告メッセージ
 // (participants.host_message)にも対応した。全員向けメッセージとは別枠で、
 // 本人の画面にだけ警告色(赤)のバーとして重ねて表示する。
+// 2026-08-30: 長いメッセージだと1行のtruncateでは右上の音声設定アイコンと
+// 重なって見えていたため、幅を狭めて複数行に折り返すようにした。
 export default function AnnouncementBanner() {
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -39,7 +41,7 @@ export default function AnnouncementBanner() {
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.25 }}
             role="alert"
-            className="pointer-events-auto max-w-[92vw] truncate rounded-full bg-red-600/90 px-5 py-2 text-center font-sans text-sm font-bold text-white shadow-lg backdrop-blur-sm"
+            className="pointer-events-auto max-w-[78vw] rounded-2xl bg-red-600/90 px-5 py-2 text-center font-sans text-sm font-bold text-white shadow-lg backdrop-blur-sm"
           >
             ⚠️ {privateMessage}
           </motion.p>
@@ -52,7 +54,7 @@ export default function AnnouncementBanner() {
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.25 }}
             role="status"
-            className="pointer-events-auto max-w-[92vw] truncate rounded-full bg-black/70 px-5 py-2 text-center font-sans text-sm font-bold text-white shadow-lg backdrop-blur-sm"
+            className="pointer-events-auto max-w-[78vw] rounded-2xl bg-black/70 px-5 py-2 text-center font-sans text-sm font-bold text-white shadow-lg backdrop-blur-sm"
           >
             📣 {message}
           </motion.p>
