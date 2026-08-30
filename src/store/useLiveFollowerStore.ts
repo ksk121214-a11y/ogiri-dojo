@@ -130,11 +130,23 @@ async function fetchGroupsForLive(liveId: string): Promise<GroupRow[]> {
 // 組結果・最終結果で他人の表示名を出すための安全な経路（生のprofilesは自分の行しか読めないため）。
 // 2026-08-29: 表示名と同じ経路でavatar_icon/avatar_colorも取得するようにした
 // （participant_display_names RPC自体を拡張、詳しくはsupabase/migrations/0015参照）。
+// 2026-08-30:「採点確定のたびにボット全員のアイコンがランダムに変わって見える」不具合の
+// 原因調査で判明した点：このRPCが一時的なエラーでdata==nullを返しても、これまでは
+// エラーを無視して空のnames/avatarsをそのまま返していた。呼び出し元(refetchAll)がその
+// 空の結果でparticipantAvatarsを丸ごと上書きすると、その間だけ全参加者の表示が
+// participant_idベースの決定的ハッシュ（本来の絵柄・色とは無関係な値）にフォールバック
+// してしまい、「アイコンが変わった」ように見えていた。ok:falseの場合は呼び出し元で
+// 既存の値を保持させ、空の結果で上書きしないようにする。
 async function fetchParticipantProfiles(liveId: string): Promise<{
+  ok: boolean;
   names: Record<string, string>;
   avatars: Record<string, ParticipantAvatarInfo>;
 }> {
-  const { data } = await supabase.rpc("participant_display_names", { p_live_id: liveId });
+  const { data, error } = await supabase.rpc("participant_display_names", { p_live_id: liveId });
+  if (error) {
+    console.warn("[live] participant_display_names取得に失敗", error);
+    return { ok: false, names: {}, avatars: {} };
+  }
   const names: Record<string, string> = {};
   const avatars: Record<string, ParticipantAvatarInfo> = {};
   for (const row of (data ?? []) as {
@@ -146,7 +158,7 @@ async function fetchParticipantProfiles(liveId: string): Promise<{
     names[row.participant_id] = row.display_name;
     avatars[row.participant_id] = { icon: row.avatar_icon, color: row.avatar_color };
   }
-  return { names, avatars };
+  return { ok: true, names, avatars };
 }
 
 async function fetchResolvedAnswersForLive(liveId: string): Promise<AnswerRow[]> {
@@ -335,17 +347,26 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   subscribe: () => {
     let cancelled = false;
 
+    // lives/participantsテーブルの変更イベントで短時間に何度も呼ばれるため、
+    // refreshTurnDerivedと同様に「今回の呼び出しが最新か」を通し番号で管理する。
+    // 無いと、後発の呼び出しが先に完了して反映された直後に、先発の（今となっては
+    // 古い）呼び出しの結果が遅れて届いて上書きしてしまうことがあった。
+    let refetchRequestId = 0;
+
     const refetchAll = async () => {
+      const requestId = ++refetchRequestId;
       const live = await fetchActiveLive();
-      if (cancelled) return;
+      if (cancelled || requestId !== refetchRequestId) return;
       const userId = useAuthStore.getState().user?.id ?? null;
       const myParticipant = live && userId ? await fetchMyParticipant(live.id, userId) : null;
-      if (cancelled) return;
+      if (cancelled || requestId !== refetchRequestId) return;
 
       let participants: ParticipantRow[] = [];
       let groups: GroupRow[] = [];
-      let participantNames: Record<string, string> = {};
-      let participantAvatars: Record<string, ParticipantAvatarInfo> = {};
+      // 2026-08-30:「採点確定のたびにボット全員のアイコンがランダムに変わって見える」
+      // 不具合対策。participant_display_names RPCが一時的なエラーで取得できなかった
+      // 場合は、空の結果で上書きせず直前の値を保持する（fetchParticipantProfiles参照）。
+      let { participantNames, participantAvatars } = get();
       if (live) {
         const [participantsResult, groupsResult, profiles] = await Promise.all([
           fetchParticipantsForLive(live.id),
@@ -354,10 +375,12 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         ]);
         participants = participantsResult;
         groups = groupsResult;
-        participantNames = profiles.names;
-        participantAvatars = profiles.avatars;
+        if (profiles.ok) {
+          participantNames = profiles.names;
+          participantAvatars = profiles.avatars;
+        }
       }
-      if (cancelled) return;
+      if (cancelled || requestId !== refetchRequestId) return;
       set({ live, myParticipant, participants, groups, participantNames, participantAvatars, loading: false });
       await refreshTurnDerived();
     };
