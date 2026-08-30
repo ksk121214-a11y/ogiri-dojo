@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import NotificationBell from "@/components/app/NotificationBell";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
@@ -49,6 +50,7 @@ export default function StadiumHeader() {
             {displayName}
           </span>
 
+          <NotificationBell />
           <SoundSettingsToggle />
 
           {/*

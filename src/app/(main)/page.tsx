@@ -8,7 +8,9 @@ import JoinLiveButton from "@/components/home/JoinLiveButton";
 import NextLiveTicket from "@/components/home/NextLiveTicket";
 import StadiumAppShell from "@/components/home/StadiumAppShell";
 import { useLiveJoinFlow } from "@/components/home/useLiveJoinFlow";
-import { CURRENT_LIVE, CURRENT_LIVE_RECEPTION } from "@/data/liveScheduleData";
+import { formatReceptionRange, toLiveScheduleDate } from "@/lib/liveDateFormat";
+import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { useLiveSchedule } from "@/lib/useLiveSchedule";
 import { useAuthStore } from "@/store/useAuthStore";
 
 // ホーム画面：地下の小さなお笑いライブハウス・インディーズイベントのフライヤーをイメージした
@@ -20,11 +22,15 @@ import { useAuthStore } from "@/store/useAuthStore";
 // 日付データはsrc/data/liveScheduleData.tsに一本化し、こことページ側で共有している。
 // 2026-08-29（追記）：「参加する」成功時に半券が切り離される演出のため、参加フローの
 // 状態管理をuseLiveJoinFlowに切り出し、NextLiveTicket・JoinLiveButton両方に配る。
+// 2026-08-30（追記）：運営者専用管理画面の追加（第2段階）。日付・番号のハードコード
+// 定数(src/data/liveScheduleData.ts)をやめ、useLiveSchedule()経由でlivesテーブルの
+// 実データを表示するようにした。
 export default function Home() {
   const { status, error, handleJoinClick, handleAnimationEnd } = useLiveJoinFlow();
   const stubVisible = status !== "joined";
   const isDetaching = status === "detaching";
   const authLoading = useAuthStore((s) => s.loading);
+  const { current } = useLiveSchedule();
 
   return (
     <StadiumAppShell bottomNav={<BottomNavigation />}>
@@ -32,12 +38,22 @@ export default function Home() {
       <DarkIndieHero />
 
       <div id="next-live" className="scroll-mt-4">
-        <NextLiveTicket
-          live={{ ...CURRENT_LIVE, reception: CURRENT_LIVE_RECEPTION }}
-          stubVisible={stubVisible}
-          isDetaching={isDetaching}
-          onDetachAnimationEnd={handleAnimationEnd}
-        />
+        {current ? (
+          <NextLiveTicket
+            live={{
+              ...toLiveScheduleDate(current.scheduled_at),
+              ticketNo: formatLiveTicketNo(current.sequence_number),
+              reception: formatReceptionRange(current.reception_starts_at, current.reception_ends_at),
+            }}
+            stubVisible={stubVisible}
+            isDetaching={isDetaching}
+            onDetachAnimationEnd={handleAnimationEnd}
+          />
+        ) : (
+          <p className="rounded-xl border border-[var(--paper)]/20 px-4 py-3 text-center font-sans text-sm text-[var(--paper)]/80">
+            次回ライブは現在準備中です
+          </p>
+        )}
       </div>
 
       <JoinLiveButton status={status} error={error} onClick={handleJoinClick} />

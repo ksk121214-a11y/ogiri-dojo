@@ -80,7 +80,10 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
       <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <SnsAuthorBadge authorId={answer.authorId} />
+            <SnsAuthorBadge
+              authorId={answer.authorId}
+              reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
+            />
             <SnsFollowButton authorId={answer.authorId} size="compact" />
           </div>
           <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
@@ -150,7 +153,11 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             className={`${stadiumStyles.grainPaper} flex flex-col gap-1.5 rounded-xl px-4 py-3 text-[var(--ink)]`}
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge authorId={comment.authorId} size={24} />
+              <SnsAuthorBadge
+                authorId={comment.authorId}
+                size={24}
+                reportTarget={{ type: "sns_comment", id: comment.id, body: comment.body }}
+              />
               <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
                 {comment.createdAtLabel}
               </span>

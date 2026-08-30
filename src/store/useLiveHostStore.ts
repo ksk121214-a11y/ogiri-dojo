@@ -13,8 +13,9 @@ import { create } from "zustand";
 
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { LIVE_ROOM_TIMING, REVEAL_SEQUENCE_MS, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
-import { assignParticipantsToGroups, pickTopicBodies } from "@/lib/liveRoomLogic";
+import { assignParticipantsToGroups, pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { supabase } from "@/lib/supabase";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
 import type {
@@ -25,6 +26,7 @@ import type {
   ParticipantRow,
   ProfileRow,
   ScoreRow,
+  TopicBankRow,
   TopicRow,
   TurnRow,
 } from "@/lib/liveRoomTypes";
@@ -37,6 +39,20 @@ const PHASE_DURATIONS_MS: Partial<Record<LivePhase, number>> = {
   group_result: LIVE_ROOM_TIMING.groupResultMs,
 };
 
+// 運営者専用管理画面の追加（第1段階）：ライブ準備画面のフォーム入力値。
+export interface LivePreparationInput {
+  title: string;
+  description: string;
+  scheduledAt: string; // ISO文字列
+  receptionStartsAt: string | null;
+  receptionEndsAt: string | null;
+  maxPlayers: number | null;
+  groupCount: number;
+  // お題の選び方："random"ならtopic_bankから必要数(groupCount×ROUNDS_PER_LIVE_DEFAULT)を
+  // 自動抽選、"manual"なら指定したtopic_bank行のIDをそのまま使う。
+  topicSelection: { mode: "random" } | { mode: "manual"; topicBankIds: string[] };
+}
+
 interface LiveHostState {
   live: LiveRow | null;
   participants: ParticipantRow[];
@@ -48,13 +64,25 @@ interface LiveHostState {
   scores: ScoreRow[]; // 現在表示中の回答ぶんだけ保持
   resolvedAnswers: AnswerRow[]; // このライブ全体で確定済みの回答履歴（ログ表示用）
   resolvedScoresByAnswer: Record<string, ScoreRow[]>; // 確定済み回答ごとの採点内訳(answer_id→scores)
+  topicBank: TopicBankRow[]; // お題管理・準備画面での選定用（is_active=trueのみ）
   loading: boolean;
   error: string | null;
 
   init: () => Promise<void>;
-  startLive: () => Promise<void>;
+  loadTopicBank: () => Promise<void>;
+  // ライブ準備〜開始（第1段階で新設）。
+  createLivePreparation: (input: LivePreparationInput) => Promise<{ ok: boolean; reason?: string }>;
+  openReception: () => Promise<void>; // 「参加受付を開始する」
+  randomizeGroups: () => Promise<{ ok: boolean; reason?: string }>; // 「（もう一度）ランダムに振り分ける」
+  setParticipantGroup: (participantId: string, groupId: string | null) => Promise<void>;
+  changeTopicAssignment: (
+    topicId: string,
+    entry: Pick<TopicBankRow, "id" | "body" | "format">,
+  ) => Promise<void>;
+  sendAnnouncement: (message: string, scope: "player" | "all") => Promise<void>;
+  clearAnnouncement: () => Promise<void>;
+  beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
   closeLive: () => Promise<void>;
-  confirmGroupingAndBegin: (groupCount: number) => Promise<void>;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -644,7 +672,7 @@ async function advanceIfDue() {
     });
     return;
   }
-  // opening は組分け確定ボタン(confirmGroupingAndBegin)が押されるまで自動では進めない。
+  // opening は「ゲームを開始する」ボタン(beginGame)が押されるまで自動では進めない。
 }
 
 export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
@@ -658,11 +686,22 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   scores: [],
   resolvedAnswers: [],
   resolvedScoresByAnswer: {},
+  topicBank: [],
   loading: true,
   error: null,
 
+  loadTopicBank: async () => {
+    const { data, error } = await supabase
+      .from("topic_bank")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    if (!error) set({ topicBank: (data ?? []) as TopicBankRow[] });
+  },
+
   init: async () => {
     set({ loading: true, error: null });
+    void get().loadTopicBank();
     const live = await fetchActiveLive();
     if (live) {
       const children = await fetchLiveChildren(live.id);
@@ -706,42 +745,376 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     }, 500);
   },
 
-  startLive: async () => {
+  // 運営者専用管理画面の追加（第1段階）：「ライブ準備画面」の保存操作。
+  // 旧startLive()はここでinterludeとして直接insertしていたが、新設計では
+  // 「準備中(scheduled)」として作成し、受付開始は別操作(openReception)に分離する。
+  createLivePreparation: async (input) => {
     const existing = await fetchActiveLive();
     if (existing) {
       set({ live: existing });
       await subscribeLiveChannels(existing.id);
-      return;
+      return { ok: false, reason: "既に進行中のライブがあります" };
     }
-    const phaseDeadline = new Date(Date.now() + LIVE_ROOM_TIMING.interludeMs).toISOString();
-    const { data, error } = await supabase
+    if (input.groupCount < 1) {
+      return { ok: false, reason: "組数は1以上にしてください" };
+    }
+    const neededTopics = input.groupCount * ROUNDS_PER_LIVE_DEFAULT;
+
+    let entries: Pick<TopicBankRow, "id" | "body" | "format">[];
+    if (input.topicSelection.mode === "random") {
+      entries = await pickRandomTopicBankEntries(neededTopics);
+    } else {
+      const ids = input.topicSelection.topicBankIds;
+      const { data } = await supabase
+        .from("topic_bank")
+        .select("id, body, format")
+        .in("id", ids);
+      entries = (data ?? []) as Pick<TopicBankRow, "id" | "body" | "format">[];
+    }
+    if (entries.length < neededTopics) {
+      return { ok: false, reason: `お題が足りません（${neededTopics}件必要）` };
+    }
+
+    const actorId = (await supabase.auth.getUser()).data.user?.id ?? null;
+    const { data: liveRow, error: liveError } = await supabase
       .from("lives")
       .insert({
-        scheduled_at: new Date().toISOString(),
-        current_phase: "interlude",
-        phase_deadline: phaseDeadline,
+        scheduled_at: input.scheduledAt,
+        current_phase: "scheduled",
+        title: input.title || null,
+        description: input.description || null,
+        max_players: input.maxPlayers,
+        planned_group_count: input.groupCount,
+        reception_starts_at: input.receptionStartsAt,
+        reception_ends_at: input.receptionEndsAt,
+        created_by: actorId,
       })
       .select()
       .single();
+    if (liveError || !liveRow) {
+      return { ok: false, reason: liveError?.message ?? "ライブの作成に失敗しました" };
+    }
+    const live = liveRow as LiveRow;
+
+    const { error: topicError } = await supabase.from("topics").insert(
+      entries.slice(0, neededTopics).map((entry) => ({
+        live_id: live.id,
+        body: entry.body,
+        format: entry.format,
+        topic_bank_id: entry.id,
+      })),
+    );
+    if (topicError) {
+      return { ok: false, reason: topicError.message };
+    }
+
+    await logAdminAction({
+      action: "live_prepared",
+      targetType: "lives",
+      targetId: live.id,
+      detail: { title: input.title, maxPlayers: input.maxPlayers, groupCount: input.groupCount },
+    });
+
+    const children = await fetchLiveChildren(live.id);
+    const profiles = await fetchProfilesFor(children.participants);
+    set({ live, ...children, profiles, error: null });
+    await subscribeLiveChannels(live.id);
+    return { ok: true };
+  },
+
+  // 「参加受付を開始する」：旧startLive()のinsert部分をupdateに置き換えただけで、
+  // 以降のフェーズ自動進行(interlude→opening、advanceIfDue)は無改造で流用する。
+  openReception: async () => {
+    const { live } = get();
+    if (!live || live.current_phase !== "scheduled") return;
+    const phaseDeadline = new Date(Date.now() + LIVE_ROOM_TIMING.interludeMs).toISOString();
+    const { error } = await updateLive(live.id, {
+      current_phase: "interlude",
+      phase_deadline: phaseDeadline,
+    });
     if (error) {
       set({ error: error.message });
       return;
     }
-    set({ live: data as LiveRow, error: null });
-    await subscribeLiveChannels((data as LiveRow).id);
+    await logAdminAction({ action: "reception_opened", targetType: "lives", targetId: live.id });
+  },
+
+  // 「（もう一度）ランダムに振り分ける」：旧confirmGroupingAndBeginの前半部分
+  // （組分けのみ）。お題選定・turns作成・フェーズ遷移は行わない（beginGameへ分離）。
+  randomizeGroups: async () => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const groupCount = live.planned_group_count ?? 1;
+
+    const { data: participantsData, error: participantsError } = await supabase
+      .from("participants")
+      .select("*")
+      .eq("live_id", live.id);
+    if (participantsError) return { ok: false, reason: participantsError.message };
+    const participants = (participantsData ?? []) as ParticipantRow[];
+
+    const playerParticipants = participants.filter((p) => p.preferred_role === "player");
+    if (playerParticipants.length === 0) {
+      return { ok: false, reason: "プレイヤー希望の参加者がいません" };
+    }
+
+    const groupedIds = assignParticipantsToGroups(
+      playerParticipants.map((p) => p.id),
+      groupCount,
+    );
+
+    // 既存のgroups行があれば再利用する（「もう一度振り分ける」で毎回組を
+    // 作り直すとturns.group_idの参照が壊れるため、group_order昇順で既存行に対応させる）。
+    let groupRows = get().groups.filter((g) => g.live_id === live.id);
+    if (groupRows.length < groupCount) {
+      const { data: newGroups, error: groupError } = await supabase
+        .from("groups")
+        .insert(
+          Array.from({ length: groupCount - groupRows.length }, (_, i) => ({
+            live_id: live.id,
+            group_order: groupRows.length + i + 1,
+          })),
+        )
+        .select();
+      if (groupError || !newGroups) {
+        return { ok: false, reason: groupError?.message ?? "組の作成に失敗しました" };
+      }
+      groupRows = [...groupRows, ...(newGroups as GroupRow[])].sort(
+        (a, b) => a.group_order - b.group_order,
+      );
+    }
+
+    // まずプレイヤー希望者全員をaudience/group_id:nullへ一旦戻し、
+    // 新しい割り当てだけを反映する（前回の手動変更を確実に上書きするため）。
+    await Promise.all(
+      playerParticipants.map((p) =>
+        supabase.from("participants").update({ group_id: null, role: "audience" }).eq("id", p.id),
+      ),
+    );
+    await Promise.all(
+      groupedIds.flatMap((memberIds, i) =>
+        memberIds.map((participantId) =>
+          supabase
+            .from("participants")
+            .update({ group_id: groupRows[i].id, role: "player" })
+            .eq("id", participantId),
+        ),
+      ),
+    );
+
+    await logAdminAction({
+      action: "groups_randomized",
+      targetType: "lives",
+      targetId: live.id,
+      detail: { groupCount, playerCount: playerParticipants.length },
+    });
+
+    const children = await fetchLiveChildren(live.id);
+    const profiles = await fetchProfilesFor(children.participants);
+    set({ ...children, profiles, error: null });
+    return { ok: true };
+  },
+
+  // 参加者一覧の組選択プルダウンから呼ぶ、個別の手動組変更。即時保存。
+  setParticipantGroup: async (participantId, groupId) => {
+    const { error } = await supabase
+      .from("participants")
+      .update({ group_id: groupId, role: groupId ? "player" : "audience" })
+      .eq("id", participantId);
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    await logAdminAction({
+      action: "participant_group_changed",
+      targetType: "participants",
+      targetId: participantId,
+      detail: { groupId },
+    });
+    const { live } = get();
+    if (live) {
+      const children = await fetchLiveChildren(live.id);
+      const profiles = await fetchProfilesFor(children.participants);
+      set({ ...children, profiles });
+    }
+  },
+
+  // 組分け確認画面でのお題変更（ランダム再抽選 or 手動選択、どちらも呼び出し側で
+  // 選んだ1件のtopic_bank行をここに渡す）。locked=true（既にturnsに紐づいて
+  // 参加者へ公開済み）の場合の確認ダイアログはUI側の責務とする。
+  changeTopicAssignment: async (topicId, entry) => {
+    const { error } = await supabase
+      .from("topics")
+      .update({ body: entry.body, format: entry.format, topic_bank_id: entry.id })
+      .eq("id", topicId);
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    await logAdminAction({
+      action: "topic_changed",
+      targetType: "topics",
+      targetId: topicId,
+      detail: { newTopicBankId: entry.id },
+    });
+    const { live } = get();
+    if (live) {
+      const children = await fetchLiveChildren(live.id);
+      set({ topics: children.topics });
+    }
+  },
+
+  sendAnnouncement: async (message, scope) => {
+    const { live } = get();
+    if (!live) return;
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const { error } = await updateLive(live.id, {
+      announcement_message: trimmed,
+      announcement_scope: scope,
+      announcement_sent_at: new Date().toISOString(),
+    });
+    if (error) {
+      set({ error: error.message });
+      return;
+    }
+    await logAdminAction({
+      action: "announcement_sent",
+      targetType: "lives",
+      targetId: live.id,
+      detail: { message: trimmed, scope },
+    });
+  },
+
+  clearAnnouncement: async () => {
+    const { live } = get();
+    if (!live) return;
+    await updateLive(live.id, { announcement_message: null });
+  },
+
+  // 「ゲームを開始する」：旧confirmGroupingAndBeginの後半部分。準備画面で既に
+  // 作成済みのtopics（live_id紐づけ）とrandomizeGroupsで確定済みのgroups/participants
+  // を使ってturnsを作成し、topic_revealへ遷移する。以降のゲーム進行は一切変更しない。
+  beginGame: async () => {
+    const { live, groups } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+
+    const { data: participantsData } = await supabase
+      .from("participants")
+      .select("*")
+      .eq("live_id", live.id)
+      .eq("role", "player");
+    const players = (participantsData ?? []) as ParticipantRow[];
+    if (players.length === 0) {
+      return { ok: false, reason: "組分けされたプレイヤーがいません" };
+    }
+
+    const { data: topicRows } = await supabase
+      .from("topics")
+      .select("*")
+      .eq("live_id", live.id)
+      .order("created_at", { ascending: true });
+    const topics = (topicRows ?? []) as TopicRow[];
+    const groupCount = groups.length || live.planned_group_count || 1;
+    const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
+    if (topics.length < neededTopics) {
+      return { ok: false, reason: "お題の準備が不足しています" };
+    }
+
+    const sortedGroups = [...groups].sort((a, b) => a.group_order - b.group_order);
+    const turnsToInsert: {
+      live_id: string;
+      round: number;
+      group_id: string;
+      topic_id: string;
+      status: "pending" | "active";
+    }[] = [];
+    let topicCursor = 0;
+    for (let round = 1; round <= ROUNDS_PER_LIVE_DEFAULT; round += 1) {
+      for (const group of sortedGroups) {
+        turnsToInsert.push({
+          live_id: live.id,
+          round,
+          group_id: group.id,
+          topic_id: topics[topicCursor].id,
+          status: "pending",
+        });
+        topicCursor += 1;
+      }
+    }
+    const { data: turnRows, error: turnError } = await supabase
+      .from("turns")
+      .insert(turnsToInsert)
+      .select();
+    if (turnError || !turnRows) {
+      return { ok: false, reason: turnError?.message ?? "ターンの作成に失敗しました" };
+    }
+
+    // 使用が確定したお題だけlocked=trueにする（実際にturnsに紐づいた分のみ）。
+    await supabase
+      .from("topics")
+      .update({ locked: true })
+      .in("id", turnsToInsert.map((t) => t.topic_id));
+
+    const firstTurn = orderedTurns(turnRows as TurnRow[], sortedGroups)[0];
+    await supabase.from("turns").update({ status: "active" }).eq("id", firstTurn.id);
+
+    await logAdminAction({
+      action: "game_started",
+      targetType: "lives",
+      targetId: live.id,
+      detail: { playerCount: players.length, groupCount },
+    });
+
+    const children = await fetchLiveChildren(live.id);
+    const profiles = await fetchProfilesFor(children.participants);
+    set({ ...children, profiles, error: null });
+
+    await updateLive(live.id, {
+      current_turn_id: firstTurn.id,
+      current_phase: "topic_reveal",
+      phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
+      answering_paused: false,
+      answering_remaining_ms: null,
+    });
+    await refreshAnswersForTurn(firstTurn.id);
+    return { ok: true };
   },
 
   closeLive: async () => {
     const { live } = get();
     if (!live) return;
-    const { error } = await supabase
+    // 終了ボタン連打で二重実行されないよう、対象をcurrent_phase<>'closed'に絞る。
+    // 既に他の呼び出し（別タブ等）でclosed済みなら対象0件で何も起きない。
+    const { data, error } = await supabase
       .from("lives")
-      .update({ current_phase: "closed", phase_deadline: null })
-      .eq("id", live.id);
+      .update({ current_phase: "closed", phase_deadline: null, ended_at: new Date().toISOString() })
+      .eq("id", live.id)
+      .neq("current_phase", "closed")
+      .select();
     if (error) {
       set({ error: error.message });
       return;
     }
+    if (!data || data.length === 0) {
+      // 既に終了済み（二重クリック等）。UIだけ「開始前」に戻す。
+      cleanupChannels();
+      set({
+        live: null,
+        participants: [],
+        profiles: [],
+        groups: [],
+        topics: [],
+        turns: [],
+        answers: [],
+        scores: [],
+        resolvedAnswers: [],
+        resolvedScoresByAnswer: {},
+        error: null,
+      });
+      return;
+    }
+    await logAdminAction({ action: "live_closed", targetType: "lives", targetId: live.id });
     cleanupChannels();
     useLiveBotStore.getState().removeAllBots();
     // closed状態の行を持ち続けると画面が「開始前」に戻らない(!liveでのみ判定しているため)。
@@ -759,119 +1132,5 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       resolvedScoresByAnswer: {},
       error: null,
     });
-  },
-
-  confirmGroupingAndBegin: async (groupCount: number) => {
-    const { live } = get();
-    if (!live) return;
-    // storeのparticipantsはRealtime経由の反映を待つため、直前に参加したボット等が
-    // 間に合っていない可能性がある。組分け確定の瞬間にDBから直接取り直す。
-    const { data: participantsData, error: participantsError } = await supabase
-      .from("participants")
-      .select("*")
-      .eq("live_id", live.id);
-    if (participantsError) {
-      set({ error: participantsError.message });
-      return;
-    }
-    const participants = (participantsData ?? []) as ParticipantRow[];
-    if (participants.length === 0) {
-      set({ error: "参加者がまだいません" });
-      return;
-    }
-    set({ participants });
-
-    // プレイヤー希望(preferred_role='player')の人だけを組分け対象にする。
-    // 観客希望の人はrole='audience'のまま(採点はできるが母数には含まれない挙動は変わらない)。
-    const playerParticipants = participants.filter((p) => p.preferred_role === "player");
-    if (playerParticipants.length === 0) {
-      set({ error: "プレイヤー希望の参加者がいません" });
-      return;
-    }
-
-    const groupedIds = assignParticipantsToGroups(
-      playerParticipants.map((p) => p.id),
-      groupCount,
-    );
-    const topicBodies = pickTopicBodies(groupCount * ROUNDS_PER_LIVE_DEFAULT);
-    if (topicBodies.length < groupCount * ROUNDS_PER_LIVE_DEFAULT) {
-      set({ error: "お題の在庫が足りません" });
-      return;
-    }
-
-    const { data: groupRows, error: groupError } = await supabase
-      .from("groups")
-      .insert(
-        Array.from({ length: groupCount }, (_, i) => ({
-          live_id: live.id,
-          group_order: i + 1,
-        })),
-      )
-      .select();
-    if (groupError || !groupRows) {
-      set({ error: groupError?.message ?? "組の作成に失敗しました" });
-      return;
-    }
-
-    const { data: topicRows, error: topicError } = await supabase
-      .from("topics")
-      .insert(topicBodies.map((body) => ({ live_id: live.id, body })))
-      .select();
-    if (topicError || !topicRows) {
-      set({ error: topicError?.message ?? "お題の作成に失敗しました" });
-      return;
-    }
-
-    // 参加者をgroup_id・role='player'に更新
-    await Promise.all(
-      groupedIds.flatMap((memberIds, i) =>
-        memberIds.map((participantId) =>
-          supabase
-            .from("participants")
-            .update({ group_id: (groupRows as GroupRow[])[i].id, role: "player" })
-            .eq("id", participantId),
-        ),
-      ),
-    );
-
-    // ターン(round × group)を作成
-    const turnsToInsert: { live_id: string; round: number; group_id: string; topic_id: string; status: "pending" | "active" }[] = [];
-    let topicCursor = 0;
-    for (let round = 1; round <= ROUNDS_PER_LIVE_DEFAULT; round += 1) {
-      for (const group of groupRows as GroupRow[]) {
-        turnsToInsert.push({
-          live_id: live.id,
-          round,
-          group_id: group.id,
-          topic_id: (topicRows as TopicRow[])[topicCursor].id,
-          status: "pending",
-        });
-        topicCursor += 1;
-      }
-    }
-    const { data: turnRows, error: turnError } = await supabase
-      .from("turns")
-      .insert(turnsToInsert)
-      .select();
-    if (turnError || !turnRows) {
-      set({ error: turnError?.message ?? "ターンの作成に失敗しました" });
-      return;
-    }
-
-    const firstTurn = orderedTurns(turnRows as TurnRow[], groupRows as GroupRow[])[0];
-    await supabase.from("turns").update({ status: "active" }).eq("id", firstTurn.id);
-
-    const children = await fetchLiveChildren(live.id);
-    const profiles = await fetchProfilesFor(children.participants);
-    set({ ...children, profiles, error: null });
-
-    await updateLive(live.id, {
-      current_turn_id: firstTurn.id,
-      current_phase: "topic_reveal",
-      phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
-      answering_paused: false,
-      answering_remaining_ms: null,
-    });
-    await refreshAnswersForTurn(firstTurn.id);
   },
 }));

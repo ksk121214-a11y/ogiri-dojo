@@ -26,6 +26,22 @@ export interface LiveRow {
   // しばらく見せる→間を置く）が終わるまでの締切時刻（2026-08-16追加）。
   reveal_sequence_until: string | null;
   created_at: string;
+  // 運営者専用管理画面（第1段階）で追加した予定管理・準備用の列。
+  // sequence_numberは「第n回開催」を表す自動連番（liveTicketNo.tsで#0001形式に変換）。
+  sequence_number: number;
+  title: string | null;
+  description: string | null;
+  // プレイヤーの最大参加人数。nullなら無制限（従来どおりの挙動）。
+  max_players: number | null;
+  planned_group_count: number | null;
+  reception_starts_at: string | null;
+  reception_ends_at: string | null;
+  results_published: boolean;
+  ended_at: string | null;
+  announcement_message: string | null;
+  announcement_scope: "player" | "all" | null;
+  announcement_sent_at: string | null;
+  created_by: string | null;
 }
 
 export interface GroupRow {
@@ -40,6 +56,21 @@ export interface TopicRow {
   body: string;
   format: "text" | "image_caption";
   created_at: string;
+  // 運営者専用管理画面（第1段階）で追加。どのtopic_bank（お題マスター）行から
+  // 選ばれたか（手動追加等でnullのこともある）。
+  topic_bank_id: string | null;
+  // turnsに紐づいた＝参加者に公開済みかどうか。trueになった後の変更は
+  // 管理画面側で確認ダイアログを挟む。
+  locked: boolean;
+}
+
+export interface TopicBankRow {
+  id: string;
+  body: string;
+  format: "text" | "image_caption";
+  is_active: boolean;
+  created_at: string;
+  created_by: string | null;
 }
 
 export type ParticipantRole = "player" | "audience";

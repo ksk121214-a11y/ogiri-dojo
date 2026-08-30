@@ -426,18 +426,22 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     const { live } = get();
     const userId = useAuthStore.getState().user?.id;
     if (!live || !userId) return;
-    const existing = await fetchMyParticipant(live.id, userId);
-    if (existing) {
-      set({ myParticipant: existing });
-      return;
-    }
-    const { data, error } = await supabase
-      .from("participants")
-      .insert({ live_id: live.id, user_id: userId, preferred_role: preferredRole })
-      .select()
-      .single();
+    // 運営者専用管理画面の追加（第1段階）：最大参加人数(lives.max_players)を
+    // Supabase側で安全に守るため、直接INSERTではなくsecurity definer RPC
+    // (join_live)経由にした。RPC内でlives行をfor updateロックしてから
+    // 人数を数えるため、同時押しでも上限を超えない。既存行があれば
+    // on conflictでpreferred_roleだけ更新して返す（二重登録防止、
+    // ページ再読み込み・再接続時も同じ結果になる）。
+    const { data, error } = await supabase.rpc("join_live", {
+      p_live_id: live.id,
+      p_preferred_role: preferredRole,
+    });
     if (error) {
-      set({ error: error.message });
+      const reason =
+        error.message.includes("PLAYER_LIMIT_REACHED")
+          ? "参加人数が上限に達しました"
+          : error.message;
+      set({ error: reason });
       return;
     }
     set({ myParticipant: data as ParticipantRow, error: null });

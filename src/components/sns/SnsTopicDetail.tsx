@@ -93,7 +93,10 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
 
       <div className={`${stadiumStyles.grainPaper} rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
-          <SnsAuthorBadge authorId={topic.authorId} />
+          <SnsAuthorBadge
+            authorId={topic.authorId}
+            reportTarget={{ type: "sns_topic", id: topic.id, body: topic.body }}
+          />
           <div className="flex shrink-0 flex-col items-end gap-1">
             <span className={`${stadiumStyles.grainAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               お題
@@ -164,7 +167,10 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             >
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
-                  <SnsAuthorBadge authorId={answer.authorId} />
+                  <SnsAuthorBadge
+                    authorId={answer.authorId}
+                    reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
+                  />
                   <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
                     {answer.createdAtLabel}
                   </span>

@@ -40,7 +40,7 @@ function toDojoProfile(row: {
   display_name_set: boolean;
   x_username: string | null;
   avatar_url: string | null;
-  is_host: boolean;
+  role: string;
   avatar_icon: string;
   avatar_color: string;
 }): DojoProfile {
@@ -50,7 +50,11 @@ function toDojoProfile(row: {
     displayNameSet: row.display_name_set,
     xUsername: row.x_username,
     avatarUrl: row.avatar_url,
-    isHost: row.is_host,
+    // 2026-08-30: 運営者専用管理画面の追加に伴い、判定の正はis_host列(boolean)から
+    // role列(text、'user'|'admin')に移した（is_host()というDB関数名・
+    // DojoProfile.isHostというフロントのフィールド名は既存呼び出し箇所を
+    // 壊さないためそのまま維持し、中身の判定元だけ差し替える）。
+    isHost: row.role === "admin",
     avatarIcon: row.avatar_icon,
     avatarColor: row.avatar_color,
   };
@@ -59,7 +63,7 @@ function toDojoProfile(row: {
 async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, display_name_set, x_username, avatar_url, is_host, avatar_icon, avatar_color")
+    .select("id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color")
     .eq("id", userId)
     .single();
   if (error || !data) return null;

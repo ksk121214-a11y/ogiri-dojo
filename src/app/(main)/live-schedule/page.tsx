@@ -6,58 +6,29 @@ import { BellGlyph, CalendarAddGlyph } from "@/components/home/icons";
 import LiveCalendar, { type CalendarMark } from "@/components/home/LiveCalendar";
 import { CurrentLiveCard, PreviousLiveCard, UpcomingLiveCard } from "@/components/home/LiveScheduleCard";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
-import {
-  CURRENT_LIVE,
-  CURRENT_LIVE_RECEPTION,
-  PREVIOUS_LIVE,
-  UPCOMING_LIVE,
-} from "@/data/liveScheduleData";
-
-const CALENDAR_MARKS: CalendarMark[] = [
-  {
-    year: Number(CURRENT_LIVE.year),
-    month: Number(CURRENT_LIVE.month),
-    day: Number(CURRENT_LIVE.day),
-    kind: "current",
-    label: "今回",
-  },
-  {
-    year: Number(PREVIOUS_LIVE.year),
-    month: Number(PREVIOUS_LIVE.month),
-    day: Number(PREVIOUS_LIVE.day),
-    kind: "previous",
-    label: "前回",
-  },
-  {
-    year: Number(UPCOMING_LIVE.year),
-    month: Number(UPCOMING_LIVE.month),
-    day: Number(UPCOMING_LIVE.day),
-    kind: "upcoming",
-    label: "次回",
-  },
-];
+import { formatReceptionRange, toLiveScheduleDate } from "@/lib/liveDateFormat";
+import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { useLiveSchedule } from "@/lib/useLiveSchedule";
 
 // 「今回のライブ」の日時からiCalendar(.ics)ファイルを組み立ててダウンロードする。
 // 所要時間は未告知のため、暫定でおおよその目安（2時間）をブロックしている。
-function buildIcsContent(): string {
-  const y = CURRENT_LIVE.year;
-  const m = CURRENT_LIVE.month.padStart(2, "0");
-  const d = CURRENT_LIVE.day.padStart(2, "0");
-  const [hh, mm] = CURRENT_LIVE.time.split(":");
-  const start = `${y}${m}${d}T${hh}${mm}00`;
-  const endHour = String((Number(hh) + 2) % 24).padStart(2, "0");
-  const end = `${y}${m}${d}T${endHour}${mm}00`;
+function buildIcsContent(scheduledAtIso: string, ticketNo: string, reception: string): string {
+  const d = new Date(scheduledAtIso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const start = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}00Z`;
+  const endDate = new Date(d.getTime() + 2 * 60 * 60 * 1000);
+  const end = `${endDate.getUTCFullYear()}${pad(endDate.getUTCMonth() + 1)}${pad(endDate.getUTCDate())}T${pad(endDate.getUTCHours())}${pad(endDate.getUTCMinutes())}00Z`;
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Bakusho Stadium//Live Schedule//JA",
     "BEGIN:VEVENT",
-    `UID:ogiri-live-${y}${m}${d}@bakusho-stadium`,
+    `UID:ogiri-live-${scheduledAtIso}@bakusho-stadium`,
     `DTSTAMP:${start}`,
     `DTSTART:${start}`,
     `DTEND:${end}`,
-    `SUMMARY:爆笑スタジアム 大喜利ライブ ${CURRENT_LIVE.ticketNo}`,
-    `DESCRIPTION:受付${CURRENT_LIVE_RECEPTION}`,
+    `SUMMARY:爆笑スタジアム 大喜利ライブ ${ticketNo}`,
+    `DESCRIPTION:受付${reception}`,
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");
@@ -69,21 +40,46 @@ function buildIcsContent(): string {
 // 「結果を見る」「詳細を見る」は先の画面がまだ無いため、押せる体裁のリンクにはしていない
 // （LiveScheduleCard.tsx側で対応）。「開催通知」トグルは見た目のON/OFFのみで、
 // 実際のプッシュ通知の仕組みとはまだ連携していないダミー機能。
+// 2026-08-30（追記）：運営者専用管理画面の追加（第2段階）。日付・番号のハードコード
+// 定数(src/data/liveScheduleData.ts)をやめ、useLiveSchedule()経由でlivesテーブルの
+// 実データを表示するようにした。管理画面でライブ予定を変更すると、ここも
+// （画面フォーカス復帰時などに）自動で新しい内容へ切り替わる。
 export default function LiveSchedulePage() {
   const [notifyOn, setNotifyOn] = useState(true);
+  const { previous, current, upcoming, loading } = useLiveSchedule();
+
+  const currentTicketNo = current ? formatLiveTicketNo(current.sequence_number) : null;
+  const currentReception = current
+    ? formatReceptionRange(current.reception_starts_at, current.reception_ends_at)
+    : null;
 
   const handleAddToCalendar = () => {
-    const ics = buildIcsContent();
+    if (!current || !currentTicketNo || !currentReception) return;
+    const ics = buildIcsContent(current.scheduled_at, currentTicketNo, currentReception);
     const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ogiri-live-${CURRENT_LIVE.year}${CURRENT_LIVE.month.padStart(2, "0")}${CURRENT_LIVE.day.padStart(2, "0")}.ics`;
+    a.download = `ogiri-live-${current.scheduled_at.slice(0, 10)}.ics`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   };
+
+  const calendarMarks: CalendarMark[] = [];
+  if (current) {
+    const d = toLiveScheduleDate(current.scheduled_at);
+    calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "current", label: "今回" });
+  }
+  if (previous) {
+    const d = toLiveScheduleDate(previous.scheduled_at);
+    calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "previous", label: "前回" });
+  }
+  if (upcoming) {
+    const d = toLiveScheduleDate(upcoming.scheduled_at);
+    calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "upcoming", label: "次回" });
+  }
 
   return (
     <StadiumPageShell contentTheme="concrete">
@@ -92,19 +88,43 @@ export default function LiveSchedulePage() {
         <div className="mt-2 h-[3px] w-full bg-[var(--ink)]" aria-hidden />
       </div>
 
-      <PreviousLiveCard date={PREVIOUS_LIVE} />
-      <CurrentLiveCard live={CURRENT_LIVE} reception={CURRENT_LIVE_RECEPTION} />
-      <UpcomingLiveCard live={UPCOMING_LIVE} />
+      {!loading && (
+        <>
+          {previous && <PreviousLiveCard date={toLiveScheduleDate(previous.scheduled_at)} />}
+
+          {current && currentTicketNo && currentReception ? (
+            <CurrentLiveCard
+              live={{ ...toLiveScheduleDate(current.scheduled_at), ticketNo: currentTicketNo }}
+              reception={currentReception}
+            />
+          ) : (
+            <p className="rounded-xl border border-[var(--ink)]/20 bg-[var(--paper)]/70 px-4 py-3 text-center font-sans text-sm text-[var(--ink)]/70">
+              次回ライブは現在準備中です
+            </p>
+          )}
+
+          {upcoming ? (
+            <UpcomingLiveCard
+              live={{ ...toLiveScheduleDate(upcoming.scheduled_at), ticketNo: formatLiveTicketNo(upcoming.sequence_number) }}
+            />
+          ) : (
+            <p className="rounded-xl border border-[var(--ink)]/20 bg-[var(--paper)]/70 px-4 py-3 text-center font-sans text-sm text-[var(--ink)]/70">
+              次回ライブは現在準備中です
+            </p>
+          )}
+        </>
+      )}
 
       <div className="rounded-2xl bg-[var(--paper)]/70 p-4">
-        <LiveCalendar marks={CALENDAR_MARKS} />
+        <LiveCalendar marks={calendarMarks} />
       </div>
 
       <div className="flex gap-2">
         <button
           type="button"
           onClick={handleAddToCalendar}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5"
+          disabled={!current}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <CalendarAddGlyph />
           カレンダーに追加

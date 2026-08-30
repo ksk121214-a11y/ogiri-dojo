@@ -288,7 +288,10 @@ function TopicFeedList({
             }
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge authorId={topic.authorId} />
+              <SnsAuthorBadge
+                authorId={topic.authorId}
+                reportTarget={{ type: "sns_topic", id: topic.id, body: topic.body }}
+              />
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <span
                   className={
@@ -362,7 +365,10 @@ function AnswerFeedList({
             }
           >
             <div className="flex items-center justify-between gap-2">
-              <SnsAuthorBadge authorId={answer.authorId} />
+              <SnsAuthorBadge
+                authorId={answer.authorId}
+                reportTarget={{ type: "sns_answer", id: answer.id, body: answer.body }}
+              />
               <span className={isStadium ? "shrink-0 font-sans text-[10px] text-[var(--ink)]/60" : "shrink-0 font-sans text-[10px] text-dojo-dark-brown"}>
                 {answer.createdAtLabel}
               </span>

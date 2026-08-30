@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 import InterludeScreen from "@/components/live-demo/InterludeScreen";
 import SoundToggle from "@/components/live-demo/SoundToggle";
+import AnnouncementBanner from "@/components/live-room/AnnouncementBanner";
 import AudienceAnsweringView from "@/components/live-room/AudienceAnsweringView";
 import FinalResultView from "@/components/live-room/FinalResultView";
 import GroupResultView from "@/components/live-room/GroupResultView";
@@ -155,6 +156,7 @@ export default function LivePage() {
     return (
       <main className="relative h-dvh w-full overflow-hidden bg-dojo-stage-dark">
         <DisplayNameSetupModal />
+        <AnnouncementBanner />
         <AnimatePresence mode="wait">
           {live.current_phase === "interlude" ? (
             <InterludeScreen key="interlude" />
@@ -175,8 +177,9 @@ export default function LivePage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
+    <div className="relative mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
       <DisplayNameSetupModal />
+      <AnnouncementBanner />
       <SoundToggle />
       <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
         爆笑スタジアムライブ
@@ -191,6 +194,22 @@ export default function LivePage() {
         <>
           <p className="font-sans text-sm text-dojo-dark-brown">
             まだライブは開演していません。司会の開始をお待ちください。
+          </p>
+          <Link
+            href="/"
+            className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+          >
+            ホームに戻る
+          </Link>
+        </>
+      ) : live.current_phase === "scheduled" ? (
+        // 運営者専用管理画面の追加（第1段階）：運営者が準備中（=まだ「参加受付を
+        // 開始する」を押していない）の間は、参加登録受付(opening)より前の
+        // 状態として、既存の「!live」ケースと同じ体裁で案内する。
+        <>
+          <p className="font-sans text-sm text-dojo-dark-brown">
+            {live.title ? `「${live.title}」は` : "次回のライブは"}
+            ただいま準備中です。参加受付が始まるまでお待ちください。
           </p>
           <Link
             href="/"

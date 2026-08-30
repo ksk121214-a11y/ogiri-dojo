@@ -35,7 +35,10 @@ import { fetchActiveLive, fetchMyParticipant } from "@/store/useLiveFollowerStor
 // 状態を破棄する。「結果発表中(final_result)」の間はまだcurrent_phaseがclosedに
 // なっていないため、fetchActiveLive()は引き続きそのライブを返し続け、
 // 半券は切れたままになる（要件どおり、結果発表とcloseは区別される）。
-export type LiveJoinStatus = "idle" | "checking" | "detaching" | "error" | "joined";
+// 2026-08-30:「preparing」は運営者専用管理画面の追加（第1段階）で増えた状態。
+// current_phase==='scheduled'（運営者がまだ「参加受付を開始する」を押していない）
+// の間はボタンを押させない。
+export type LiveJoinStatus = "idle" | "checking" | "detaching" | "error" | "joined" | "preparing";
 
 // useSyncExternalStoreのsubscribe引数：liveEntryStorageは変更を通知する仕組みを
 // 持たない単純なlocalStorageラッパーのため、購読すべきイベントが無い（値が変わる
@@ -101,6 +104,16 @@ export function useLiveJoinFlow() {
       // まだ次のライブが案内されていない。いずれにせよ入場済み状態は無効。
       clearLiveEntry();
       if (!isBusy()) setStatus("idle");
+      return;
+    }
+
+    // 2026-08-30: 運営者専用管理画面の追加（第1段階）。current_phase==='scheduled'は
+    // 運営者がまだ「参加受付を開始する」を押していない準備中の状態。この間は
+    // 参加ボタンを押せないようにする（要件：「準備が完了するまでは参加ボタンを
+    // 押せないようにする」）。
+    if (live.current_phase === "scheduled") {
+      clearLiveEntry();
+      if (!isBusy()) setStatus("preparing");
       return;
     }
 
@@ -190,6 +203,8 @@ export function useLiveJoinFlow() {
 
   const handleJoinClick = async () => {
     if (inFlightRef.current) return; // 連打防止：通信中・アニメーション中・再入場中は無視
+    // 準備中はJoinLiveButton側でボタンをdisabledにしているが、念のため二重に防ぐ。
+    if (effectiveStatus === "preparing") return;
     inFlightRef.current = true;
 
     if (effectiveStatus === "joined") {

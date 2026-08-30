@@ -183,6 +183,8 @@ function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: Topi
     body,
     format: "text",
     created_at: new Date().toISOString(),
+    topic_bank_id: null,
+    locked: false,
   };
   const turn: TurnRow = {
     id: genId("turn"),
@@ -503,6 +505,19 @@ export const useLiveDesignPreviewStore = create<LiveDesignPreviewState>()((set, 
       answering_remaining_ms: null,
       reveal_sequence_until: null,
       created_at: new Date().toISOString(),
+      sequence_number: 0,
+      title: null,
+      description: null,
+      max_players: null,
+      planned_group_count: null,
+      reception_starts_at: null,
+      reception_ends_at: null,
+      results_published: false,
+      ended_at: null,
+      announcement_message: null,
+      announcement_scope: null,
+      announcement_sent_at: null,
+      created_by: null,
     };
     set({
       live,

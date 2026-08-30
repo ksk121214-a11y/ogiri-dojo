@@ -48,6 +48,12 @@ export default function OpeningView({
 
   if (!live) return null;
 
+  // 運営者専用管理画面の追加（第1段階）：最大参加人数はプレイヤーのみに適用し、
+  // 観客には適用しない。上限判定はUIの見た目を早く更新するための表示用であり、
+  // 実際の安全な上限チェックはjoinLive内のRPC(join_live)がSupabase側で行う。
+  const playerCount = participants.filter((p) => p.preferred_role === "player").length;
+  const isPlayerFull = live.max_players != null && playerCount >= live.max_players;
+
   const handleJoin = async (role: ParticipantRole) => {
     if (role === "player") playSfx("joinAsPlayer");
     setJoining(true);
@@ -72,23 +78,31 @@ export default function OpeningView({
       </p>
 
       {!myParticipant ? (
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            disabled={joining}
-            onClick={() => handleJoin("player")}
-            className="rounded-full bg-[#ff3b5b] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {joining ? "参加処理中…" : "プレイヤーとして参加する"}
-          </button>
-          <button
-            type="button"
-            disabled={joining}
-            onClick={() => handleJoin("audience")}
-            className="rounded-full border border-white/40 px-6 py-3 font-sans text-sm font-bold text-white transition hover:border-[#ffcf4a] hover:text-[#ffcf4a] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {joining ? "参加処理中…" : "観客として参加する"}
-          </button>
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              disabled={joining || isPlayerFull}
+              onClick={() => handleJoin("player")}
+              title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
+              className="rounded-full bg-[#ff3b5b] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {joining ? "参加処理中…" : isPlayerFull ? "満員です" : "プレイヤーとして参加する"}
+            </button>
+            <button
+              type="button"
+              disabled={joining}
+              onClick={() => handleJoin("audience")}
+              className="rounded-full border border-white/40 px-6 py-3 font-sans text-sm font-bold text-white transition hover:border-[#ffcf4a] hover:text-[#ffcf4a] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {joining ? "参加処理中…" : "観客として参加する"}
+            </button>
+          </div>
+          {isPlayerFull && (
+            <p className="font-sans text-xs text-[#ffcf4a]">
+              参加人数が上限に達しました。観客として参加できます。
+            </p>
+          )}
         </div>
       ) : (
         <p className="mt-6 font-sans text-sm text-[#ffcf4a]">
