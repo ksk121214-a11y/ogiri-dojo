@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 
+import AvatarGlyph from "@/components/app/AvatarGlyph";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton, { type ReportTargetType } from "@/components/app/ReportButton";
 import { getRankByMeter } from "@/data/collectionData";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
+import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -79,7 +81,21 @@ export default function SnsAuthorBadge({
           className="flex shrink-0 items-center justify-center"
           style={{ width: size, height: size, fontSize: size * 0.75 }}
         >
-          {author?.emoji ?? (realAuthor ? "🎤" : "🎭")}
+          {author ? (
+            author.emoji
+          ) : realAuthor ? (
+            // 2026-08-30: 実ユーザーの投稿者はマイク絵文字(🎤)固定になっていたのを、
+            // 本人がマイページで設定した実際の絵柄・色（SnsAuthorProfile.tsxの
+            // プロフィールページと同じ経路）で表示するようにした。
+            <AvatarGlyph
+              iconSrc={getAvatarIconSrc(realAuthor.avatarIcon)}
+              silhouetteSrc={getAvatarSilhouetteSrc(realAuthor.avatarIcon)}
+              color={realAuthor.avatarColor}
+              size={size}
+            />
+          ) : (
+            "🎭"
+          )}
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
