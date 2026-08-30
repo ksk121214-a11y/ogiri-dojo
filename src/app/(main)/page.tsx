@@ -8,9 +8,8 @@ import JoinLiveButton from "@/components/home/JoinLiveButton";
 import NextLiveTicket from "@/components/home/NextLiveTicket";
 import StadiumAppShell from "@/components/home/StadiumAppShell";
 import { useLiveJoinFlow } from "@/components/home/useLiveJoinFlow";
-import { formatReceptionRange, toLiveScheduleDate } from "@/lib/liveDateFormat";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
-import { useLiveSchedule } from "@/lib/useLiveSchedule";
+import { formatScheduleReception, toScheduleEntryDate } from "@/lib/liveDateFormat";
+import { useLiveSchedulePlan } from "@/lib/useLiveSchedulePlan";
 import { useAuthStore } from "@/store/useAuthStore";
 
 // ホーム画面：地下の小さなお笑いライブハウス・インディーズイベントのフライヤーをイメージした
@@ -25,12 +24,15 @@ import { useAuthStore } from "@/store/useAuthStore";
 // 2026-08-30（追記）：運営者専用管理画面の追加（第2段階）。日付・番号のハードコード
 // 定数(src/data/liveScheduleData.ts)をやめ、useLiveSchedule()経由でlivesテーブルの
 // 実データを表示するようにした。
+// 2026-08-30（さらに追記）：「前回/今回/次回/ホーム次回」の自動判定(useLiveSchedule)を
+// やめ、運営が/admin/scheduleで手動割り当てるlive_schedule_entries（実際のゲーム進行用
+// livesテーブルとは別の、表示専用データ）から取得するように変更した。
 export default function Home() {
   const { status, error, handleJoinClick, handleAnimationEnd } = useLiveJoinFlow();
   const stubVisible = status !== "joined";
   const isDetaching = status === "detaching";
   const authLoading = useAuthStore((s) => s.loading);
-  const { current } = useLiveSchedule();
+  const { homeUpcoming } = useLiveSchedulePlan();
 
   return (
     <StadiumAppShell bottomNav={<BottomNavigation />}>
@@ -40,11 +42,11 @@ export default function Home() {
       <div id="next-live" className="scroll-mt-4">
         <NextLiveTicket
           live={
-            current
+            homeUpcoming
               ? {
-                  ...toLiveScheduleDate(current.scheduled_at),
-                  ticketNo: formatLiveTicketNo(current.sequence_number),
-                  reception: formatReceptionRange(current.reception_starts_at, current.reception_ends_at),
+                  ...toScheduleEntryDate(homeUpcoming.event_date, homeUpcoming.start_time),
+                  ticketNo: homeUpcoming.ticket_no,
+                  reception: formatScheduleReception(homeUpcoming.reception_time),
                 }
               : null
           }

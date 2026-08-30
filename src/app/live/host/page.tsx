@@ -42,6 +42,9 @@ function fromDatetimeLocalValue(value: string): string | null {
 // 「ライブ準備 → 参加受付開始 → 組分け確認・お題確認 → ゲーム開始 → 進行監視 → 終了」の
 // 一連の流れをこの1画面（/live/host）で扱う。ゲーム進行中の表示・操作（お題発表〜最終結果、
 // 終了ボタン）は既存の実装をそのまま維持している。
+// 2026-08-30（追記）：この画面は運営者しか見ないため、公開サイトの装飾的なトンマナ
+// （筆文字フォント・ブランドカラー・中央寄せの縦長レイアウト）をやめ、操作内容が
+// 一目で分かるニュートラルな管理画面調のデザインに変更した（ロジックは無変更）。
 export default function LiveHostPage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
@@ -92,7 +95,7 @@ export default function LiveHostPage() {
         <button
           type="button"
           onClick={() => signInWithX()}
-          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
+          className="rounded bg-gray-900 px-5 py-2.5 font-sans text-sm font-bold text-white"
         >
           Xでログイン
         </button>
@@ -123,45 +126,44 @@ export default function LiveHostPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
-      <Link href="/admin" className="self-start font-sans text-xs text-dojo-dark-brown underline">
-        ← 運営者専用管理画面トップへ
-      </Link>
-      <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
-        ライブ準備・操作
-      </p>
+    <div className="mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-3 bg-gray-50 px-4 py-6 text-left font-sans">
+      <div className="flex items-center justify-between">
+        <Link href="/admin" className="text-xs text-gray-500 underline">
+          ← 運営者専用管理画面トップへ
+        </Link>
+        <p className="text-xs font-bold tracking-wide text-gray-400">司会コンソール</p>
+      </div>
 
       {loading ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">状態を確認中…</p>
+        <p className="text-sm text-gray-500">状態を確認中…</p>
       ) : !live ? (
         <PreparationForm />
       ) : (
         <>
-          <p className="font-brush text-xl text-dojo-curtain-red">
-            {live.sequence_number ? `${formatLiveTicketNo(live.sequence_number)} ` : ""}
-            {PHASE_LABEL[live.current_phase] ?? live.current_phase}
-          </p>
-          {live.title && <p className="font-sans text-sm font-bold text-dojo-ink">{live.title}</p>}
-          {remainingSec !== null && (
-            <p className="font-sans text-sm tabular-nums text-dojo-dark-brown">
-              残り{remainingSec}秒
-              {live.answering_paused && "（審査中は一時停止）"}
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-lg font-bold text-gray-900">
+              {live.sequence_number ? `${formatLiveTicketNo(live.sequence_number)} ` : ""}
+              {PHASE_LABEL[live.current_phase] ?? live.current_phase}
             </p>
-          )}
+            {live.title && <p className="mt-0.5 text-sm text-gray-600">{live.title}</p>}
+            {remainingSec !== null && (
+              <p className="mt-1 text-sm font-bold tabular-nums text-gray-700">
+                残り{remainingSec}秒
+                {live.answering_paused && "（審査中は一時停止）"}
+              </p>
+            )}
+          </div>
 
           {live.current_phase === "scheduled" && <ReceptionStartPanel />}
 
-          <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-            <p className="font-sans text-xs font-bold text-dojo-ink">
-              参加者：{participants.length}人
-              {live.max_players != null && (
-                <span className="text-dojo-dark-brown">
-                  （プレイヤー{participants.filter((p) => p.preferred_role === "player").length}/
-                  {live.max_players}人）
-                </span>
-              )}
-            </p>
-            <ul className="mt-1 max-h-32 overflow-y-auto font-sans text-[11px] text-dojo-dark-brown">
+          <Panel title={`参加者：${participants.length}人`}>
+            {live.max_players != null && (
+              <p className="text-xs text-gray-500">
+                プレイヤー{participants.filter((p) => p.preferred_role === "player").length}/
+                {live.max_players}人
+              </p>
+            )}
+            <ul className="mt-2 max-h-32 overflow-y-auto text-xs text-gray-700">
               {participants.map((p) => {
                 const name =
                   hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
@@ -173,13 +175,13 @@ export default function LiveHostPage() {
                   ? `${ROLE_LABEL[p.role] ?? p.role}・組${groupOrder}`
                   : `${ROLE_LABEL[p.preferred_role] ?? p.preferred_role}希望`;
                 return (
-                  <li key={p.id}>
+                  <li key={p.id} className="border-b border-gray-100 py-1 last:border-0">
                     {name}（{statusLabel}）
                   </li>
                 );
               })}
             </ul>
-          </div>
+          </Panel>
 
           {(live.current_phase === "interlude" || live.current_phase === "opening") && (
             <>
@@ -196,52 +198,46 @@ export default function LiveHostPage() {
             live.current_phase === "final_result") && <AnnouncementPanel />}
 
           {live.current_phase === "opening" && turns.length === 0 && (
-            <>
+            <Panel title="ゲーム開始">
               <BotSetupPanel liveId={live.id} />
               <button
                 type="button"
                 onClick={() => beginGame()}
-                className="rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-xs font-bold text-dojo-washi-white"
+                className="mt-2 rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700"
               >
                 ゲームを開始する
               </button>
-            </>
+            </Panel>
           )}
 
           {currentTopic && (
-            <div className="w-full rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/60 p-4">
-              <p className="font-sans text-xs text-dojo-dark-brown">お題</p>
-              <p className="mt-1 font-sans text-base font-bold text-dojo-ink">
-                {currentTopic.body}
-              </p>
-            </div>
+            <Panel title="お題">
+              <p className="text-base font-bold text-gray-900">{currentTopic.body}</p>
+            </Panel>
           )}
 
           {live.current_phase === "answering" && (
-            <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left font-sans text-xs text-dojo-dark-brown">
-              <p>未表示の回答：{queuedCount}件</p>
+            <Panel title="回答状況">
+              <p className="text-xs text-gray-600">未表示の回答：{queuedCount}件</p>
               {activeAnswer ? (
                 <>
-                  <p className="mt-1 font-bold text-dojo-ink">
+                  <p className="mt-1 text-xs font-bold text-gray-900">
                     表示中：{activeAnswer.body}
                   </p>
-                  <p>
+                  <p className="text-xs text-gray-600">
                     採点数：{scores.length}人・合計点：
                     {scores.reduce((sum, s) => sum + s.points, 0)}点
                   </p>
                 </>
               ) : (
-                <p className="mt-1">表示中の回答はありません</p>
+                <p className="mt-1 text-xs text-gray-500">表示中の回答はありません</p>
               )}
-            </div>
+            </Panel>
           )}
 
           {resolvedAnswers.length > 0 && (
-            <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-              <p className="font-sans text-xs font-bold text-dojo-ink">
-                確定済みの回答ログ（{resolvedAnswers.length}件）
-              </p>
-              <ul className="mt-1 max-h-56 overflow-y-auto font-sans text-[11px] text-dojo-dark-brown">
+            <Panel title={`確定済みの回答ログ（${resolvedAnswers.length}件）`}>
+              <ul className="max-h-56 overflow-y-auto text-xs text-gray-700">
                 {[...resolvedAnswers].reverse().map((a) => {
                   const participant = participants.find((p) => p.id === a.participant_id);
                   const name = participant
@@ -263,34 +259,42 @@ export default function LiveHostPage() {
                     })
                     .join("、");
                   return (
-                    <li key={a.id} className="border-b border-dojo-dark-brown/10 py-1 last:border-0">
+                    <li key={a.id} className="border-b border-gray-100 py-1 last:border-0">
                       <p>
                         {groupOrder ? `【組${groupOrder}・${turn?.round}巡目】` : ""}
                         {name}：「{a.body}」→ {a.score_total}点（{a.judge_count}人中{a.top_score_votes}
                         人が3点）
                       </p>
-                      {breakdown && (
-                        <p className="text-dojo-dark-brown/70">採点内訳：{breakdown}</p>
-                      )}
+                      {breakdown && <p className="text-gray-500">採点内訳：{breakdown}</p>}
                     </li>
                   );
                 })}
               </ul>
-            </div>
+            </Panel>
           )}
 
           <button
             type="button"
             disabled={closing}
             onClick={handleCloseLive}
-            className="rounded-full border border-dojo-dark-brown/30 px-5 py-2 font-sans text-xs font-bold text-dojo-dark-brown disabled:opacity-50"
+            className="self-start rounded border border-red-300 px-5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
           >
             {closing ? "終了処理中…" : "ライブを終了する"}
           </button>
         </>
       )}
 
-      {error && <p className="font-sans text-xs text-dojo-deep-crimson">{error}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+// セクションを見出し＋境界線で区切る共通パネル。
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3">
+      <p className="text-xs font-bold text-gray-500">{title}</p>
+      <div className="mt-1.5">{children}</div>
     </div>
   );
 }
@@ -341,141 +345,139 @@ function PreparationForm() {
   };
 
   return (
-    <div className="flex w-full flex-col gap-3 text-left">
-      <p className="text-center font-sans text-sm font-bold text-dojo-ink">
-        ライブ準備画面（次回ライブの設定）
-      </p>
+    <Panel title="ライブ準備（次回ライブの設定）">
+      <div className="flex flex-col gap-3">
+        <LabeledInput label="タイトル">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="例：第721回 定例ライブ"
+            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+          />
+        </LabeledInput>
 
-      <LabeledInput label="タイトル">
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="例：第721回 定例ライブ"
-          className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-        />
-      </LabeledInput>
+        <LabeledInput label="簡単な説明">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+          />
+        </LabeledInput>
 
-      <LabeledInput label="簡単な説明">
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-        />
-      </LabeledInput>
-
-      <LabeledInput label="開始日時">
-        <input
-          type="datetime-local"
-          value={scheduledAt}
-          onChange={(e) => setScheduledAt(e.target.value)}
-          className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-        />
-      </LabeledInput>
-
-      <div className="flex gap-2">
-        <LabeledInput label="受付開始時刻" className="flex-1">
+        <LabeledInput label="開始日時">
           <input
             type="datetime-local"
-            value={receptionStartsAt}
-            onChange={(e) => setReceptionStartsAt(e.target.value)}
-            className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
+            value={scheduledAt}
+            onChange={(e) => setScheduledAt(e.target.value)}
+            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
         </LabeledInput>
-        <LabeledInput label="受付終了時刻" className="flex-1">
-          <input
-            type="datetime-local"
-            value={receptionEndsAt}
-            onChange={(e) => setReceptionEndsAt(e.target.value)}
-            className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-          />
-        </LabeledInput>
-      </div>
 
-      <div className="flex gap-2">
-        <LabeledInput label="最大参加人数（プレイヤー）" className="flex-1">
-          <input
-            type="number"
-            min={1}
-            value={maxPlayers}
-            onChange={(e) => setMaxPlayers(Number(e.target.value))}
-            className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-          />
-        </LabeledInput>
-        <LabeledInput label="組数" className="flex-1">
-          <input
-            type="number"
-            min={1}
-            max={8}
-            value={groupCount}
-            onChange={(e) => setGroupCount(Number(e.target.value))}
-            className="w-full rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-sm"
-          />
-        </LabeledInput>
-      </div>
-
-      <div className="rounded border border-dojo-dark-brown/20 p-2">
-        <p className="font-sans text-xs font-bold text-dojo-ink">
-          お題の選び方（必要数：{neededTopics}件）
-        </p>
-        <div className="mt-1 flex gap-3 font-sans text-xs">
-          <label className="flex items-center gap-1">
+        <div className="flex gap-2">
+          <LabeledInput label="受付開始時刻" className="flex-1">
             <input
-              type="radio"
-              checked={topicMode === "random"}
-              onChange={() => setTopicMode("random")}
+              type="datetime-local"
+              value={receptionStartsAt}
+              onChange={(e) => setReceptionStartsAt(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
-            ランダム選択
-          </label>
-          <label className="flex items-center gap-1">
+          </LabeledInput>
+          <LabeledInput label="受付終了時刻" className="flex-1">
             <input
-              type="radio"
-              checked={topicMode === "manual"}
-              onChange={() => setTopicMode("manual")}
+              type="datetime-local"
+              value={receptionEndsAt}
+              onChange={(e) => setReceptionEndsAt(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
-            手動選択
-          </label>
+          </LabeledInput>
         </div>
-        {topicMode === "manual" && (
-          <div className="mt-2 max-h-40 overflow-y-auto rounded border border-dojo-dark-brown/10">
-            {topicBank.length === 0 ? (
-              <p className="p-2 font-sans text-xs text-dojo-dark-brown">
-                登録済みのお題がありません。先にお題管理画面で追加してください。
-              </p>
-            ) : (
-              topicBank.map((t) => (
-                <label
-                  key={t.id}
-                  className="flex items-center gap-2 border-b border-dojo-dark-brown/5 px-2 py-1 font-sans text-xs last:border-0"
-                >
-                  <input
-                    type="checkbox"
-                    checked={manualTopicIds.includes(t.id)}
-                    onChange={() => toggleManualTopic(t.id)}
-                  />
-                  {t.body}
-                </label>
-              ))
-            )}
-            <p className="p-1 text-right font-sans text-[10px] text-dojo-dark-brown">
-              選択中：{manualTopicIds.length}/{neededTopics}
-            </p>
+
+        <div className="flex gap-2">
+          <LabeledInput label="最大参加人数（プレイヤー）" className="flex-1">
+            <input
+              type="number"
+              min={1}
+              value={maxPlayers}
+              onChange={(e) => setMaxPlayers(Number(e.target.value))}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </LabeledInput>
+          <LabeledInput label="組数" className="flex-1">
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={groupCount}
+              onChange={(e) => setGroupCount(Number(e.target.value))}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </LabeledInput>
+        </div>
+
+        <div className="rounded border border-gray-200 p-2">
+          <p className="text-xs font-bold text-gray-700">
+            お題の選び方（必要数：{neededTopics}件）
+          </p>
+          <div className="mt-1 flex gap-3 text-xs">
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                checked={topicMode === "random"}
+                onChange={() => setTopicMode("random")}
+              />
+              ランダム選択
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="radio"
+                checked={topicMode === "manual"}
+                onChange={() => setTopicMode("manual")}
+              />
+              手動選択
+            </label>
           </div>
-        )}
+          {topicMode === "manual" && (
+            <div className="mt-2 max-h-40 overflow-y-auto rounded border border-gray-200">
+              {topicBank.length === 0 ? (
+                <p className="p-2 text-xs text-gray-500">
+                  登録済みのお題がありません。先にお題管理画面で追加してください。
+                </p>
+              ) : (
+                topicBank.map((t) => (
+                  <label
+                    key={t.id}
+                    className="flex items-center gap-2 border-b border-gray-100 px-2 py-1 text-xs last:border-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={manualTopicIds.includes(t.id)}
+                      onChange={() => toggleManualTopic(t.id)}
+                    />
+                    {t.body}
+                  </label>
+                ))
+              )}
+              <p className="p-1 text-right text-[10px] text-gray-500">
+                選択中：{manualTopicIds.length}/{neededTopics}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {localError && <p className="text-xs text-red-600">{localError}</p>}
+
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={handleSubmit}
+          className="self-start rounded bg-blue-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {submitting ? "保存中…" : "この内容でライブを準備する"}
+        </button>
       </div>
-
-      {localError && <p className="font-sans text-xs text-dojo-deep-crimson">{localError}</p>}
-
-      <button
-        type="button"
-        disabled={submitting}
-        onClick={handleSubmit}
-        className="rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-sm font-bold text-dojo-washi-white disabled:opacity-50"
-      >
-        {submitting ? "保存中…" : "この内容でライブを準備する"}
-      </button>
-    </div>
+    </Panel>
   );
 }
 
@@ -489,7 +491,7 @@ function LabeledInput({
   className?: string;
 }) {
   return (
-    <label className={`flex flex-col gap-1 font-sans text-xs text-dojo-dark-brown ${className}`}>
+    <label className={`flex flex-col gap-1 text-xs text-gray-600 ${className}`}>
       {label}
       {children}
     </label>
@@ -517,7 +519,7 @@ function ReceptionStartPanel() {
       type="button"
       disabled={submitting}
       onClick={handleClick}
-      className="rounded-full bg-dojo-curtain-red px-6 py-3 font-sans text-sm font-bold text-dojo-washi-white disabled:opacity-50"
+      className="self-start rounded bg-blue-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
     >
       {submitting ? "処理中…" : "参加受付を開始する"}
     </button>
@@ -557,10 +559,9 @@ function CapacityPanel({ live }: { live: LiveRow }) {
   };
 
   return (
-    <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-      <p className="font-sans text-xs font-bold text-dojo-ink">受付中の人数・組数調整</p>
-      <div className="mt-2 flex gap-2">
-        <label className="flex flex-1 flex-col gap-1 font-sans text-[10px] text-dojo-dark-brown">
+    <Panel title="受付中の人数・組数調整">
+      <div className="flex gap-2">
+        <label className="flex flex-1 flex-col gap-1 text-[10px] text-gray-600">
           最大参加人数
           <input
             type="number"
@@ -568,10 +569,10 @@ function CapacityPanel({ live }: { live: LiveRow }) {
             value={maxPlayers}
             onChange={(e) => setMaxPlayers(e.target.value)}
             placeholder="無制限"
-            className="rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
+            className="rounded border border-gray-300 px-2 py-1 text-xs"
           />
         </label>
-        <label className="flex flex-1 flex-col gap-1 font-sans text-[10px] text-dojo-dark-brown">
+        <label className="flex flex-1 flex-col gap-1 text-[10px] text-gray-600">
           組数
           <input
             type="number"
@@ -579,7 +580,7 @@ function CapacityPanel({ live }: { live: LiveRow }) {
             max={8}
             value={groupCount}
             onChange={(e) => setGroupCount(Number(e.target.value))}
-            className="rounded border border-dojo-dark-brown/30 px-2 py-1 font-sans text-xs"
+            className="rounded border border-gray-300 px-2 py-1 text-xs"
           />
         </label>
       </div>
@@ -587,12 +588,12 @@ function CapacityPanel({ live }: { live: LiveRow }) {
         type="button"
         disabled={saving}
         onClick={handleSave}
-        className="mt-2 rounded-full bg-dojo-curtain-red px-4 py-1.5 font-sans text-xs font-bold text-dojo-washi-white disabled:opacity-50"
+        className="mt-2 rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
       >
         {saving ? "保存中…" : "保存する"}
       </button>
-      {message && <p className="mt-1 font-sans text-[11px] text-dojo-dark-brown">{message}</p>}
-    </div>
+      {message && <p className="mt-1 text-[11px] text-gray-600">{message}</p>}
+    </Panel>
   );
 }
 
@@ -641,19 +642,17 @@ function GroupingPanel({
   };
 
   return (
-    <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-      <p className="font-sans text-xs font-bold text-dojo-ink">組分け確認</p>
-
+    <Panel title="組分け確認">
       <button
         type="button"
         disabled={busy}
         onClick={handleRandomize}
-        className="mt-2 rounded-full bg-dojo-curtain-red px-4 py-1.5 font-sans text-xs font-bold text-dojo-washi-white disabled:opacity-50"
+        className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
       >
         {hasManualGrouping ? "もう一度ランダムに振り分ける" : "ランダムに振り分ける"}
       </button>
 
-      <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto font-sans text-[11px] text-dojo-dark-brown">
+      <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-gray-700">
         {participants
           .filter((p) => p.preferred_role === "player")
           .map((p) => {
@@ -665,7 +664,7 @@ function GroupingPanel({
                 <select
                   value={p.group_id ?? ""}
                   onChange={(e) => setParticipantGroup(p.id, e.target.value || null)}
-                  className="rounded border border-dojo-dark-brown/30 px-1 py-0.5 text-xs"
+                  className="rounded border border-gray-300 px-1 py-0.5 text-xs"
                 >
                   <option value="">未割当</option>
                   {groups.map((g) => (
@@ -680,26 +679,26 @@ function GroupingPanel({
       </ul>
 
       {topics.length > 0 && (
-        <div className="mt-3 border-t border-dojo-dark-brown/10 pt-2">
-          <p className="font-sans text-xs font-bold text-dojo-ink">使用するお題</p>
-          <ul className="mt-1 space-y-1 font-sans text-[11px] text-dojo-dark-brown">
+        <div className="mt-3 border-t border-gray-200 pt-2">
+          <p className="text-xs font-bold text-gray-700">使用するお題</p>
+          <ul className="mt-1 space-y-1 text-[11px] text-gray-700">
             {topics.map((t) => (
               <li key={t.id}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate">
                     {t.body}
-                    {t.locked && <span className="ml-1 text-dojo-curtain-red">（公開済み）</span>}
+                    {t.locked && <span className="ml-1 text-red-600">（公開済み）</span>}
                   </span>
                   <button
                     type="button"
                     onClick={() => handleChangeTopic(t)}
-                    className="shrink-0 rounded border border-dojo-dark-brown/30 px-1.5 py-0.5 text-[10px]"
+                    className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-[10px]"
                   >
                     変更
                   </button>
                 </div>
                 {openTopicPicker === t.id && (
-                  <div className="mt-1 max-h-32 overflow-y-auto rounded border border-dojo-dark-brown/10 bg-dojo-washi-white">
+                  <div className="mt-1 max-h-32 overflow-y-auto rounded border border-gray-200 bg-white">
                     {topicBank.map((tb) => (
                       <button
                         key={tb.id}
@@ -708,7 +707,7 @@ function GroupingPanel({
                           await changeTopicAssignment(t.id, tb);
                           setOpenTopicPicker(null);
                         }}
-                        className="block w-full truncate px-2 py-1 text-left text-[10px] hover:bg-dojo-light-brown"
+                        className="block w-full truncate px-2 py-1 text-left text-[10px] hover:bg-gray-100"
                       >
                         {tb.body}
                       </button>
@@ -720,7 +719,7 @@ function GroupingPanel({
           </ul>
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -745,20 +744,19 @@ function AnnouncementPanel() {
   };
 
   return (
-    <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
-      <p className="font-sans text-xs font-bold text-dojo-ink">プレイヤー全員への運営メッセージ</p>
-      <div className="mt-2 flex gap-2">
+    <Panel title="プレイヤー全員への運営メッセージ">
+      <div className="flex gap-2">
         <input
           type="text"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder="例：まもなくゲームを開始します"
-          className="flex-1 rounded border border-dojo-dark-brown/30 px-2 py-1.5 font-sans text-xs"
+          className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs"
         />
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as "player" | "all")}
-          className="rounded border border-dojo-dark-brown/30 px-1 py-1 text-xs"
+          className="rounded border border-gray-300 px-1 py-1 text-xs"
         >
           <option value="all">全員に表示</option>
           <option value="player">プレイヤーのみ</option>
@@ -769,7 +767,7 @@ function AnnouncementPanel() {
           type="button"
           disabled={sending || !message.trim()}
           onClick={handleSend}
-          className="rounded-full bg-dojo-curtain-red px-4 py-1.5 font-sans text-xs font-bold text-dojo-washi-white disabled:opacity-50"
+          className="rounded bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
         >
           送信する
         </button>
@@ -777,26 +775,26 @@ function AnnouncementPanel() {
           <button
             type="button"
             onClick={() => clearAnnouncement()}
-            className="rounded-full border border-dojo-dark-brown/30 px-4 py-1.5 font-sans text-xs font-bold text-dojo-dark-brown"
+            className="rounded border border-gray-300 px-4 py-1.5 text-xs font-bold text-gray-600"
           >
             表示を消す
           </button>
         )}
       </div>
       {live?.announcement_message && (
-        <p className="mt-2 font-sans text-[11px] text-dojo-dark-brown">
+        <p className="mt-2 text-[11px] text-gray-600">
           現在表示中：「{live.announcement_message}」
           {live.announcement_sent_at &&
             `（${new Date(live.announcement_sent_at).toLocaleString("ja-JP")}送信）`}
         </p>
       )}
-    </div>
+    </Panel>
   );
 }
 
 function CenterMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-svh w-full flex-col items-center justify-center px-4 text-center font-sans text-sm text-dojo-dark-brown">
+    <div className="flex min-h-svh w-full flex-col items-center justify-center bg-gray-50 px-4 text-center font-sans text-sm text-gray-600">
       {children}
     </div>
   );

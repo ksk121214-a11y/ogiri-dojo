@@ -53,13 +53,18 @@ function DateLine({ date, timeTone }: { date: LiveScheduleDate; timeTone: "accen
   );
 }
 
-// 半券（バーコード＋チケット番号＋OGIRI LIVE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
-function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: string }) {
+// 半券（バーコード＋チケット番号＋SAMPLE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
+// ticketNoがnull（=その表示先にまだライブ予定が割り当てられていない「準備中」）の場合も、
+// 半券自体（赤/黒の色分けされた部分）は常に表示したままにし、番号欄だけ空にする
+// （2026-08-30：運営者専用管理画面の追加。準備中でもチケットの型は崩さない要望）。
+function TicketStub({ ticketNo, stubClass }: { ticketNo: string | null; stubClass: string }) {
   return (
     <div className={`${stubClass} relative px-2 py-1.5 text-[var(--ink)]`}>
-      <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
-        {ticketNo}
-      </span>
+      {ticketNo && (
+        <span className="absolute top-1.5 left-1/2 shrink-0 -translate-x-1/2 rounded-sm border border-[var(--ink)]/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
+          {ticketNo}
+        </span>
+      )}
       <div
         className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5"
         style={{ top: "calc(50% + 8px)" }}
@@ -79,7 +84,7 @@ function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: stri
         </div>
         <div className="flex flex-col items-center justify-center gap-1">
           <span className="[writing-mode:vertical-rl] text-[11px] leading-none font-bold tracking-normal">
-            OGIRI LIVE
+            SAMPLE
           </span>
           <span className="flex flex-col items-center gap-0.5 text-[11px] leading-none" aria-hidden>
             <span>★</span>
@@ -90,7 +95,9 @@ function TicketStub({ ticketNo, stubClass }: { ticketNo: string; stubClass: stri
   );
 }
 
-export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
+// dateがnull（=「前回のライブ」がまだ割り当てられていない）場合も、チケットの枠自体は
+// そのまま保ち、中身だけ「準備中」表示に差し替える。
+export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
   return (
     <div className={styles.tornTicketRow}>
       <div
@@ -107,10 +114,16 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
           <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/60">
             前回のライブ
           </span>
-          <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
-            {date.year}年{date.month}月{date.day}日（{date.weekday}）
-          </p>
-          <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>
+          {date ? (
+            <>
+              <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
+                {date.year}年{date.month}月{date.day}日（{date.weekday}）
+              </p>
+              <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>
+            </>
+          ) : (
+            <p className="mt-1 font-sans text-base font-black text-[var(--ink)]">準備中です</p>
+          )}
         </div>
       </div>
 
@@ -129,13 +142,13 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate }) {
 }
 
 // 2026-08-30: 予定がまだ準備されていない（管理画面でライブが作成されていない）
-// 場合の「次回ライブは現在準備中です」を、チケットの枠（scallop装飾・質感）は
-// そのまま保ちつつ中身だけ差し替えて表示する共通パーツ。
-function PreparingTicketBody() {
+// 場合の「準備中です」を、チケットの枠（scallop装飾・質感）はそのまま保ちつつ
+// 中身だけ差し替えて表示する共通パーツ。
+function PreparingTicketBody({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1 px-5 py-8 text-center">
       <p className="font-sans text-lg font-black leading-snug text-[var(--ink)]">
-        次回ライブは
+        {label}
         <br />
         現在準備中です
       </p>
@@ -165,26 +178,26 @@ export function CurrentLiveCard({
         <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         {live && reception ? (
-          <>
-            <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
-              <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
-              <DateLine date={live} timeTone="accent" />
-              <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
-                <ClockGlyph />
-                受付 {reception}
-              </p>
-              <Link
-                href="/live"
-                className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
-              >
-                参加する
-              </Link>
-            </div>
-            <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainAccent} />
-          </>
+          <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+            <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
+            <DateLine date={live} timeTone="accent" />
+            <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
+              <ClockGlyph />
+              受付 {reception}
+            </p>
+            <Link
+              href="/live"
+              className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+            >
+              参加する
+            </Link>
+          </div>
         ) : (
-          <PreparingTicketBody />
+          <PreparingTicketBody label="今回のライブは" />
         )}
+        {/* 2026-08-30: 準備中（liveが未割当）でも、チケットの型（赤い半券部分）は
+            常に表示したままにする。番号欄だけ空にする。 */}
+        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.grainAccent} />
       </div>
     </div>
   );
@@ -203,24 +216,24 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
         <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
 
         {live ? (
-          <>
-            <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
-              <DateLine date={live} timeTone="ink" />
-              <div className="mt-2 flex items-center gap-2">
-                <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
-                  開催予定
-                </span>
-                {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
-                <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
-                  詳細を見る ›
-                </span>
-              </div>
+          <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
+            <DateLine date={live} timeTone="ink" />
+            <div className="mt-2 flex items-center gap-2">
+              <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+                開催予定
+              </span>
+              {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
+              <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
+                詳細を見る ›
+              </span>
             </div>
-            <TicketStub ticketNo={live.ticketNo} stubClass={styles.grainDarkGray} />
-          </>
+          </div>
         ) : (
-          <PreparingTicketBody />
+          <PreparingTicketBody label="次回ライブは" />
         )}
+        {/* 2026-08-30: 準備中（liveが未割当）でも、チケットの型（黒い半券部分）は
+            常に表示したままにする。番号欄だけ空にする。 */}
+        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.grainDarkGray} />
       </div>
     </div>
   );

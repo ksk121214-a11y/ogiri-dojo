@@ -6,9 +6,8 @@ import { BellGlyph, CalendarAddGlyph } from "@/components/home/icons";
 import LiveCalendar, { type CalendarMark } from "@/components/home/LiveCalendar";
 import { CurrentLiveCard, PreviousLiveCard, UpcomingLiveCard } from "@/components/home/LiveScheduleCard";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
-import { formatReceptionRange, toLiveScheduleDate } from "@/lib/liveDateFormat";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
-import { useLiveSchedule } from "@/lib/useLiveSchedule";
+import { formatScheduleReception, toScheduleEntryDate } from "@/lib/liveDateFormat";
+import { useLiveSchedulePlan } from "@/lib/useLiveSchedulePlan";
 
 // 「今回のライブ」の日時からiCalendar(.ics)ファイルを組み立ててダウンロードする。
 // 所要時間は未告知のため、暫定でおおよその目安（2時間）をブロックしている。
@@ -44,23 +43,23 @@ function buildIcsContent(scheduledAtIso: string, ticketNo: string, reception: st
 // 定数(src/data/liveScheduleData.ts)をやめ、useLiveSchedule()経由でlivesテーブルの
 // 実データを表示するようにした。管理画面でライブ予定を変更すると、ここも
 // （画面フォーカス復帰時などに）自動で新しい内容へ切り替わる。
+// 2026-08-30（さらに追記）：「前回/今回/次回」の自動判定をやめ、運営が/admin/scheduleで
+// 手動割り当てるlive_schedule_entries（表示専用データ）から取得するように変更した。
 export default function LiveSchedulePage() {
   const [notifyOn, setNotifyOn] = useState(true);
-  const { previous, current, upcoming, loading } = useLiveSchedule();
+  const { previous, current, upcoming, loading } = useLiveSchedulePlan();
 
-  const currentTicketNo = current ? formatLiveTicketNo(current.sequence_number) : null;
-  const currentReception = current
-    ? formatReceptionRange(current.reception_starts_at, current.reception_ends_at)
-    : null;
+  const currentReception = current ? formatScheduleReception(current.reception_time) : null;
 
   const handleAddToCalendar = () => {
-    if (!current || !currentTicketNo || !currentReception) return;
-    const ics = buildIcsContent(current.scheduled_at, currentTicketNo, currentReception);
+    if (!current || !currentReception) return;
+    const scheduledAtIso = new Date(`${current.event_date}T${current.start_time}+09:00`).toISOString();
+    const ics = buildIcsContent(scheduledAtIso, current.ticket_no, currentReception);
     const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ogiri-live-${current.scheduled_at.slice(0, 10)}.ics`;
+    a.download = `ogiri-live-${current.event_date}.ics`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -69,15 +68,15 @@ export default function LiveSchedulePage() {
 
   const calendarMarks: CalendarMark[] = [];
   if (current) {
-    const d = toLiveScheduleDate(current.scheduled_at);
+    const d = toScheduleEntryDate(current.event_date, current.start_time);
     calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "current", label: "今回" });
   }
   if (previous) {
-    const d = toLiveScheduleDate(previous.scheduled_at);
+    const d = toScheduleEntryDate(previous.event_date, previous.start_time);
     calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "previous", label: "前回" });
   }
   if (upcoming) {
-    const d = toLiveScheduleDate(upcoming.scheduled_at);
+    const d = toScheduleEntryDate(upcoming.event_date, upcoming.start_time);
     calendarMarks.push({ year: Number(d.year), month: Number(d.month), day: Number(d.day), kind: "upcoming", label: "次回" });
   }
 
@@ -90,12 +89,14 @@ export default function LiveSchedulePage() {
 
       {!loading && (
         <>
-          {previous && <PreviousLiveCard date={toLiveScheduleDate(previous.scheduled_at)} />}
+          <PreviousLiveCard
+            date={previous ? toScheduleEntryDate(previous.event_date, previous.start_time) : null}
+          />
 
           <CurrentLiveCard
             live={
-              current && currentTicketNo
-                ? { ...toLiveScheduleDate(current.scheduled_at), ticketNo: currentTicketNo }
+              current
+                ? { ...toScheduleEntryDate(current.event_date, current.start_time), ticketNo: current.ticket_no }
                 : null
             }
             reception={currentReception ?? undefined}
@@ -104,7 +105,7 @@ export default function LiveSchedulePage() {
           <UpcomingLiveCard
             live={
               upcoming
-                ? { ...toLiveScheduleDate(upcoming.scheduled_at), ticketNo: formatLiveTicketNo(upcoming.sequence_number) }
+                ? { ...toScheduleEntryDate(upcoming.event_date, upcoming.start_time), ticketNo: upcoming.ticket_no }
                 : null
             }
           />
