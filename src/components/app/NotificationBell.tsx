@@ -19,7 +19,8 @@ interface NotificationRow {
 // notificationsテーブルから取得して表示する。プッシュ通知ではなく、
 // ヘッダーの小さいベルアイコン＋未読バッジ＋クリックで一覧、という最小構成。
 // 未ログイン時・自分宛の通知が無い時は何も表示しない（既存ヘッダーの見た目を
-// 崩さないため）。
+// 崩さないため）。data-sfx="home"により、StadiumSfxController.tsx経由で
+// 下部ナビ等と同じhomeClick音が鳴る（付けなければ既定のpageTurn音になる）。
 export default function NotificationBell() {
   const authUser = useAuthStore((s) => s.user);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -62,6 +63,7 @@ export default function NotificationBell() {
         type="button"
         onClick={handleOpen}
         aria-label="お知らせを開く"
+        data-sfx="home"
         className="relative flex h-6 w-6 items-center justify-center rounded-full text-[var(--muted-on-dark)] transition hover:text-[var(--text-on-dark)]"
       >
         <BellGlyph />

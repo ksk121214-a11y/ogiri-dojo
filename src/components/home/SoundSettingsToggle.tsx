@@ -16,6 +16,8 @@ import styles from "./StadiumHome.module.css";
 // needsAudioResumeを見てアイコンに「！」バッジを出し、メニュー内に「BGMを再開」ボタンを
 // 表示するようにした。OFF→ONへの切り替えはそのクリックイベントの冒頭でAudioContextの
 // resumeを呼び、モバイルの自動再生制限をそのユーザー操作で突破する。
+// メインボタンにはdata-sfx="home"を付け、下部ナビ等と同じhomeClick音が鳴るようにしている
+// （StadiumSfxController.tsx参照。付けなければ既定のpageTurn音になる）。
 export default function SoundSettingsToggle() {
   const [open, setOpen] = useState(false);
   const bgmMuted = useBgmMuted();
@@ -48,6 +50,7 @@ export default function SoundSettingsToggle() {
         aria-label="音の設定を開く"
         aria-expanded={open}
         aria-haspopup="dialog"
+        data-sfx="home"
         className="relative flex h-6 w-6 items-center justify-center rounded-full text-[var(--muted-on-dark)] transition hover:text-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
         <SpeakerIcon muted={allMuted} />
