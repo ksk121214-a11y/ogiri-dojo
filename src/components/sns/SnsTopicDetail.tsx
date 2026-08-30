@@ -154,7 +154,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           onChange={(e) => setBody(e.target.value)}
           placeholder="あなたの回答を入力..."
           rows={3}
-          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-sm text-[var(--ink)] outline-none ${
+          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-base text-[var(--ink)] outline-none ${
             overLimit
               ? "border-[var(--accent)] focus:border-[var(--accent)]"
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"

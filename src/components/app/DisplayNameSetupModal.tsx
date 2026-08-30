@@ -42,7 +42,7 @@ export default function DisplayNameSetupModal() {
           onChange={(e) => setName(e.target.value)}
           placeholder="例: 高座の花子"
           autoFocus
-          className="mt-4 w-full rounded-full border border-dojo-dark-brown/30 bg-dojo-washi-white px-4 py-2 font-sans text-sm text-dojo-ink outline-none focus:border-dojo-curtain-red"
+          className="mt-4 w-full rounded-full border border-dojo-dark-brown/30 bg-dojo-washi-white px-4 py-2 font-sans text-base text-dojo-ink outline-none focus:border-dojo-curtain-red"
         />
         <span
           className={`mt-1 block text-right font-sans text-[11px] ${

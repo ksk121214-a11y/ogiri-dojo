@@ -73,7 +73,7 @@ export default function SnsNewTopicPage() {
           onChange={(e) => setBody(e.target.value)}
           placeholder="お題の文章を入力...（例：師匠に弟子入りしたら、まさかの修行内容だった。何をさせられた？）"
           rows={4}
-          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-sm text-[var(--ink)] outline-none ${
+          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-base text-[var(--ink)] outline-none ${
             overLimit
               ? "border-[var(--accent)] focus:border-[var(--accent)]"
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"

@@ -158,7 +158,7 @@ export default function MyProfileEditModal({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-xl border border-[var(--ink)]/15 bg-white px-3 py-2 font-sans text-sm text-[var(--ink)] outline-none focus:border-[var(--ink)]"
+            className="w-full rounded-xl border border-[var(--ink)]/15 bg-white px-3 py-2 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--ink)]"
           />
           <span
             className={`self-end font-sans text-[11px] ${
@@ -176,7 +176,7 @@ export default function MyProfileEditModal({
             onChange={(e) => setBio(e.target.value)}
             rows={3}
             maxLength={BIO_MAX_LENGTH}
-            className="w-full resize-none rounded-xl border border-[var(--ink)]/15 bg-white p-3 font-sans text-sm text-[var(--ink)] outline-none focus:border-[var(--ink)]"
+            className="w-full resize-none rounded-xl border border-[var(--ink)]/15 bg-white p-3 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--ink)]"
           />
           <span className="self-end font-sans text-[11px] text-[var(--ink)]/60">
             {bio.length} / {BIO_MAX_LENGTH}
