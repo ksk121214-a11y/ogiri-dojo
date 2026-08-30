@@ -6,6 +6,7 @@ import BotSetupPanel from "@/components/live-demo/host/BotSetupPanel";
 import AdminButton from "@/components/admin/AdminButton";
 import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
+import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
 import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
@@ -40,6 +41,8 @@ function fromDatetimeLocalValue(value: string): string | null {
   return d.toISOString();
 }
 
+type Notify = (type: "success" | "error", message: string) => void;
+
 // 司会コンソール（運営者専用管理画面）。
 // 「ライブ準備 → 参加受付開始 → 組分け確認・お題確認 → ゲーム開始 → 進行監視 → 終了」の
 // 一連の流れをこの1画面（/live/host）で扱う。ゲーム進行中の表示・操作（お題発表〜最終結果、
@@ -47,6 +50,10 @@ function fromDatetimeLocalValue(value: string): string | null {
 // 2026-08-30（デザイン整理）：この画面は運営者しか見ないため、公開サイトの装飾的な
 // トンマナをやめ、共通のAdmin*コンポーネント（/admin配下と共有）でニュートラルな
 // 管理画面調のデザインに統一した（ロジックは無変更）。
+// 2026-08-30（事故防止・操作性改善）：各パネルの成否を画面上部のAdminNoticeに集約し、
+// 最終更新時刻＋「最新状態を取得」ボタンを追加。ゲーム開始・受付開始等はstore側で
+// サーバー側のフェーズ確認（ガード付きupdate）を経るようになったため、その結果
+// （STALE_STATE等）もここでバナー表示する。
 export default function LiveHostPage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
@@ -65,12 +72,17 @@ export default function LiveHostPage() {
   const resolvedScoresByAnswer = useLiveHostStore((s) => s.resolvedScoresByAnswer);
   const loading = useLiveHostStore((s) => s.loading);
   const error = useLiveHostStore((s) => s.error);
+  const lastRefreshedAt = useLiveHostStore((s) => s.lastRefreshedAt);
   const init = useLiveHostStore((s) => s.init);
+  const refresh = useLiveHostStore((s) => s.refresh);
   const closeLive = useLiveHostStore((s) => s.closeLive);
   const beginGame = useLiveHostStore((s) => s.beginGame);
 
   const [now, setNow] = useState(() => Date.now());
   const [closing, setClosing] = useState(false);
+  const [beginningGame, setBeginningGame] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   useEffect(() => {
     if (profile?.isHost) init();
@@ -111,13 +123,34 @@ export default function LiveHostPage() {
   const activeAnswer = answers.find((a) => a.revealed_at && !a.resolved);
   const queuedCount = answers.filter((a) => !a.revealed_at).length;
 
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const result = await refresh();
+    setRefreshing(false);
+    if (!result.ok) notifyError(result.reason ?? "最新状態の取得に失敗しました。もう一度お試しください");
+  };
+
+  const handleBeginGame = async () => {
+    if (beginningGame) return;
+    setBeginningGame(true);
+    try {
+      const result = await beginGame();
+      if (!result.ok) notifyError(result.reason ?? "処理に失敗しました。もう一度お試しください");
+      else notifySuccess("ゲームを開始しました。");
+    } finally {
+      setBeginningGame(false);
+    }
+  };
+
   const handleCloseLive = async () => {
     if (closing) return; // 連打防止
     const confirmed = window.confirm("ライブを終了しますか？この操作は取り消せません。");
     if (!confirmed) return;
     setClosing(true);
     try {
-      await closeLive();
+      const result = await closeLive();
+      if (!result.ok) notifyError(result.reason ?? "処理に失敗しました。もう一度お試しください");
     } finally {
       setClosing(false);
     }
@@ -127,10 +160,23 @@ export default function LiveHostPage() {
     <AdminShell>
       <AdminHeader title="司会コンソール（ライブ準備・操作）" />
 
+      <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
+        <span>
+          {lastRefreshedAt
+            ? `最終更新 ${new Date(lastRefreshedAt).toLocaleTimeString("ja-JP", { hour12: false })}`
+            : "まだ取得していません"}
+        </span>
+        <AdminButton disabled={refreshing} onClick={handleRefresh}>
+          {refreshing ? "取得中…" : "最新状態を取得"}
+        </AdminButton>
+      </div>
+
+      <AdminNotice notice={notice} onClose={clear} />
+
       {loading ? (
         <p className="text-sm text-gray-500">状態を確認中…</p>
       ) : !live ? (
-        <PreparationForm />
+        <PreparationForm onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))} />
       ) : (
         <>
           <AdminCard>
@@ -147,7 +193,9 @@ export default function LiveHostPage() {
             )}
           </AdminCard>
 
-          {live.current_phase === "scheduled" && <ReceptionStartPanel />}
+          {live.current_phase === "scheduled" && (
+            <ReceptionStartPanel onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))} />
+          )}
 
           <AdminCard title={`参加者：${participants.length}人`}>
             {live.max_players != null && (
@@ -178,8 +226,16 @@ export default function LiveHostPage() {
 
           {(live.current_phase === "interlude" || live.current_phase === "opening") && (
             <>
-              <CapacityPanel live={live} />
-              <GroupingPanel participants={participants} groups={groups} topics={topics} />
+              <CapacityPanel
+                live={live}
+                onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+              />
+              <GroupingPanel
+                participants={participants}
+                groups={groups}
+                topics={topics}
+                onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+              />
             </>
           )}
 
@@ -188,13 +244,17 @@ export default function LiveHostPage() {
             live.current_phase === "topic_reveal" ||
             live.current_phase === "answering" ||
             live.current_phase === "group_result" ||
-            live.current_phase === "final_result") && <AnnouncementPanel />}
+            live.current_phase === "final_result") && (
+            <AnnouncementPanel
+              onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+            />
+          )}
 
           {live.current_phase === "opening" && turns.length === 0 && (
             <AdminCard title="ゲーム開始">
               <BotSetupPanel liveId={live.id} />
-              <AdminButton variant="primary" onClick={() => beginGame()} className="mt-2">
-                ゲームを開始する
+              <AdminButton variant="primary" disabled={beginningGame} onClick={handleBeginGame} className="mt-2">
+                {beginningGame ? "処理中…" : "ゲームを開始する"}
               </AdminButton>
             </AdminCard>
           )}
@@ -279,7 +339,7 @@ export default function LiveHostPage() {
 }
 
 // ライブ準備画面：liveが無い（またはclosed後）の時に表示するフォーム。
-function PreparationForm() {
+function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const createLivePreparation = useLiveHostStore((s) => s.createLivePreparation);
   const topicBank = useLiveHostStore((s) => s.topicBank);
   const [title, setTitle] = useState("");
@@ -294,6 +354,7 @@ function PreparationForm() {
   const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
 
   const handleSubmit = async () => {
+    if (submitting) return;
     setLocalError(null);
     const input: LivePreparationInput = {
       title,
@@ -306,9 +367,17 @@ function PreparationForm() {
           : { mode: "manual", topicBankIds: manualTopicIds },
     };
     setSubmitting(true);
-    const result = await createLivePreparation(input);
-    setSubmitting(false);
-    if (!result.ok) setLocalError(result.reason ?? "保存に失敗しました");
+    try {
+      const result = await createLivePreparation(input);
+      if (!result.ok) {
+        setLocalError(result.reason ?? "保存に失敗しました");
+        onNotify("error", result.reason ?? "保存に失敗しました");
+      } else {
+        onNotify("success", "ライブを準備しました。");
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const toggleManualTopic = (id: string) => {
@@ -439,16 +508,19 @@ function LabeledInput({
 }
 
 // 準備完了後、「参加受付を開始する」ボタンだけを表示するパネル。
-function ReceptionStartPanel() {
+function ReceptionStartPanel({ onNotify }: { onNotify: Notify }) {
   const openReception = useLiveHostStore((s) => s.openReception);
   const [submitting, setSubmitting] = useState(false);
 
   const handleClick = async () => {
+    if (submitting) return;
     const confirmed = window.confirm("参加受付を開始しますか？参加者がホームから参加できるようになります。");
     if (!confirmed) return;
     setSubmitting(true);
     try {
-      await openReception();
+      const result = await openReception();
+      if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました。もう一度お試しください");
+      else onNotify("success", "参加受付を開始しました。");
     } finally {
       setSubmitting(false);
     }
@@ -465,33 +537,35 @@ function ReceptionStartPanel() {
 // 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を
 // 調整するパネル。組数を変えた場合は、既存の組分けとの整合を取るため
 // 「（もう一度）ランダムに振り分ける」を押し直す必要がある旨を案内する。
-function CapacityPanel({ live }: { live: LiveRow }) {
+function CapacityPanel({ live, onNotify }: { live: LiveRow; onNotify: Notify }) {
   const updateCapacity = useLiveHostStore((s) => s.updateCapacity);
   const [maxPlayers, setMaxPlayers] = useState(live.max_players != null ? String(live.max_players) : "");
   const [groupCount, setGroupCount] = useState(live.planned_group_count ?? 1);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const groupCountChanged = groupCount !== (live.planned_group_count ?? 1);
 
   const handleSave = async () => {
+    if (saving) return;
     setSaving(true);
-    setMessage(null);
-    const result = await updateCapacity({
-      maxPlayers: maxPlayers.trim() ? Number(maxPlayers) : null,
-      groupCount,
-    });
-    setSaving(false);
-    if (!result.ok) {
-      setMessage({ ok: false, text: result.reason ?? "保存に失敗しました" });
-      return;
+    try {
+      const result = await updateCapacity({
+        maxPlayers: maxPlayers.trim() ? Number(maxPlayers) : null,
+        groupCount,
+      });
+      if (!result.ok) {
+        onNotify("error", result.reason ?? "保存に失敗しました");
+        return;
+      }
+      onNotify(
+        "success",
+        groupCountChanged
+          ? "保存しました。組数を変更したので、必要であれば「（もう一度）ランダムに振り分ける」を押してください。"
+          : "保存しました。",
+      );
+    } finally {
+      setSaving(false);
     }
-    setMessage({
-      ok: true,
-      text: groupCountChanged
-        ? "保存しました。組数を変更したので、必要であれば「（もう一度）ランダムに振り分ける」を押してください。"
-        : "保存しました。",
-    });
   };
 
   return (
@@ -523,11 +597,6 @@ function CapacityPanel({ live }: { live: LiveRow }) {
       <AdminButton variant="primary" disabled={saving} onClick={handleSave} className="mt-2">
         {saving ? "保存中…" : "保存する"}
       </AdminButton>
-      {message && (
-        <p className={`mt-2 rounded border px-2 py-1 text-[11px] ${message.ok ? "border-green-300 bg-green-50 text-green-800" : "border-red-300 bg-red-50 text-red-800"}`}>
-          {message.text}
-        </p>
-      )}
     </AdminCard>
   );
 }
@@ -536,10 +605,12 @@ function GroupingPanel({
   participants,
   groups,
   topics,
+  onNotify,
 }: {
   participants: ParticipantRow[];
   groups: GroupRow[];
   topics: TopicRow[];
+  onNotify: Notify;
 }) {
   const hostProfiles = useLiveHostStore((s) => s.profiles);
   const topicBank = useLiveHostStore((s) => s.topicBank);
@@ -547,11 +618,14 @@ function GroupingPanel({
   const setParticipantGroup = useLiveHostStore((s) => s.setParticipantGroup);
   const changeTopicAssignment = useLiveHostStore((s) => s.changeTopicAssignment);
   const [busy, setBusy] = useState(false);
+  const [changingParticipantId, setChangingParticipantId] = useState<string | null>(null);
   const [openTopicPicker, setOpenTopicPicker] = useState<string | null>(null);
+  const [applyingTopicId, setApplyingTopicId] = useState<string | null>(null);
 
   const hasManualGrouping = participants.some((p) => p.group_id);
 
   const handleRandomize = async () => {
+    if (busy) return;
     if (hasManualGrouping) {
       const confirmed = window.confirm(
         "もう一度ランダムに振り分けますか？現在の手動変更は消えます。",
@@ -560,9 +634,22 @@ function GroupingPanel({
     }
     setBusy(true);
     try {
-      await randomizeGroups();
+      const result = await randomizeGroups();
+      if (!result.ok) onNotify("error", result.reason ?? "組分けに失敗しました");
+      else onNotify("success", "組分けを更新しました。");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleChangeGroup = async (participantId: string, groupId: string | null) => {
+    if (changingParticipantId) return;
+    setChangingParticipantId(participantId);
+    try {
+      const result = await setParticipantGroup(participantId, groupId);
+      if (!result.ok) onNotify("error", result.reason ?? "組の変更に失敗しました");
+    } finally {
+      setChangingParticipantId(null);
     }
   };
 
@@ -576,10 +663,23 @@ function GroupingPanel({
     setOpenTopicPicker(topic.id);
   };
 
+  const handleApplyTopic = async (topicId: string, tb: (typeof topicBank)[number]) => {
+    if (applyingTopicId) return;
+    setApplyingTopicId(topicId);
+    try {
+      const result = await changeTopicAssignment(topicId, tb);
+      if (!result.ok) onNotify("error", result.reason ?? "お題の変更に失敗しました");
+      else onNotify("success", "お題を変更しました。");
+    } finally {
+      setApplyingTopicId(null);
+      setOpenTopicPicker(null);
+    }
+  };
+
   return (
     <AdminCard title="組分け確認">
       <AdminButton variant="primary" disabled={busy} onClick={handleRandomize}>
-        {hasManualGrouping ? "もう一度ランダムに振り分ける" : "ランダムに振り分ける"}
+        {busy ? "処理中…" : hasManualGrouping ? "もう一度ランダムに振り分ける" : "ランダムに振り分ける"}
       </AdminButton>
 
       <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-gray-700">
@@ -593,8 +693,9 @@ function GroupingPanel({
                 <span className="truncate">{name}</span>
                 <select
                   value={p.group_id ?? ""}
-                  onChange={(e) => setParticipantGroup(p.id, e.target.value || null)}
-                  className="rounded border border-gray-300 px-1 py-0.5 text-xs"
+                  disabled={changingParticipantId === p.id}
+                  onChange={(e) => handleChangeGroup(p.id, e.target.value || null)}
+                  className="rounded border border-gray-300 px-1 py-0.5 text-xs disabled:opacity-50"
                 >
                   <option value="">未割当</option>
                   {groups.map((g) => (
@@ -629,11 +730,9 @@ function GroupingPanel({
                       <button
                         key={tb.id}
                         type="button"
-                        onClick={async () => {
-                          await changeTopicAssignment(t.id, tb);
-                          setOpenTopicPicker(null);
-                        }}
-                        className="block w-full truncate px-2 py-1 text-left text-[10px] hover:bg-gray-100"
+                        disabled={applyingTopicId === t.id}
+                        onClick={() => handleApplyTopic(t.id, tb)}
+                        className="block w-full truncate px-2 py-1 text-left text-[10px] hover:bg-gray-100 disabled:opacity-50"
                       >
                         {tb.body}
                       </button>
@@ -650,22 +749,40 @@ function GroupingPanel({
 }
 
 // 運営メッセージ送信欄。組分け確認中〜ゲーム進行中まで共通で表示する。
-function AnnouncementPanel() {
+function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
   const live = useLiveHostStore((s) => s.live);
   const sendAnnouncement = useLiveHostStore((s) => s.sendAnnouncement);
   const clearAnnouncement = useLiveHostStore((s) => s.clearAnnouncement);
   const [message, setMessage] = useState("");
   const [scope, setScope] = useState<"player" | "all">("all");
   const [sending, setSending] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const handleSend = async () => {
-    if (!message.trim()) return;
+    if (sending || !message.trim()) return;
     setSending(true);
     try {
-      await sendAnnouncement(message, scope);
+      const result = await sendAnnouncement(message, scope);
+      if (!result.ok) {
+        onNotify("error", result.reason ?? "送信に失敗しました");
+        return;
+      }
+      onNotify("success", "メッセージを送信しました。");
       setMessage("");
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (clearing) return;
+    setClearing(true);
+    try {
+      const result = await clearAnnouncement();
+      if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました");
+      else onNotify("success", "表示を消しました。");
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -690,10 +807,12 @@ function AnnouncementPanel() {
       </div>
       <div className="mt-2 flex gap-2">
         <AdminButton variant="primary" disabled={sending || !message.trim()} onClick={handleSend}>
-          送信する
+          {sending ? "送信中…" : "送信する"}
         </AdminButton>
         {live?.announcement_message && (
-          <AdminButton onClick={() => clearAnnouncement()}>表示を消す</AdminButton>
+          <AdminButton disabled={clearing} onClick={handleClear}>
+            {clearing ? "処理中…" : "表示を消す"}
+          </AdminButton>
         )}
       </div>
       {live?.announcement_message && (

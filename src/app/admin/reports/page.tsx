@@ -55,6 +55,8 @@ export default function AdminReportsPage() {
   const [memoDrafts, setMemoDrafts] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<ReportRow["status"] | "all">("all");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
+  const [savingMemoId, setSavingMemoId] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
@@ -99,30 +101,42 @@ export default function AdminReportsPage() {
   );
 
   const handleStatusChange = async (report: ReportRow, status: ReportRow["status"]) => {
-    const { error } = await supabase
-      .from("reports")
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", report.id);
-    if (error) {
-      notifyError(error.message);
-      return;
+    if (changingStatusId) return;
+    setChangingStatusId(report.id);
+    try {
+      const { error } = await supabase
+        .from("reports")
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", report.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      notifySuccess(`対応状態を「${STATUS_LABEL[status]}」に変更しました。`);
+      await load();
+    } finally {
+      setChangingStatusId(null);
     }
-    notifySuccess(`対応状態を「${STATUS_LABEL[status]}」に変更しました。`);
-    await load();
   };
 
   const handleSaveMemo = async (report: ReportRow) => {
-    const memo = memoDrafts[report.id] ?? report.admin_memo ?? "";
-    const { error } = await supabase
-      .from("reports")
-      .update({ admin_memo: memo, updated_at: new Date().toISOString() })
-      .eq("id", report.id);
-    if (error) {
-      notifyError(error.message);
-      return;
+    if (savingMemoId) return;
+    setSavingMemoId(report.id);
+    try {
+      const memo = memoDrafts[report.id] ?? report.admin_memo ?? "";
+      const { error } = await supabase
+        .from("reports")
+        .update({ admin_memo: memo, updated_at: new Date().toISOString() })
+        .eq("id", report.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      notifySuccess("運営メモを保存しました。");
+      await load();
+    } finally {
+      setSavingMemoId(null);
     }
-    notifySuccess("運営メモを保存しました。");
-    await load();
   };
 
   return (
@@ -191,8 +205,9 @@ export default function AdminReportsPage() {
                         <button
                           key={s}
                           type="button"
+                          disabled={changingStatusId === r.id}
                           onClick={() => handleStatusChange(r, s)}
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold disabled:opacity-50 ${
                             r.status === s
                               ? "border-blue-600 bg-blue-600 text-white"
                               : "border-gray-300 text-gray-600"
@@ -211,7 +226,9 @@ export default function AdminReportsPage() {
                         placeholder="運営メモ"
                         className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
                       />
-                      <AdminButton onClick={() => handleSaveMemo(r)}>保存</AdminButton>
+                      <AdminButton disabled={savingMemoId === r.id} onClick={() => handleSaveMemo(r)}>
+                        {savingMemoId === r.id ? "保存中…" : "保存"}
+                      </AdminButton>
                     </div>
                   </div>
                 )}

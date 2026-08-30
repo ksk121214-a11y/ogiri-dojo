@@ -72,6 +72,11 @@ export default function AdminUserDetailPage() {
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [memoDraft, setMemoDraft] = useState("");
+  // 事故防止：この画面の対応操作（警告〜削除）は同時に1つだけ実行できるようにする
+  // （どの操作が進行中かをキーで持ち、実行中は該当ボタンを含め全て無効化する）。
+  const [pendingAction, setPendingAction] = useState<
+    "memo" | "warning" | "suspend_temporary" | "suspend_permanent" | "lift" | "delete" | null
+  >(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
@@ -135,97 +140,136 @@ export default function AdminUserDetailPage() {
   };
 
   const handleSaveMemo = async () => {
-    const { error } = await supabase.from("profiles").update({ admin_memo: memoDraft }).eq("id", userId);
-    if (error) {
-      notifyError(error.message);
-      return;
+    if (pendingAction) return;
+    setPendingAction("memo");
+    try {
+      const { error } = await supabase.from("profiles").update({ admin_memo: memoDraft }).eq("id", userId);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      notifySuccess("運営メモを保存しました。");
+      await load();
+    } finally {
+      setPendingAction(null);
     }
-    notifySuccess("運営メモを保存しました。");
-    await load();
   };
 
   const handleWarning = async () => {
+    if (pendingAction) return;
     const targetRef = window.prompt("対象となった投稿や行為を入力してください", "") ?? "";
     const reason = window.prompt("警告理由を入力してください", "") ?? "";
     if (!reason) return;
     const body = window.prompt("警告本文（本人への通知に表示されます）を入力してください", "") ?? "";
     const responseNote = window.prompt("今回行った対応を入力してください（省略可）", "") ?? "";
-    await recordSanction("warning", reason, `${body}\n\n対応：${responseNote}`, targetRef);
-    await supabase.from("notifications").insert({
-      user_id: userId,
-      type: "warning",
-      title: "運営からの警告",
-      body: body || reason,
-    });
-    notifySuccess("警告を送りました。");
-    await load();
+    setPendingAction("warning");
+    try {
+      await recordSanction("warning", reason, `${body}\n\n対応：${responseNote}`, targetRef);
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        type: "warning",
+        title: "運営からの警告",
+        body: body || reason,
+      });
+      notifySuccess("警告を送りました。");
+      await load();
+    } finally {
+      setPendingAction(null);
+    }
   };
 
   const handleSuspendTemporary = async () => {
+    if (pendingAction) return;
     const daysInput = window.prompt("何日間利用停止しますか？（日数を入力）", "7");
     if (!daysInput) return;
     const days = Number(daysInput);
     if (!Number.isFinite(days) || days <= 0) return;
     const reason = window.prompt("利用停止理由を入力してください", "") ?? "";
-    const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-    const { error } = await supabase.from("profiles").update({ suspended_until: until }).eq("id", userId);
-    if (error) {
-      notifyError(error.message);
-      return;
+    setPendingAction("suspend_temporary");
+    try {
+      const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+      const { error } = await supabase.from("profiles").update({ suspended_until: until }).eq("id", userId);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await recordSanction("suspend_temporary", reason, `${days}日間`, null);
+      notifySuccess(`${days}日間の利用停止にしました。`);
+      await load();
+    } finally {
+      setPendingAction(null);
     }
-    await recordSanction("suspend_temporary", reason, `${days}日間`, null);
-    notifySuccess(`${days}日間の利用停止にしました。`);
-    await load();
   };
 
   const handleSuspendPermanent = async () => {
+    if (pendingAction) return;
     const confirmed = window.confirm("永久停止しますか？");
     if (!confirmed) return;
     const reason = window.prompt("永久停止理由を入力してください", "") ?? "";
-    const { error } = await supabase.from("profiles").update({ is_permanently_suspended: true }).eq("id", userId);
-    if (error) {
-      notifyError(error.message);
-      return;
+    setPendingAction("suspend_permanent");
+    try {
+      const { error } = await supabase.from("profiles").update({ is_permanently_suspended: true }).eq("id", userId);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await recordSanction("suspend_permanent", reason, null, null);
+      notifySuccess("永久停止にしました。");
+      await load();
+    } finally {
+      setPendingAction(null);
     }
-    await recordSanction("suspend_permanent", reason, null, null);
-    notifySuccess("永久停止にしました。");
-    await load();
   };
 
   const handleLift = async () => {
-    const { error } = await supabase
-      .from("profiles")
-      .update({ is_permanently_suspended: false, suspended_until: null })
-      .eq("id", userId);
-    if (error) {
-      notifyError(error.message);
-      return;
+    if (pendingAction) return;
+    setPendingAction("lift");
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ is_permanently_suspended: false, suspended_until: null })
+        .eq("id", userId);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await recordSanction("lift", "利用停止の解除", null, null);
+      notifySuccess("停止を解除しました。");
+      await load();
+    } finally {
+      setPendingAction(null);
     }
-    await recordSanction("lift", "利用停止の解除", null, null);
-    notifySuccess("停止を解除しました。");
-    await load();
   };
 
   const handleDelete = async () => {
+    if (pendingAction) return;
     const confirmed = window.confirm(
       "アカウントを完全に削除しますか？この操作は取り消せません。投稿等の関連データも失われます。",
     );
     if (!confirmed) return;
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return;
-    const res = await fetch(`/api/admin/users/${userId}/delete`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      notifyError(`削除に失敗しました：${body.error ?? res.statusText}`);
-      return;
+    setPendingAction("delete");
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        notifyError("ログイン状態を確認できませんでした。もう一度お試しください");
+        return;
+      }
+      const res = await fetch(`/api/admin/users/${userId}/delete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        notifyError(`削除に失敗しました：${body.error ?? res.statusText}`);
+        return;
+      }
+      await logAdminAction({ action: "user_deleted", targetType: "profiles", targetId: userId });
+      router.push("/admin/users");
+    } finally {
+      setPendingAction(null);
     }
-    await logAdminAction({ action: "user_deleted", targetType: "profiles", targetId: userId });
-    router.push("/admin/users");
   };
 
   if (loading) {
@@ -304,25 +348,29 @@ export default function AdminUserDetailPage() {
           rows={3}
           className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
         />
-        <AdminButton onClick={handleSaveMemo} className="mt-1">
-          保存
+        <AdminButton disabled={pendingAction !== null} onClick={handleSaveMemo} className="mt-1">
+          {pendingAction === "memo" ? "保存中…" : "保存"}
         </AdminButton>
       </AdminCard>
 
       <AdminCard title="対応操作（下にいくほど強い対応です）">
         <div className="flex flex-col items-start gap-2">
-          <AdminButton onClick={handleWarning}>警告を送る</AdminButton>
-          <AdminButton onClick={handleSuspendTemporary}>期限付きで利用停止する</AdminButton>
-          <AdminButton variant="danger" onClick={handleSuspendPermanent}>
-            永久停止する
+          <AdminButton disabled={pendingAction !== null} onClick={handleWarning}>
+            {pendingAction === "warning" ? "処理中…" : "警告を送る"}
+          </AdminButton>
+          <AdminButton disabled={pendingAction !== null} onClick={handleSuspendTemporary}>
+            {pendingAction === "suspend_temporary" ? "処理中…" : "期限付きで利用停止する"}
+          </AdminButton>
+          <AdminButton variant="danger" disabled={pendingAction !== null} onClick={handleSuspendPermanent}>
+            {pendingAction === "suspend_permanent" ? "処理中…" : "永久停止する"}
           </AdminButton>
           {(profile.is_permanently_suspended || profile.suspended_until) && (
-            <AdminButton variant="primary" onClick={handleLift}>
-              停止を解除する
+            <AdminButton variant="primary" disabled={pendingAction !== null} onClick={handleLift}>
+              {pendingAction === "lift" ? "処理中…" : "停止を解除する"}
             </AdminButton>
           )}
-          <AdminButton variant="danger" onClick={handleDelete}>
-            アカウントを完全に削除する（最終手段）
+          <AdminButton variant="danger" disabled={pendingAction !== null} onClick={handleDelete}>
+            {pendingAction === "delete" ? "削除中…" : "アカウントを完全に削除する（最終手段）"}
           </AdminButton>
         </div>
       </AdminCard>

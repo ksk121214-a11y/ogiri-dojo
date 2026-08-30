@@ -42,6 +42,7 @@ export default function AdminSchedulePage() {
   const [entries, setEntries] = useState<LiveScheduleEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingRole, setEditingRole] = useState<LiveScheduleDisplayRole | null>(null);
+  const [clearingId, setClearingId] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
@@ -70,27 +71,33 @@ export default function AdminSchedulePage() {
   }, [entries]);
 
   const handleClear = async (entry: LiveScheduleEntry) => {
+    if (clearingId) return;
     const confirmed = window.confirm(
       `「${DISPLAY_ROLE_LABEL[entry.display_role]}」の予定を未設定に戻しますか？（データ自体は削除されません）`,
     );
     if (!confirmed) return;
-    const { error } = await supabase.rpc("set_live_schedule_role", {
-      p_entry_id: entry.id,
-      p_role: "preparing",
-    });
-    if (error) {
-      notifyError(error.message);
-      return;
+    setClearingId(entry.id);
+    try {
+      const { error } = await supabase.rpc("set_live_schedule_role", {
+        p_entry_id: entry.id,
+        p_role: "preparing",
+      });
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await logAdminAction({
+        action: "schedule_entry_role_changed",
+        targetType: "live_schedule_entries",
+        targetId: entry.id,
+        detail: { role: "preparing" },
+      });
+      notifySuccess(`「${DISPLAY_ROLE_LABEL[entry.display_role]}」を未設定に戻しました。`);
+      setEditingRole(null);
+      await load();
+    } finally {
+      setClearingId(null);
     }
-    await logAdminAction({
-      action: "schedule_entry_role_changed",
-      targetType: "live_schedule_entries",
-      targetId: entry.id,
-      detail: { role: "preparing" },
-    });
-    notifySuccess(`「${DISPLAY_ROLE_LABEL[entry.display_role]}」を未設定に戻しました。`);
-    setEditingRole(null);
-    await load();
   };
 
   return (
@@ -132,7 +139,9 @@ export default function AdminSchedulePage() {
                         <AdminButton variant="primary" onClick={() => setEditingRole(role)}>
                           編集する
                         </AdminButton>
-                        <AdminButton onClick={() => handleClear(entry)}>未設定に戻す</AdminButton>
+                        <AdminButton disabled={clearingId === entry.id} onClick={() => handleClear(entry)}>
+                          {clearingId === entry.id ? "処理中…" : "未設定に戻す"}
+                        </AdminButton>
                       </div>
                     </>
                   ) : (
@@ -190,7 +199,7 @@ export default function AdminSchedulePage() {
         </div>
       )}
 
-      <ResultsPublishSection notifySuccess={notifySuccess} />
+      <ResultsPublishSection notifySuccess={notifySuccess} notifyError={notifyError} />
     </AdminShell>
   );
 }
@@ -362,9 +371,16 @@ function ScheduleEntryForm({
 // 終了したライブの結果公開状態のみを扱う既存機能（第2段階から温存）。
 // 日時等の編集は上のライブ予定（表示専用データ）に役目が移ったため、ここでは
 // 結果公開トグルのみのシンプルな一覧にしている。
-function ResultsPublishSection({ notifySuccess }: { notifySuccess: (message: string) => void }) {
+function ResultsPublishSection({
+  notifySuccess,
+  notifyError,
+}: {
+  notifySuccess: (message: string) => void;
+  notifyError: (message: string) => void;
+}) {
   const [lives, setLives] = useState<LiveRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -383,18 +399,27 @@ function ResultsPublishSection({ notifySuccess }: { notifySuccess: (message: str
   }, []);
 
   const handleToggle = async (live: LiveRow) => {
-    const { error } = await supabase
-      .from("lives")
-      .update({ results_published: !live.results_published })
-      .eq("id", live.id);
-    if (error) return;
-    await logAdminAction({
-      action: live.results_published ? "results_unpublished" : "results_published",
-      targetType: "lives",
-      targetId: live.id,
-    });
-    notifySuccess(live.results_published ? "結果を非公開にしました。" : "結果を公開しました。");
-    await load();
+    if (togglingId) return;
+    setTogglingId(live.id);
+    try {
+      const { error } = await supabase
+        .from("lives")
+        .update({ results_published: !live.results_published })
+        .eq("id", live.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await logAdminAction({
+        action: live.results_published ? "results_unpublished" : "results_published",
+        targetType: "lives",
+        targetId: live.id,
+      });
+      notifySuccess(live.results_published ? "結果を非公開にしました。" : "結果を公開しました。");
+      await load();
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   if (loading || lives.length === 0) return null;
@@ -410,8 +435,12 @@ function ResultsPublishSection({ notifySuccess }: { notifySuccess: (message: str
             <p className="text-xs text-gray-700">
               {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
             </p>
-            <AdminButton onClick={() => handleToggle(live)}>
-              {live.results_published ? "結果を非公開にする" : "結果を公開する"}
+            <AdminButton disabled={togglingId === live.id} onClick={() => handleToggle(live)}>
+              {togglingId === live.id
+                ? "処理中…"
+                : live.results_published
+                  ? "結果を非公開にする"
+                  : "結果を公開する"}
             </AdminButton>
           </li>
         ))}

@@ -68,26 +68,31 @@ interface LiveHostState {
   topicBank: TopicBankRow[]; // お題管理・準備画面での選定用（is_active=trueのみ）
   loading: boolean;
   error: string | null;
+  // 事故防止・操作性改善：最後に正常に最新状態を取得できた時刻（refresh()・init()で更新）。
+  lastRefreshedAt: string | null;
 
   init: () => Promise<void>;
+  // 画面全体をリロードせず、現在表示中のライブ情報一式（フェーズ・参加人数・組分け・
+  // お題・回答/採点状況）だけを再取得する。「最新状態を取得」ボタンから呼ぶ。
+  refresh: () => Promise<{ ok: boolean; reason?: string }>;
   loadTopicBank: () => Promise<void>;
   // ライブ準備〜開始（第1段階で新設）。
   createLivePreparation: (input: LivePreparationInput) => Promise<{ ok: boolean; reason?: string }>;
-  openReception: () => Promise<void>; // 「参加受付を開始する」
+  openReception: () => Promise<{ ok: boolean; reason?: string }>; // 「参加受付を開始する」
   randomizeGroups: () => Promise<{ ok: boolean; reason?: string }>; // 「（もう一度）ランダムに振り分ける」
-  setParticipantGroup: (participantId: string, groupId: string | null) => Promise<void>;
+  setParticipantGroup: (participantId: string, groupId: string | null) => Promise<{ ok: boolean; reason?: string }>;
   changeTopicAssignment: (
     topicId: string,
     entry: Pick<TopicBankRow, "id" | "body" | "format">,
-  ) => Promise<void>;
-  sendAnnouncement: (message: string, scope: "player" | "all") => Promise<void>;
-  clearAnnouncement: () => Promise<void>;
+  ) => Promise<{ ok: boolean; reason?: string }>;
+  sendAnnouncement: (message: string, scope: "player" | "all") => Promise<{ ok: boolean; reason?: string }>;
+  clearAnnouncement: () => Promise<{ ok: boolean; reason?: string }>;
   // 受付中（interlude/opening）でも組数・最大参加人数を調整できるようにする。
   // 組数を変えた場合は、既存のgroupsとの整合を取るため「ランダムに振り分ける」を
   // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
   updateCapacity: (input: { maxPlayers: number | null; groupCount: number }) => Promise<{ ok: boolean; reason?: string }>;
   beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
-  closeLive: () => Promise<void>;
+  closeLive: () => Promise<{ ok: boolean; reason?: string }>;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -694,6 +699,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   topicBank: [],
   loading: true,
   error: null,
+  lastRefreshedAt: null,
 
   loadTopicBank: async () => {
     const { data, error } = await supabase
@@ -722,6 +728,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         resolvedAnswers,
         resolvedScoresByAnswer,
         loading: false,
+        lastRefreshedAt: new Date().toISOString(),
       });
       // 司会画面を開き直した時、answeringフェーズの途中であればanswerRemainingMsTrue
       // （ホスト内メモリのみ）を最善努力で復元する。これが無いと再読込のたびに
@@ -748,6 +755,52 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     tickTimer = setInterval(() => {
       advanceIfDue();
     }, 500);
+  },
+
+  // 事故防止・操作性改善：ページ全体をリロードせず、現在表示中のライブ情報一式だけを
+  // 再取得する。「最新状態を取得」ボタンから呼ぶ。loadingフラグは変更しない
+  // （画面全体を「状態を確認中…」に戻さないため）。tickTimer自体はinit()で既に
+  // 動いているので触らない。
+  refresh: async () => {
+    const { live } = get();
+    if (!live) return { ok: true };
+    try {
+      const { data: freshLiveData, error: liveError } = await supabase
+        .from("lives")
+        .select("*")
+        .eq("id", live.id)
+        .maybeSingle();
+      if (liveError) return { ok: false, reason: liveError.message };
+      if (!freshLiveData) {
+        // ライブ行自体が無くなっている（通常は起こらないが念のため）。
+        set({ live: null, lastRefreshedAt: new Date().toISOString() });
+        return { ok: true };
+      }
+      const freshLive = freshLiveData as LiveRow;
+      const children = await fetchLiveChildren(live.id);
+      const profiles = await fetchProfilesFor(children.participants);
+      const answers = freshLive.current_turn_id
+        ? await fetchAnswersForTurn(freshLive.current_turn_id)
+        : [];
+      const resolvedAnswers = await fetchResolvedAnswersForLive(live.id);
+      const resolvedScoresByAnswer = await fetchScoresForAnswers(resolvedAnswers.map((a) => a.id));
+      const active = answers.find((a) => a.revealed_at && !a.resolved);
+      const scores = active ? await fetchScoresForAnswer(active.id) : [];
+      set({
+        live: freshLive,
+        ...children,
+        profiles,
+        answers,
+        scores,
+        resolvedAnswers,
+        resolvedScoresByAnswer,
+        lastRefreshedAt: new Date().toISOString(),
+        error: null,
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message : "取得に失敗しました" };
+    }
   },
 
   // 運営者専用管理画面の追加（第1段階）：「ライブ準備画面」の保存操作。
@@ -829,19 +882,37 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
 
   // 「参加受付を開始する」：旧startLive()のinsert部分をupdateに置き換えただけで、
   // 以降のフェーズ自動進行(interlude→opening、advanceIfDue)は無改造で流用する。
+  // 事故防止：別タブ等から既に受付開始済みの場合に二重実行しないよう、
+  // current_phase='scheduled'であることをwhere条件に含めたガード付きupdateにする
+  // （closeLiveと同じ考え方）。対象0件なら状態が変わっている旨のエラーを返す。
   openReception: async () => {
     const { live } = get();
-    if (!live || live.current_phase !== "scheduled") return;
+    if (!live || live.current_phase !== "scheduled") {
+      return {
+        ok: false,
+        reason: "ライブの状態が別の操作によって変更されています。最新状態を取得してください。",
+      };
+    }
     const phaseDeadline = new Date(Date.now() + LIVE_ROOM_TIMING.interludeMs).toISOString();
-    const { error } = await updateLive(live.id, {
-      current_phase: "interlude",
-      phase_deadline: phaseDeadline,
-    });
+    const { data, error } = await supabase
+      .from("lives")
+      .update({ current_phase: "interlude", phase_deadline: phaseDeadline })
+      .eq("id", live.id)
+      .eq("current_phase", "scheduled")
+      .select()
+      .maybeSingle();
     if (error) {
       set({ error: error.message });
-      return;
+      return { ok: false, reason: error.message };
     }
+    if (!data) {
+      const message = "ライブの状態が別の操作によって変更されています。最新状態を取得してください。";
+      set({ error: message });
+      return { ok: false, reason: message };
+    }
+    set({ live: data as LiveRow });
     await logAdminAction({ action: "reception_opened", targetType: "lives", targetId: live.id });
+    return { ok: true };
   },
 
   // 「（もう一度）ランダムに振り分ける」：旧confirmGroupingAndBeginの前半部分
@@ -928,7 +999,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .eq("id", participantId);
     if (error) {
       set({ error: error.message });
-      return;
+      return { ok: false, reason: error.message };
     }
     await logAdminAction({
       action: "participant_group_changed",
@@ -942,6 +1013,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       const profiles = await fetchProfilesFor(children.participants);
       set({ ...children, profiles });
     }
+    return { ok: true };
   },
 
   // 組分け確認画面でのお題変更（ランダム再抽選 or 手動選択、どちらも呼び出し側で
@@ -954,7 +1026,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .eq("id", topicId);
     if (error) {
       set({ error: error.message });
-      return;
+      return { ok: false, reason: error.message };
     }
     await logAdminAction({
       action: "topic_changed",
@@ -967,13 +1039,14 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       const children = await fetchLiveChildren(live.id);
       set({ topics: children.topics });
     }
+    return { ok: true };
   },
 
   sendAnnouncement: async (message, scope) => {
     const { live } = get();
-    if (!live) return;
+    if (!live) return { ok: false, reason: "ライブがありません" };
     const trimmed = message.trim();
-    if (!trimmed) return;
+    if (!trimmed) return { ok: false, reason: "メッセージを入力してください" };
     const { error } = await updateLive(live.id, {
       announcement_message: trimmed,
       announcement_scope: scope,
@@ -981,7 +1054,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     });
     if (error) {
       set({ error: error.message });
-      return;
+      return { ok: false, reason: error.message };
     }
     await logAdminAction({
       action: "announcement_sent",
@@ -989,12 +1062,15 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetId: live.id,
       detail: { message: trimmed, scope },
     });
+    return { ok: true };
   },
 
   clearAnnouncement: async () => {
     const { live } = get();
-    if (!live) return;
-    await updateLive(live.id, { announcement_message: null });
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { error } = await updateLive(live.id, { announcement_message: null });
+    if (error) return { ok: false, reason: error.message };
+    return { ok: true };
   },
 
   // 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を
@@ -1048,6 +1124,28 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: false, reason: "お題の準備が不足しています" };
     }
 
+    // 事故防止：連打・複数タブからの同時実行でturns等が重複作成されないための関所。
+    // 「opening・かつまだturnsが割り当てられていない(current_turn_id is null)」状態からしか
+    // 離脱できないガード付きupdateにし、成功できるのは最初の1回だけになるようにする。
+    const topicRevealDeadline = new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString();
+    const { data: guardedLive, error: guardError } = await supabase
+      .from("lives")
+      .update({ current_phase: "topic_reveal", phase_deadline: topicRevealDeadline })
+      .eq("id", live.id)
+      .eq("current_phase", "opening")
+      .is("current_turn_id", null)
+      .select()
+      .maybeSingle();
+    if (guardError) {
+      return { ok: false, reason: guardError.message };
+    }
+    if (!guardedLive) {
+      const message = "ライブの状態が別の操作によって変更されています。最新状態を取得してください。";
+      set({ error: message });
+      return { ok: false, reason: message };
+    }
+    set({ live: guardedLive as LiveRow });
+
     const sortedGroups = [...groups].sort((a, b) => a.group_order - b.group_order);
     const turnsToInsert: {
       live_id: string;
@@ -1074,6 +1172,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .insert(turnsToInsert)
       .select();
     if (turnError || !turnRows) {
+      // ロールバック：opening状態に戻し、もう一度「ゲームを開始する」をやり直せるようにする
+      // （このガードを通過できるのは1回だけなので、戻さないと二度と開始できなくなる）。
+      await updateLive(live.id, { current_phase: "opening", phase_deadline: null });
       return { ok: false, reason: turnError?.message ?? "ターンの作成に失敗しました" };
     }
 
@@ -1097,10 +1198,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     const profiles = await fetchProfilesFor(children.participants);
     set({ ...children, profiles, error: null });
 
+    // current_phase/phase_deadlineは既に上のガード付きupdateで設定済みのため、
+    // ここではcurrent_turn_idの確定だけを行う。
     await updateLive(live.id, {
       current_turn_id: firstTurn.id,
-      current_phase: "topic_reveal",
-      phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
       answering_paused: false,
       answering_remaining_ms: null,
     });
@@ -1110,7 +1211,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
 
   closeLive: async () => {
     const { live } = get();
-    if (!live) return;
+    if (!live) return { ok: true };
     // 終了ボタン連打で二重実行されないよう、対象をcurrent_phase<>'closed'に絞る。
     // 既に他の呼び出し（別タブ等）でclosed済みなら対象0件で何も起きない。
     const { data, error } = await supabase
@@ -1121,7 +1222,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .select();
     if (error) {
       set({ error: error.message });
-      return;
+      return { ok: false, reason: error.message };
     }
     if (!data || data.length === 0) {
       // 既に終了済み（二重クリック等）。UIだけ「開始前」に戻す。
@@ -1139,7 +1240,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         resolvedScoresByAnswer: {},
         error: null,
       });
-      return;
+      return { ok: true };
     }
     await logAdminAction({ action: "live_closed", targetType: "lives", targetId: live.id });
     cleanupChannels();
@@ -1159,5 +1260,6 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       resolvedScoresByAnswer: {},
       error: null,
     });
+    return { ok: true };
   },
 }));

@@ -50,6 +50,8 @@ export default function AdminPostsPage() {
   const [filterKind, setFilterKind] = useState<PostKind | "all">("all");
   const [filterVisibility, setFilterVisibility] = useState<VisibilityFilter>("all");
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [togglingKey, setTogglingKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const load = async () => {
@@ -100,46 +102,58 @@ export default function AdminPostsPage() {
   const tableName = (kind: PostKind) =>
     kind === "sns_topic" ? "sns_topics" : kind === "sns_answer" ? "sns_answers" : "sns_comments";
 
-  const handleToggleHidden = async (row: PostRow) => {
+  const handleToggleHidden = async (row: PostRow, key: string) => {
+    if (togglingKey) return;
     let reason: string | null = null;
     if (!row.is_hidden) {
       reason = window.prompt("非表示にする理由を入力してください（省略可）", "") ?? "";
     }
-    const { error } = await supabase
-      .from(tableName(row.kind))
-      .update({
-        is_hidden: !row.is_hidden,
-        hidden_reason: row.is_hidden ? null : reason || null,
-        hidden_at: row.is_hidden ? null : new Date().toISOString(),
-      })
-      .eq("id", row.id);
-    if (error) {
-      notifyError(error.message);
-      return;
+    setTogglingKey(key);
+    try {
+      const { error } = await supabase
+        .from(tableName(row.kind))
+        .update({
+          is_hidden: !row.is_hidden,
+          hidden_reason: row.is_hidden ? null : reason || null,
+          hidden_at: row.is_hidden ? null : new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await logAdminAction({
+        action: row.is_hidden ? "post_unhidden" : "post_hidden",
+        targetType: row.kind,
+        targetId: row.id,
+        reason: reason ?? undefined,
+      });
+      notifySuccess(row.is_hidden ? "非表示を解除しました。" : "非表示にしました。");
+      await load();
+    } finally {
+      setTogglingKey(null);
     }
-    await logAdminAction({
-      action: row.is_hidden ? "post_unhidden" : "post_hidden",
-      targetType: row.kind,
-      targetId: row.id,
-      reason: reason ?? undefined,
-    });
-    notifySuccess(row.is_hidden ? "非表示を解除しました。" : "非表示にしました。");
-    await load();
   };
 
-  const handleDelete = async (row: PostRow) => {
+  const handleDelete = async (row: PostRow, key: string) => {
+    if (deletingKey) return;
     const confirmed = window.confirm(
       "この投稿を完全に削除しますか？通常は「非表示」を推奨します。この操作は取り消せません。",
     );
     if (!confirmed) return;
-    const { error } = await supabase.from(tableName(row.kind)).delete().eq("id", row.id);
-    if (error) {
-      notifyError(error.message);
-      return;
+    setDeletingKey(key);
+    try {
+      const { error } = await supabase.from(tableName(row.kind)).delete().eq("id", row.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await logAdminAction({ action: "post_deleted", targetType: row.kind, targetId: row.id });
+      notifySuccess("完全に削除しました。");
+      await load();
+    } finally {
+      setDeletingKey(null);
     }
-    await logAdminAction({ action: "post_deleted", targetType: row.kind, targetId: row.id });
-    notifySuccess("完全に削除しました。");
-    await load();
   };
 
   return (
@@ -231,11 +245,19 @@ export default function AdminPostsPage() {
                         <p className="mt-1 text-xs text-gray-500">非表示理由：{row.hidden_reason}</p>
                       )}
                       <div className="mt-2 flex items-center gap-2">
-                        <AdminButton variant="primary" onClick={() => handleToggleHidden(row)}>
-                          {row.is_hidden ? "非表示を解除する" : "非表示にする"}
+                        <AdminButton
+                          variant="primary"
+                          disabled={togglingKey === key}
+                          onClick={() => handleToggleHidden(row, key)}
+                        >
+                          {togglingKey === key ? "処理中…" : row.is_hidden ? "非表示を解除する" : "非表示にする"}
                         </AdminButton>
-                        <AdminButton variant="danger" onClick={() => handleDelete(row)}>
-                          完全削除
+                        <AdminButton
+                          variant="danger"
+                          disabled={deletingKey === key}
+                          onClick={() => handleDelete(row, key)}
+                        >
+                          {deletingKey === key ? "削除中…" : "完全削除"}
                         </AdminButton>
                       </div>
                     </div>

@@ -26,7 +26,11 @@ const STATUS_FILTER_LABEL: Record<StatusFilter, string> = {
 // 追加・編集・使用停止・削除を行う。「過去に使用したか」はtopics.topic_bank_idに
 // この行を参照している行があるかどうかで判定する（既存ロジックのまま）。
 // 2026-08-30（デザイン整理）：状態フィルタ・20件ずつのページネーションを追加し、
-// 共通のAdmin*コンポーネントに置き換えた。管理操作のロジック自体は変更していない。
+// 共通のAdmin*コンポーネントに置き換えた。
+// 2026-08-30（事故防止）：使用済みお題は過去のライブ履歴を守るため削除できないように
+// した（0025_topic_bank_delete_guard.sqlのRLSで完全削除も拒否される）。UI側でも
+// 使用済みなら削除ボタンを無効化し、各操作に二重実行防止（処理中は該当ボタンを無効化）
+// を追加した。
 export default function AdminTopicsPage() {
   const [topics, setTopics] = useState<TopicBankRow[]>([]);
   const [usedIds, setUsedIds] = useState<Set<string>>(new Set());
@@ -34,7 +38,11 @@ export default function AdminTopicsPage() {
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [newBody, setNewBody] = useState("");
+  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
@@ -91,66 +99,104 @@ export default function AdminTopicsPage() {
   const visible = filtered.slice(0, visibleCount);
 
   const handleAdd = async () => {
+    if (adding) return;
     const body = newBody.trim();
     if (!body) return;
-    const { error: insertError } = await supabase.from("topic_bank").insert({ body });
-    if (insertError) {
-      notifyError(insertError.message);
-      return;
+    setAdding(true);
+    try {
+      const { error: insertError } = await supabase.from("topic_bank").insert({ body });
+      if (insertError) {
+        notifyError(insertError.message);
+        return;
+      }
+      await logAdminAction({ action: "topic_bank_added", targetType: "topic_bank", detail: { body } });
+      setNewBody("");
+      notifySuccess("お題を追加しました。");
+      await load();
+    } finally {
+      setAdding(false);
     }
-    await logAdminAction({ action: "topic_bank_added", targetType: "topic_bank", detail: { body } });
-    setNewBody("");
-    notifySuccess("お題を追加しました。");
-    await load();
   };
 
   const handleSaveEdit = async (id: string) => {
+    if (savingId) return;
     const body = editing[id]?.trim();
     if (!body) return;
-    const { error: updateError } = await supabase.from("topic_bank").update({ body }).eq("id", id);
-    if (updateError) {
-      notifyError(updateError.message);
-      return;
+    setSavingId(id);
+    try {
+      const { error: updateError } = await supabase.from("topic_bank").update({ body }).eq("id", id);
+      if (updateError) {
+        notifyError(updateError.message);
+        return;
+      }
+      await logAdminAction({ action: "topic_bank_edited", targetType: "topic_bank", targetId: id });
+      setEditing((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      notifySuccess("保存しました。");
+      await load();
+    } finally {
+      setSavingId(null);
     }
-    await logAdminAction({ action: "topic_bank_edited", targetType: "topic_bank", targetId: id });
-    setEditing((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    notifySuccess("保存しました。");
-    await load();
   };
 
   const handleToggleActive = async (topic: TopicBankRow) => {
-    const { error: updateError } = await supabase
-      .from("topic_bank")
-      .update({ is_active: !topic.is_active })
-      .eq("id", topic.id);
-    if (updateError) {
-      notifyError(updateError.message);
-      return;
+    if (togglingId) return;
+    setTogglingId(topic.id);
+    try {
+      const { error: updateError } = await supabase
+        .from("topic_bank")
+        .update({ is_active: !topic.is_active })
+        .eq("id", topic.id);
+      if (updateError) {
+        notifyError(updateError.message);
+        return;
+      }
+      await logAdminAction({
+        action: topic.is_active ? "topic_bank_deactivated" : "topic_bank_activated",
+        targetType: "topic_bank",
+        targetId: topic.id,
+      });
+      notifySuccess(topic.is_active ? "使用停止にしました。" : "使用再開しました。");
+      await load();
+    } finally {
+      setTogglingId(null);
     }
-    await logAdminAction({
-      action: topic.is_active ? "topic_bank_deactivated" : "topic_bank_activated",
-      targetType: "topic_bank",
-      targetId: topic.id,
-    });
-    notifySuccess(topic.is_active ? "使用停止にしました。" : "使用再開しました。");
-    await load();
   };
 
   const handleDelete = async (topic: TopicBankRow) => {
-    const confirmed = window.confirm(`「${topic.body}」を完全に削除しますか？この操作は取り消せません。`);
-    if (!confirmed) return;
-    const { error: deleteError } = await supabase.from("topic_bank").delete().eq("id", topic.id);
-    if (deleteError) {
-      notifyError(deleteError.message);
+    if (deletingId) return;
+    if (statusOf(topic) === "used") {
+      notifyError("使用済みのお題は削除できません。使用停止にしてください。");
       return;
     }
-    await logAdminAction({ action: "topic_bank_deleted", targetType: "topic_bank", targetId: topic.id });
-    notifySuccess("削除しました。");
-    await load();
+    const confirmed = window.confirm(`「${topic.body}」を完全に削除しますか？この操作は取り消せません。`);
+    if (!confirmed) return;
+    setDeletingId(topic.id);
+    try {
+      // サーバー側（RLS）でも使用済みなら削除0件で拒否されるため、削除できた行数を確認する。
+      const { data, error: deleteError } = await supabase
+        .from("topic_bank")
+        .delete()
+        .eq("id", topic.id)
+        .select();
+      if (deleteError) {
+        notifyError(deleteError.message);
+        return;
+      }
+      if (!data || data.length === 0) {
+        notifyError("使用済みのお題は削除できません。使用停止にしてください。");
+        await load();
+        return;
+      }
+      await logAdminAction({ action: "topic_bank_deleted", targetType: "topic_bank", targetId: topic.id });
+      notifySuccess("削除しました。");
+      await load();
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -193,8 +239,8 @@ export default function AdminTopicsPage() {
             placeholder="新しいお題を入力"
             className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
-          <AdminButton variant="primary" onClick={handleAdd}>
-            追加
+          <AdminButton variant="primary" disabled={adding || !newBody.trim()} onClick={handleAdd}>
+            {adding ? "追加中…" : "追加"}
           </AdminButton>
         </div>
       </AdminCard>
@@ -207,6 +253,7 @@ export default function AdminTopicsPage() {
             <ul className="flex flex-col gap-2">
               {visible.map((t) => {
                 const status = statusOf(t);
+                const isUsed = status === "used";
                 return (
                   <li key={t.id} className="rounded border border-gray-200 p-2.5">
                     {editing[t.id] !== undefined ? (
@@ -217,8 +264,12 @@ export default function AdminTopicsPage() {
                           onChange={(e) => setEditing((prev) => ({ ...prev, [t.id]: e.target.value }))}
                           className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm"
                         />
-                        <AdminButton variant="primary" onClick={() => handleSaveEdit(t.id)}>
-                          保存
+                        <AdminButton
+                          variant="primary"
+                          disabled={savingId === t.id}
+                          onClick={() => handleSaveEdit(t.id)}
+                        >
+                          {savingId === t.id ? "保存中…" : "保存"}
                         </AdminButton>
                       </div>
                     ) : (
@@ -253,11 +304,16 @@ export default function AdminTopicsPage() {
                       >
                         {editing[t.id] !== undefined ? "キャンセル" : "編集"}
                       </AdminButton>
-                      <AdminButton onClick={() => handleToggleActive(t)}>
-                        {t.is_active ? "使用停止にする" : "使用再開する"}
+                      <AdminButton disabled={togglingId === t.id} onClick={() => handleToggleActive(t)}>
+                        {togglingId === t.id ? "処理中…" : t.is_active ? "使用停止にする" : "使用再開する"}
                       </AdminButton>
-                      <AdminButton variant="danger" onClick={() => handleDelete(t)}>
-                        削除
+                      <AdminButton
+                        variant="danger"
+                        disabled={isUsed || deletingId === t.id}
+                        title={isUsed ? "使用済みのお題は削除できません。使用停止にしてください。" : undefined}
+                        onClick={() => handleDelete(t)}
+                      >
+                        {deletingId === t.id ? "削除中…" : "削除"}
                       </AdminButton>
                     </div>
                   </li>
