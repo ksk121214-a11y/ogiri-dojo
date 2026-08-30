@@ -97,7 +97,7 @@ export default function NextLiveTicket({
     return (
       <div className="relative">
         <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
-          次回ライブ
+          ライブ
         </span>
 
         <div className={styles.nextLiveTicketRow}>
@@ -108,7 +108,7 @@ export default function NextLiveTicket({
 
             <div className="flex flex-col items-center justify-center gap-1 px-5 py-8 text-center">
               <p className="font-sans text-xl font-black leading-snug text-[var(--ink)]">
-                次回ライブは
+                ライブは
                 <br />
                 現在準備中です
               </p>
@@ -125,7 +125,7 @@ export default function NextLiveTicket({
     // 半分隠れてしまうため。
     <div className="relative">
       <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
-        次回ライブ
+        ライブ
       </span>
 
       <div className={styles.nextLiveTicketRow}>

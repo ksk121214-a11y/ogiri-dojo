@@ -104,7 +104,7 @@ export default function AdminSchedulePage() {
     <AdminShell wide>
       <AdminHeader title="ライブ予定" />
       <p className="text-xs text-gray-500">
-        ここで管理する日付・番号は、ホーム画面・次回ライブ画面のチケット表示にのみ使う
+        ここで管理する日付・番号は、ホーム画面・ライブ画面のチケット表示にのみ使う
         告知用の予定です。実際のライブの実施（受付開始・組分け等）は
         <Link href="/live/host" className="mx-1 underline">
           ライブ準備画面

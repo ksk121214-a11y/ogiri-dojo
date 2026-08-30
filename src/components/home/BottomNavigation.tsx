@@ -112,7 +112,7 @@ export default function BottomNavigation() {
           className={`${itemClass} ${isLiveSchedule ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
         >
           <CalendarIcon active={isLiveSchedule} />
-          次回ライブ
+          ライブ
         </Link>
         <Link
           href="/how-to-play"

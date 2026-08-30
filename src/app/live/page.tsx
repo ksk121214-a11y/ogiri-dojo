@@ -9,6 +9,7 @@ import InterludeScreen from "@/components/live-demo/InterludeScreen";
 import SoundToggle from "@/components/live-demo/SoundToggle";
 import AnnouncementBanner from "@/components/live-room/AnnouncementBanner";
 import AudienceAnsweringView from "@/components/live-room/AudienceAnsweringView";
+import AudienceHomeButton from "@/components/live-room/AudienceHomeButton";
 import FinalResultView from "@/components/live-room/FinalResultView";
 import GroupResultView from "@/components/live-room/GroupResultView";
 import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
@@ -172,6 +173,7 @@ export default function LivePage() {
       <main className="relative h-dvh w-full overflow-hidden bg-dojo-stage-dark">
         <DisplayNameSetupModal />
         <AnnouncementBanner />
+        <AudienceHomeButton />
         <AnimatePresence mode="wait">
           {live.current_phase === "interlude" ? (
             <InterludeScreen key="interlude" />
@@ -195,6 +197,7 @@ export default function LivePage() {
     <div className="relative mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
       <DisplayNameSetupModal />
       <AnnouncementBanner />
+      <AudienceHomeButton />
       <SoundToggle />
       <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
         爆笑スタジアムライブ
@@ -259,20 +262,12 @@ export default function LivePage() {
             )}
           </div>
 
+          {/* 2026-08-30: このビューに来る時点でcurrent_phaseは既にtopic_reveal以降
+              （ゲーム開始後）のため、プレイヤーとしての新規参加登録ボタンは置かない
+              （interlude/openingでのプレイヤー参加受付はOpeningView.tsx側）。
+              観客としてはゲーム進行中いつでも出入りできる。 */}
           {!myParticipant && (
             <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={joining}
-                onClick={async () => {
-                  setJoining(true);
-                  await joinLive("player");
-                  setJoining(false);
-                }}
-                className="rounded-full bg-dojo-curtain-red px-5 py-3 font-sans text-sm font-bold text-dojo-washi-white disabled:opacity-50"
-              >
-                {joining ? "参加処理中…" : "プレイヤーとして参加する"}
-              </button>
               <button
                 type="button"
                 disabled={joining}

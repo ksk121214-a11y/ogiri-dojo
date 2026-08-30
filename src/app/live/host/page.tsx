@@ -591,9 +591,10 @@ const PRIVATE_MESSAGE_TEMPLATES = [
   { label: "最終警告", text: "再度違反が確認されたため、最終警告です。改善されない場合は退場していただきます。" },
 ] as const;
 
-// 参加者一覧＋個別操作（個別メッセージ送信・退場/解除）。
-// 事故防止のため、操作は参加者ごとに独立したpending stateで管理し、連打で
-// 二重実行されないようにする（他の参加者への操作は並行して行える）。
+// 参加者一覧＋個別メッセージ・退場操作。
+// 2026-08-30:「プレイヤー全員への運営メッセージ」と同じ形（1つの入力欄＋宛先を
+// 選ぶ＋送信ボタン）に統一し、退場するボタンもそこに並べる形にした
+// （以前は参加者ごとに個別のボタン・フォームが並んでいた）。
 function ParticipantsPanel({
   participants,
   groups,
@@ -612,169 +613,153 @@ function ParticipantsPanel({
   const kickParticipant = useLiveHostStore((s) => s.kickParticipant);
   const unkickParticipant = useLiveHostStore((s) => s.unkickParticipant);
 
-  const [openMessageFor, setOpenMessageFor] = useState<string | null>(null);
-  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
-  const [sendingFor, setSendingFor] = useState<string | null>(null);
-  const [clearingFor, setClearingFor] = useState<string | null>(null);
-  const [kickingId, setKickingId] = useState<string | null>(null);
+  const [targetId, setTargetId] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [kicking, setKicking] = useState(false);
 
-  const handleSend = async (participantId: string) => {
-    if (sendingFor) return;
-    const text = (messageDrafts[participantId] ?? "").trim();
-    if (!text) {
-      onNotify("error", "メッセージを入力してください。");
-      return;
-    }
-    setSendingFor(participantId);
+  const nameOf = (p: ParticipantRow) =>
+    hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
+
+  // 参加者一覧が変わって選択中の相手が居なくなった場合は先頭にフォールバックする。
+  const target = participants.find((p) => p.id === targetId) ?? participants[0] ?? null;
+  const effectiveTargetId = target?.id ?? "";
+
+  const handleSend = async () => {
+    if (sending || !effectiveTargetId || !message.trim()) return;
+    setSending(true);
     try {
-      const result = await sendPrivateMessage(participantId, text);
+      const result = await sendPrivateMessage(effectiveTargetId, message);
       if (!result.ok) {
         onNotify("error", result.reason ?? "送信に失敗しました");
         return;
       }
       onNotify("success", "個別メッセージを送信しました。");
-      setOpenMessageFor(null);
-      setMessageDrafts((prev) => ({ ...prev, [participantId]: "" }));
+      setMessage("");
     } finally {
-      setSendingFor(null);
+      setSending(false);
     }
   };
 
-  const handleClearMessage = async (participantId: string) => {
-    if (clearingFor) return;
-    setClearingFor(participantId);
+  const handleClear = async () => {
+    if (clearing || !effectiveTargetId) return;
+    setClearing(true);
     try {
-      const result = await clearPrivateMessage(participantId);
+      const result = await clearPrivateMessage(effectiveTargetId);
       if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました");
       else onNotify("success", "表示を消しました。");
     } finally {
-      setClearingFor(null);
+      setClearing(false);
     }
   };
 
-  const handleKick = async (participantId: string, name: string) => {
-    if (kickingId) return;
-    const confirmed = window.confirm(`${name}さんを退場させますか？以降このライブに参加できなくなります。`);
+  const handleKick = async () => {
+    if (kicking || !target) return;
+    const confirmed = window.confirm(`${nameOf(target)}さんを退場させますか？以降このライブに参加できなくなります。`);
     if (!confirmed) return;
-    setKickingId(participantId);
+    setKicking(true);
     try {
-      const result = await kickParticipant(participantId);
+      const result = await kickParticipant(target.id);
       if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました");
       else onNotify("success", "退場させました。");
     } finally {
-      setKickingId(null);
+      setKicking(false);
     }
   };
 
-  const handleUnkick = async (participantId: string) => {
-    if (kickingId) return;
-    setKickingId(participantId);
+  const handleUnkick = async () => {
+    if (kicking || !target) return;
+    setKicking(true);
     try {
-      const result = await unkickParticipant(participantId);
+      const result = await unkickParticipant(target.id);
       if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました");
       else onNotify("success", "退場を解除しました。");
     } finally {
-      setKickingId(null);
+      setKicking(false);
     }
   };
 
   return (
-    <AdminCard title={`参加者：${participants.length}人`}>
-      {maxPlayers != null && (
-        <p className="text-xs text-gray-500">
-          プレイヤー{participants.filter((p) => p.preferred_role === "player").length}/
-          {maxPlayers}人
-        </p>
-      )}
-      <ul className="mt-2 max-h-80 overflow-y-auto text-xs text-gray-700">
-        {participants.map((p) => {
-          const name = hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
-          const groupOrder = p.group_id ? groups.find((g) => g.id === p.group_id)?.group_order : null;
-          // 組分け前は実際のrole（常に'audience'）ではなく、本人の希望(preferred_role)を出す。
-          const statusLabel = p.group_id
-            ? `${ROLE_LABEL[p.role] ?? p.role}・組${groupOrder}`
-            : `${ROLE_LABEL[p.preferred_role] ?? p.preferred_role}希望`;
-          const isKicked = !!p.kicked_at;
+    <>
+      <AdminCard title={`参加者：${participants.length}人`}>
+        {maxPlayers != null && (
+          <p className="text-xs text-gray-500">
+            プレイヤー{participants.filter((p) => p.preferred_role === "player").length}/
+            {maxPlayers}人
+          </p>
+        )}
+        <ul className="mt-2 max-h-56 overflow-y-auto text-xs text-gray-700">
+          {participants.map((p) => {
+            const name = nameOf(p);
+            const groupOrder = p.group_id ? groups.find((g) => g.id === p.group_id)?.group_order : null;
+            // 組分け前は実際のrole（常に'audience'）ではなく、本人の希望(preferred_role)を出す。
+            const statusLabel = p.group_id
+              ? `${ROLE_LABEL[p.role] ?? p.role}・組${groupOrder}`
+              : `${ROLE_LABEL[p.preferred_role] ?? p.preferred_role}希望`;
+            return (
+              <li key={p.id} className="border-b border-gray-100 py-1 last:border-0">
+                {name}（{statusLabel}）
+                {p.kicked_at && <span className="ml-1 font-bold text-red-600">退場中</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </AdminCard>
 
-          return (
-            <li key={p.id} className="border-b border-gray-100 py-1.5 last:border-0">
-              <div className="flex flex-wrap items-center justify-between gap-1.5">
-                <span>
-                  {name}（{statusLabel}）
-                  {isKicked && <span className="ml-1 font-bold text-red-600">退場中</span>}
-                </span>
-                <div className="flex shrink-0 gap-1.5">
-                  <AdminButton
-                    onClick={() => setOpenMessageFor((prev) => (prev === p.id ? null : p.id))}
-                    className="px-1.5 py-0.5 text-[10px]"
-                  >
-                    個別メッセージ
-                  </AdminButton>
-                  {isKicked ? (
-                    <AdminButton
-                      variant="primary"
-                      disabled={kickingId === p.id}
-                      onClick={() => handleUnkick(p.id)}
-                      className="px-1.5 py-0.5 text-[10px]"
-                    >
-                      {kickingId === p.id ? "処理中…" : "退場を解除する"}
-                    </AdminButton>
-                  ) : (
-                    <AdminButton
-                      variant="danger"
-                      disabled={kickingId === p.id}
-                      onClick={() => handleKick(p.id, name)}
-                      className="px-1.5 py-0.5 text-[10px]"
-                    >
-                      {kickingId === p.id ? "処理中…" : "退場させる"}
-                    </AdminButton>
-                  )}
-                </div>
-              </div>
-
-              {p.host_message && (
-                <p className="mt-1 flex items-center gap-1.5 rounded bg-red-50 px-2 py-1 text-[11px] text-red-800">
-                  <span className="flex-1">送信中の個別メッセージ：「{p.host_message}」</span>
-                  <AdminButton
-                    disabled={clearingFor === p.id}
-                    onClick={() => handleClearMessage(p.id)}
-                    className="shrink-0 px-1.5 py-0.5 text-[10px]"
-                  >
-                    {clearingFor === p.id ? "処理中…" : "消す"}
-                  </AdminButton>
-                </p>
-              )}
-
-              {openMessageFor === p.id && (
-                <div className="mt-2 rounded border border-gray-200 p-2">
-                  <AdminTemplateChips
-                    templates={PRIVATE_MESSAGE_TEMPLATES}
-                    onSelect={(t) => setMessageDrafts((prev) => ({ ...prev, [p.id]: t.text }))}
-                  />
-                  <textarea
-                    value={messageDrafts[p.id] ?? ""}
-                    onChange={(e) => setMessageDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                    rows={2}
-                    placeholder="この参加者にだけ表示される警告メッセージ"
-                    className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                  />
-                  <div className="mt-1.5 flex gap-2">
-                    <AdminButton
-                      variant="primary"
-                      disabled={sendingFor === p.id || !(messageDrafts[p.id] ?? "").trim()}
-                      onClick={() => handleSend(p.id)}
-                    >
-                      {sendingFor === p.id ? "送信中…" : "送信する"}
-                    </AdminButton>
-                    <AdminButton onClick={() => setOpenMessageFor(null)}>キャンセル</AdminButton>
-                  </div>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </AdminCard>
+      <AdminCard title="参加者への個別メッセージ・退場">
+        <AdminTemplateChips templates={PRIVATE_MESSAGE_TEMPLATES} onSelect={(t) => setMessage(t.text)} />
+        <div className="mt-2 flex gap-2">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={2}
+            placeholder="この参加者にだけ表示される警告メッセージ"
+            className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs"
+          />
+          <select
+            value={effectiveTargetId}
+            onChange={(e) => setTargetId(e.target.value)}
+            className="rounded border border-gray-300 px-1 py-1 text-xs"
+          >
+            {participants.map((p) => (
+              <option key={p.id} value={p.id}>
+                {nameOf(p)}
+                {p.kicked_at ? "（退場中）" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="mt-2 flex gap-2">
+          <AdminButton
+            variant="primary"
+            disabled={sending || !message.trim() || !effectiveTargetId}
+            onClick={handleSend}
+          >
+            {sending ? "送信中…" : "送信する"}
+          </AdminButton>
+          {target?.kicked_at ? (
+            <AdminButton variant="primary" disabled={kicking} onClick={handleUnkick}>
+              {kicking ? "処理中…" : "退場を解除する"}
+            </AdminButton>
+          ) : (
+            <AdminButton variant="danger" disabled={kicking || !effectiveTargetId} onClick={handleKick}>
+              {kicking ? "処理中…" : "退場させる"}
+            </AdminButton>
+          )}
+        </div>
+        {target?.host_message && (
+          <p className="mt-2 flex items-center gap-1.5 rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] text-red-800">
+            <span className="flex-1">
+              {nameOf(target)}さんに現在表示中：「{target.host_message}」
+            </span>
+            <AdminButton disabled={clearing} onClick={handleClear} className="shrink-0">
+              {clearing ? "処理中…" : "表示を消す"}
+            </AdminButton>
+          </p>
+        )}
+      </AdminCard>
+    </>
   );
 }
 

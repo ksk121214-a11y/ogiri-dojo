@@ -108,7 +108,7 @@ export default function AdminHomePage() {
   const menu: { label: string; description: string; href: string; badge?: string }[] = [
     {
       label: "ライブ予定",
-      description: "ホーム画面・次回ライブ画面に表示する日付やライブ番号を管理します。",
+      description: "ホーム画面・ライブ画面に表示する日付やライブ番号を管理します。",
       href: "/admin/schedule",
     },
     {

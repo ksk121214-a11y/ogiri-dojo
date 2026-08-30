@@ -411,8 +411,26 @@ async function resolveIfDue() {
 
   resolvingAnswerIds.add(active.id);
   try {
-    const scoreTotal = state.scores.reduce((sum, s) => sum + s.points, 0);
-    const topScoreVotes = state.scores.filter((s) => s.points === 3).length;
+    // 2026-08-30:「ボットの回答席が光って音が鳴った直後、実際にはまだ全員の採点が
+    // 揃っていないのに別の人の回答席に切り替わる」不具合対策。scoresはRealtimeイベント
+    // 経由で更新されるため、直前の判定に使ったstate.scoresがまだ最新でないことがある。
+    // 実際に確定する直前でDBから直接最新の採点一覧を取得し直し、本当に確定条件
+    // （全員投票済み、または審査時間切れ）を満たしているか再確認してから確定する。
+    const freshScores = await fetchScoresForAnswer(active.id);
+    const freshVotedJudgeIds = new Set(freshScores.map((s) => s.judge_participant_id));
+    const freshAllVoted =
+      eligibleJudges.length > 0 && eligibleJudges.every((p) => freshVotedJudgeIds.has(p.id));
+    const freshDeadlinePassed =
+      Date.now() >= new Date(active.judging_ends_at).getTime() + LIVE_ROOM_TIMING.judgeGraceMs;
+    if (!freshAllVoted && !freshDeadlinePassed) {
+      // まだ確定できない。取得し直した最新の採点をstateに反映し、次のtickで
+      // 正しい状態から続きを判定できるようにする。
+      useLiveHostStore.setState({ scores: freshScores });
+      return;
+    }
+
+    const scoreTotal = freshScores.reduce((sum, s) => sum + s.points, 0);
+    const topScoreVotes = freshScores.filter((s) => s.points === 3).length;
     const laughTriggered = topScoreVotes > Math.floor(eligibleJudges.length / 2);
 
     const { error } = await supabase
@@ -453,7 +471,7 @@ async function resolveIfDue() {
         resolvedAnswers: s.resolvedAnswers.some((a) => a.id === resolvedEntry.id)
           ? s.resolvedAnswers
           : [...s.resolvedAnswers, resolvedEntry],
-        resolvedScoresByAnswer: { ...s.resolvedScoresByAnswer, [active.id]: state.scores },
+        resolvedScoresByAnswer: { ...s.resolvedScoresByAnswer, [active.id]: freshScores },
       }));
     }
   } finally {
@@ -624,8 +642,21 @@ async function advanceIfDue() {
     const freshState = useLiveHostStore.getState();
     const latest = freshState.live;
     if (!latest || latest.current_phase !== "answering") return;
-    if (isAnsweringBusy(freshState.answers, latest)) {
-      return; // 現在表示中の1件・演出シーケンスが終わるまでは待つ
+
+    // 2026-08-30:「時間切れギリギリで投稿された回答が無視されて次のフェーズに進んで
+    // しまう」不具合対策。answersはRealtimeイベント経由で更新されるため、投稿直後は
+    // まだこのクライアントのstate.answersに反映されていないことがある。フェーズを
+    // 進める直前は必ずDBから直接最新の回答一覧を取得して確認し、state.answersの
+    // キャッシュだけに頼らないようにする（ギリギリの回答も必ず表示・評価されてから
+    // 次のフェーズに進むようにする）。
+    const dbAnswers = latest.current_turn_id
+      ? await fetchAnswersForTurn(latest.current_turn_id)
+      : freshState.answers;
+    if (isAnsweringBusy(dbAnswers, latest)) {
+      // 取得し直した最新の回答をstateにも反映しておき、次のtickでprocessRevealQueue等が
+      // 追いついた状態からすぐ処理を続けられるようにする。
+      useLiveHostStore.setState({ answers: dbAnswers });
+      return; // 現在表示中の1件・演出シーケンス・未表示の回答が残っている間は待つ
     }
     answeringRemainingMsTrue = null;
     lastAnsweringTickAt = null;
