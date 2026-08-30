@@ -75,12 +75,14 @@ export const useLiveBotStore = create<LiveBotState>()((set, get) => ({
 
       let participant = existing as ParticipantRow | null;
       if (!participant) {
+        // 2026-08-30: 運営者専用管理画面の追加（第1段階）で、最大参加人数を
+        // 安全に守るためparticipantsへの直接INSERTを廃止しjoin_live RPCに
+        // 一本化した（src/store/useLiveFollowerStore.tsのjoinLiveと同じ経路）。
         // ボットは基本的にプレイヤー(舞台上)として参加させる。
-        const { data: inserted, error: insertError } = await client
-          .from("participants")
-          .insert({ live_id: liveId, user_id: userId, preferred_role: "player" })
-          .select()
-          .single();
+        const { data: inserted, error: insertError } = await client.rpc("join_live", {
+          p_live_id: liveId,
+          p_preferred_role: "player",
+        });
         if (insertError || !inserted) {
           errors.push(`${email}: 参加登録失敗（${insertError?.message ?? "不明なエラー"}）`);
           continue;

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import Link from "next/link";
+
 import BotSetupPanel from "@/components/live-demo/host/BotSetupPanel";
 import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
@@ -122,6 +124,9 @@ export default function LiveHostPage() {
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-lg flex-col items-center gap-4 px-4 py-8 text-center">
+      <Link href="/admin" className="self-start font-sans text-xs text-dojo-dark-brown underline">
+        ← 運営者専用管理画面トップへ
+      </Link>
       <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
         ライブ準備・操作
       </p>
