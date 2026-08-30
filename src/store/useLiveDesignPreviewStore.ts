@@ -153,6 +153,9 @@ function buildRoster(): {
       role: "player",
       preferred_role: "player",
       joined_at: nowIso,
+      host_message: null,
+      host_message_sent_at: null,
+      kicked_at: null,
     };
   };
 
@@ -164,6 +167,9 @@ function buildRoster(): {
     role: "player",
     preferred_role: "player",
     joined_at: nowIso,
+    host_message: null,
+    host_message_sent_at: null,
+    kicked_at: null,
   };
   const botsA = names.slice(0, 4).map((n) => makeBot(n, groupA));
   const botsB = names.slice(4, 9).map((n) => makeBot(n, groupB));

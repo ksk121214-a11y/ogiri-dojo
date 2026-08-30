@@ -183,6 +183,9 @@ function buildRoster(myGroupSize: number = PREVIEW_MEMBERS_PER_GROUP): {
       role: "player",
       preferred_role: "player",
       joined_at: nowIso,
+      host_message: null,
+      host_message_sent_at: null,
+      kicked_at: null,
     };
   };
 
@@ -194,6 +197,9 @@ function buildRoster(myGroupSize: number = PREVIEW_MEMBERS_PER_GROUP): {
     role: "player",
     preferred_role: "player",
     joined_at: nowIso,
+    host_message: null,
+    host_message_sent_at: null,
+    kicked_at: null,
   };
 
   // 自分の枠(1人)を差し引いた残り全員ぶんの名前をシャッフルして各組に配分する。

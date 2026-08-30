@@ -83,6 +83,12 @@ export interface ParticipantRow {
   role: ParticipantRole;
   preferred_role: ParticipantRole;
   joined_at: string;
+  // 2026-08-30: 司会コンソールからの個別メッセージ（警告用）・退場機能で追加。
+  // host_messageは全員向けのlives.announcement_messageとは別に、この参加者
+  // 本人の画面にだけ表示する。kicked_atが入っている間はライブへの参加をブロックする。
+  host_message: string | null;
+  host_message_sent_at: string | null;
+  kicked_at: string | null;
 }
 
 export type TurnStatus = "pending" | "active" | "done";

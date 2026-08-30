@@ -45,11 +45,13 @@ export type BgmName = keyof typeof BGM_PATHS;
 // 2026-08-29: 「bgmが全体的にデカすぎる、特にライブ中は結構下げて」の要望で全体を
 // 引き下げた（waiting/entrance/home: 0.13→0.08→0.05、live: 0.06→0.025→0.012と
 // 特に大きく下げる）。
+// 2026-08-30: 「BGMをほんの少しだけ音量上げて」の要望で、下げすぎだった分を
+// ごくわずかに戻した（waiting/entrance/home: 0.05→0.06、live: 0.012→0.015）。
 const BGM_VOLUME: Record<BgmName, number> = {
-  waiting: 0.05,
-  entrance: 0.05,
-  live: 0.012,
-  home: 0.05,
+  waiting: 0.06,
+  entrance: 0.06,
+  live: 0.015,
+  home: 0.06,
 };
 const FADE_MS = 700;
 
@@ -81,7 +83,8 @@ export const SFX_PATHS = {
 
 export type SfxName = keyof typeof SFX_PATHS;
 
-const SE_VOLUME = 0.45;
+// 2026-08-30: 「効果音をほんの少しだけ下げて」の要望でごくわずかに引き下げた。
+const SE_VOLUME = 0.38;
 
 // ============================================================
 // 状態

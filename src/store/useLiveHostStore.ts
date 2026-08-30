@@ -87,6 +87,14 @@ interface LiveHostState {
   ) => Promise<{ ok: boolean; reason?: string }>;
   sendAnnouncement: (message: string, scope: "player" | "all") => Promise<{ ok: boolean; reason?: string }>;
   clearAnnouncement: () => Promise<{ ok: boolean; reason?: string }>;
+  // 参加者個別への運営メッセージ（警告用）。全員向けのsendAnnouncementとは別に、
+  // 特定の参加者本人の画面にだけ表示する。
+  sendPrivateMessage: (participantId: string, message: string) => Promise<{ ok: boolean; reason?: string }>;
+  clearPrivateMessage: (participantId: string) => Promise<{ ok: boolean; reason?: string }>;
+  // ライブからの退場（本人はブロック画面になり、以降の参加・回答ができなくなる）。
+  // 誤操作の事故防止のため解除もできるようにする。
+  kickParticipant: (participantId: string) => Promise<{ ok: boolean; reason?: string }>;
+  unkickParticipant: (participantId: string) => Promise<{ ok: boolean; reason?: string }>;
   // 受付中（interlude/opening）でも組数・最大参加人数を調整できるようにする。
   // 組数を変えた場合は、既存のgroupsとの整合を取るため「ランダムに振り分ける」を
   // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
@@ -1070,6 +1078,76 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { error } = await updateLive(live.id, { announcement_message: null });
     if (error) return { ok: false, reason: error.message };
+    return { ok: true };
+  },
+
+  sendPrivateMessage: async (participantId, message) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const trimmed = message.trim();
+    if (!trimmed) return { ok: false, reason: "メッセージを入力してください" };
+    const { error } = await supabase
+      .from("participants")
+      .update({ host_message: trimmed, host_message_sent_at: new Date().toISOString() })
+      .eq("id", participantId);
+    if (error) return { ok: false, reason: error.message };
+    await logAdminAction({
+      action: "participant_private_message_sent",
+      targetType: "participants",
+      targetId: participantId,
+      detail: { message: trimmed },
+    });
+    const children = await fetchLiveChildren(live.id);
+    set({ participants: children.participants });
+    return { ok: true };
+  },
+
+  clearPrivateMessage: async (participantId) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { error } = await supabase
+      .from("participants")
+      .update({ host_message: null })
+      .eq("id", participantId);
+    if (error) return { ok: false, reason: error.message };
+    const children = await fetchLiveChildren(live.id);
+    set({ participants: children.participants });
+    return { ok: true };
+  },
+
+  kickParticipant: async (participantId) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { error } = await supabase
+      .from("participants")
+      .update({ kicked_at: new Date().toISOString() })
+      .eq("id", participantId);
+    if (error) return { ok: false, reason: error.message };
+    await logAdminAction({
+      action: "participant_kicked",
+      targetType: "participants",
+      targetId: participantId,
+    });
+    const children = await fetchLiveChildren(live.id);
+    set({ participants: children.participants });
+    return { ok: true };
+  },
+
+  unkickParticipant: async (participantId) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { error } = await supabase
+      .from("participants")
+      .update({ kicked_at: null })
+      .eq("id", participantId);
+    if (error) return { ok: false, reason: error.message };
+    await logAdminAction({
+      action: "participant_unkicked",
+      targetType: "participants",
+      targetId: participantId,
+    });
+    const children = await fetchLiveChildren(live.id);
+    set({ participants: children.participants });
     return { ok: true };
   },
 

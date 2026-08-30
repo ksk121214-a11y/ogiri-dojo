@@ -14,6 +14,9 @@ export const ACTION_LABEL: Record<string, string> = {
   capacity_updated: "最大人数・組数を変更した",
   game_started: "ゲームを開始した",
   live_closed: "ライブを終了した",
+  participant_private_message_sent: "参加者に個別メッセージを送った",
+  participant_kicked: "参加者を退場させた",
+  participant_unkicked: "参加者の退場を解除した",
 
   // ライブ予定
   schedule_entry_created: "ライブ予定を作成した",

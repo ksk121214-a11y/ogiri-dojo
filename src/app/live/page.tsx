@@ -142,6 +142,21 @@ export default function LivePage() {
     );
   }
 
+  // 2026-08-30: 司会コンソールから退場させられた参加者は、以降の画面遷移・回答操作を
+  // すべてブロックする（immersive/通常表示どちらに入る前に、ここで確実に止める）。
+  if (myParticipant?.kicked_at) {
+    return (
+      <CenterMessage>
+        <p className="mb-2 font-sans text-base font-bold text-dojo-ink">
+          運営により退場となりました
+        </p>
+        <p className="font-sans text-xs text-dojo-dark-brown/70">
+          このライブへの参加はできません。
+        </p>
+      </CenterMessage>
+    );
+  }
+
   const isMyGroupOnStage =
     !!myParticipant && !!currentTurn && myParticipant.group_id === currentTurn.group_id;
 
