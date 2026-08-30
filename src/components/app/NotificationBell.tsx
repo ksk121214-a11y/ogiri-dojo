@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { BellGlyph } from "@/components/home/icons";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 
@@ -63,7 +64,7 @@ export default function NotificationBell() {
         aria-label="お知らせを開く"
         className="relative flex h-6 w-6 items-center justify-center rounded-full text-[var(--muted-on-dark)] transition hover:text-[var(--text-on-dark)]"
       >
-        🔔
+        <BellGlyph />
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-[var(--accent)] text-[8px] font-black leading-none text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
