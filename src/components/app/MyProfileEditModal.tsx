@@ -124,7 +124,7 @@ export default function MyProfileEditModal({
 
             <div className="shrink-0">
               <p className="mb-1.5 font-sans text-xs font-bold text-[var(--ink)]/70">絵柄</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {AVATAR_ICON_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
