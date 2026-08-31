@@ -45,6 +45,13 @@ interface ParticipationRow {
   role: string;
   joined_at: string;
 }
+interface WarningNotificationRow {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  is_hidden: boolean;
+}
 
 // よく使う警告理由・警告本文の定型文セット。クリックすると理由・本文の両方に
 // セットされ、その後は自由に書き換えられる（定型文のまま送ることも、
@@ -99,6 +106,8 @@ export default function AdminUserDetailPage() {
   const [sanctions, setSanctions] = useState<SanctionRow[]>([]);
   const [reported, setReported] = useState<ReportedRow[]>([]);
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
+  const [warningNotifications, setWarningNotifications] = useState<WarningNotificationRow[]>([]);
+  const [togglingNotificationId, setTogglingNotificationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [memoDraft, setMemoDraft] = useState("");
   // 警告フォーム（定型文＋自由入力）。window.promptの連鎖では定型文を選べないため、
@@ -124,6 +133,7 @@ export default function AdminUserDetailPage() {
       { data: sanctionData },
       { data: reportData },
       { data: participationData },
+      { data: warningNotificationData },
     ] = await Promise.all([
       supabase
         .from("profiles")
@@ -139,6 +149,12 @@ export default function AdminUserDetailPage() {
         .eq("target_author_id", userId)
         .order("created_at", { ascending: false }),
       supabase.from("participants").select("*").eq("user_id", userId).order("joined_at", { ascending: false }),
+      supabase
+        .from("notifications")
+        .select("id, title, body, created_at, is_hidden")
+        .eq("user_id", userId)
+        .eq("type", "warning")
+        .order("created_at", { ascending: false }),
     ]);
     setProfile(profileData as ProfileDetail | null);
     setPostCount(topicsCount ?? 0);
@@ -147,6 +163,7 @@ export default function AdminUserDetailPage() {
     setSanctions(sanctionRows);
     setReported((reportData ?? []) as ReportedRow[]);
     setParticipations((participationData ?? []) as ParticipationRow[]);
+    setWarningNotifications((warningNotificationData ?? []) as WarningNotificationRow[]);
     setMemoDraft((profileData as ProfileDetail | null)?.admin_memo ?? "");
     setLoading(false);
 
@@ -231,6 +248,31 @@ export default function AdminUserDetailPage() {
       await load();
     } finally {
       setPendingAction(null);
+    }
+  };
+
+  // 通知ベルに届いた「運営からの警告」を、後から非公開にする/再公開する。
+  // 警告そのもの（user_sanctions＝対応履歴）は削除・変更しない。あくまで
+  // 本人の通知ベルに表示するかどうかだけを切り替える。
+  const handleToggleWarningNotificationHidden = async (n: WarningNotificationRow) => {
+    if (togglingNotificationId) return;
+    const nextHidden = !n.is_hidden;
+    setTogglingNotificationId(n.id);
+    try {
+      const { error } = await supabase.from("notifications").update({ is_hidden: nextHidden }).eq("id", n.id);
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
+      await logAdminAction({
+        action: nextHidden ? "warning_notification_hidden" : "warning_notification_unhidden",
+        targetType: "notifications",
+        targetId: n.id,
+      });
+      notifySuccess(nextHidden ? "通知ベルから非公開にしました。" : "通知ベルに再表示しました。");
+      await load();
+    } finally {
+      setTogglingNotificationId(null);
     }
   };
 
@@ -399,6 +441,43 @@ export default function AdminUserDetailPage() {
           ))}
           {sanctions.length === 0 && <li>対応履歴はありません。</li>}
         </ul>
+      </AdminCard>
+
+      <AdminCard title={`通知ベルに届いた警告（${warningNotifications.length}件）`}>
+        {warningNotifications.length === 0 ? (
+          <p className="text-xs text-gray-500">送った警告はありません。</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {warningNotifications.map((n) => (
+              <li key={n.id} className="rounded border border-gray-200 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-gray-500">
+                    {new Date(n.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                  </p>
+                  {n.is_hidden && (
+                    <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
+                      非公開中
+                    </span>
+                  )}
+                </div>
+                <p className={`mt-0.5 text-xs ${n.is_hidden ? "text-gray-400" : "text-gray-700"}`}>{n.body}</p>
+                <div className="mt-1.5">
+                  <AdminButton
+                    variant={n.is_hidden ? "secondary" : "danger"}
+                    disabled={togglingNotificationId === n.id}
+                    onClick={() => handleToggleWarningNotificationHidden(n)}
+                  >
+                    {togglingNotificationId === n.id
+                      ? "処理中…"
+                      : n.is_hidden
+                        ? "通知ベルに再表示する"
+                        : "通知ベルから非公開にする"}
+                  </AdminButton>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </AdminCard>
 
       <AdminCard title="運営メモ">

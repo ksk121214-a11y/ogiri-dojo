@@ -48,6 +48,8 @@ export const ACTION_LABEL: Record<string, string> = {
   user_suspend_permanent: "永久停止にした",
   user_lift: "利用停止を解除した",
   user_deleted: "アカウントを完全削除した",
+  warning_notification_hidden: "警告の通知を非公開にした",
+  warning_notification_unhidden: "警告の通知を再表示した",
 
   // ライブ結果（SNS掲載）
   sns_live_result_answer_excluded: "ライブ結果の掲載回答を除外した",
