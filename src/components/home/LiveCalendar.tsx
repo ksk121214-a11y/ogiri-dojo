@@ -93,7 +93,10 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-y-1 text-center">
+      {/* 7列がカード幅いっぱいに広がると、丸自体は小さいまま列だけが広くなり
+          隣り合う日付の数字の間が間延びして見えるため、グリッド全体の幅を
+          絞って中央寄せし、数字同士の間隔を詰める（丸のサイズ自体は変えない）。 */}
+      <div className="mx-auto grid w-full max-w-[280px] grid-cols-7 gap-y-1 text-center">
         {WEEKDAY_LABELS.map((w, i) => (
           <div
             key={w}
@@ -114,7 +117,7 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
           return (
             <div key={i} className="flex flex-col items-center gap-0.5 py-1">
               <span
-                className={`flex h-6 w-6 items-center justify-center rounded-full font-sans text-sm ${
+                className={`flex h-7 w-7 items-center justify-center rounded-full font-sans text-sm ${
                   day == null ? "" : mark ? MARK_STYLE[mark.kind] : `${baseColor} font-bold`
                 }`}
               >
