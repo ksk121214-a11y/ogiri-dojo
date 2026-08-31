@@ -5,10 +5,8 @@ import Link from "next/link";
 import AvatarGlyph from "@/components/app/AvatarGlyph";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton, { type ReportTargetType } from "@/components/app/ReportButton";
-import { getRankByMeter } from "@/data/collectionData";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
-import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -40,16 +38,16 @@ export default function SnsAuthorBadge({
   hideReportButton?: boolean;
 }) {
   const user = useUserStore((s) => s.user);
-  const profile = useProfileStore((s) => s.profile);
   // 2026-08-30: 早期returnより前でフックを呼ぶ必要がある（Rules of Hooks）ため、
   // isMeケースでは使わない値でも、ここで一度だけ呼んでおく。
   const realAuthor = useSnsStore((s) => s.realAuthorNames[authorId]);
   const isMe = authorId === "me";
 
+  // 2026-08-31: 段位表示はプロフィールページ（SnsAuthorProfile.tsx）だけに残し、
+  // お題・回答一覧等のカード内バッジからは外した（他ユーザーの段位を解決していない
+  // 場面で「全員見習い」に見えてしまっていたため。カード単位で全員ぶんの段位を
+  // 解決するのは負荷も見合わないという判断）。
   if (isMe) {
-    // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
-    const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
-
     return (
       <span className="flex min-w-0 items-center gap-2">
         <Link
@@ -58,13 +56,8 @@ export default function SnsAuthorBadge({
           className="flex min-w-0 items-center gap-2"
         >
           <MyIconAvatar size={size} bare />
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
-              {user.displayName}
-            </span>
-            <span className="font-sans text-[10px] text-[var(--ink)]/60">
-              {rank.label}
-            </span>
+          <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
+            {user.displayName}
           </span>
         </Link>
       </span>
@@ -104,13 +97,8 @@ export default function SnsAuthorBadge({
             "🎭"
           )}
         </span>
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
-            {author?.displayName ?? realAuthor?.displayName ?? "名無しの演者"}
-          </span>
-          <span className="font-sans text-[10px] text-[var(--ink)]/60">
-            {author?.rankLabel ?? "見習い"}
-          </span>
+        <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
+          {author?.displayName ?? realAuthor?.displayName ?? "名無しの演者"}
         </span>
       </Link>
       {!hideReportButton && (

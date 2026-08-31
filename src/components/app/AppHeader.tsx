@@ -56,7 +56,7 @@ export default function AppHeader() {
                 {displayName}
               </span>
               <span className="shrink-0 font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
-                {user.points.toLocaleString()}pt
+                {(profile?.pointsBalance ?? user.points).toLocaleString()}pt
               </span>
             </button>
             {!authLoading && (

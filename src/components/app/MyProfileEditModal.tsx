@@ -109,7 +109,7 @@ export default function MyProfileEditModal({
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
-        className={`${styles.grainPaper} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        className={`${styles.grainPaper} flex max-h-[76vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
       >
         <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
 

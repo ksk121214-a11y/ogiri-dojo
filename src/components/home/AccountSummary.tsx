@@ -53,10 +53,17 @@ export default function AccountSummary() {
         aria-haspopup="dialog"
         className={`${styles.pressable} shrink-0 rounded-xl px-2 py-1 text-right transition hover:bg-[var(--ink)]/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
       >
-        <p className="text-xs text-[var(--ink)]/60">ポイント残高</p>
+        {/* 2026-08-31: 固定ダミー値(5000pt)のまま変わらなかったのを修正し、
+            ライブ終了時に加算される実データ（profiles）を表示するようにした。
+            見出しは「累計ポイント」（消費されず積み上がる値）を主表示にし、
+            その下に小さく「ポイント残高」（将来ガチャ等で消費されうる値）を添える。 */}
+        <p className="text-xs text-[var(--ink)]/60">累計ポイント</p>
         <p className="text-2xl font-black tabular-nums text-[var(--accent)]">
-          {user.points.toLocaleString()}
+          {(profile?.totalPoints ?? user.points).toLocaleString()}
           <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/60">pt</span>
+        </p>
+        <p className="text-[10px] text-[var(--ink)]/50">
+          残高 {(profile?.pointsBalance ?? user.points).toLocaleString()}pt
         </p>
       </button>
 
