@@ -23,9 +23,25 @@ const nextConfig: NextConfig = {
     const immutableCacheHeaders = [
       { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
     ];
+    // 2026-09-01：初回ライブ実開催前のセキュリティ点検で追加。Vercelはこの種の
+    // セキュリティヘッダーを自動では付与しないため明示する。script-src/style-src
+    // を縛る本格的なContent-Security-Policyは、Framer Motion等の実行時インライン
+    // スタイルを壊すリスクを実機確認なしに判断できないため今回は見送り、壊れる
+    // 心配のない項目（クリックジャッキング対策・MIMEスニッフィング対策・
+    // リファラー漏洩対策・不要な端末機能へのアクセス無効化）だけを追加する。
+    const securityHeaders = [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      {
+        key: "Permissions-Policy",
+        value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+      },
+    ];
     return [
       { source: "/images/:path*", headers: immutableCacheHeaders },
       { source: "/sounds/:path*", headers: immutableCacheHeaders },
+      { source: "/:path*", headers: securityHeaders },
     ];
   },
 };

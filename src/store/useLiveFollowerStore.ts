@@ -467,7 +467,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
           ? "ゲームが始まったため、プレイヤーとしての参加登録はできません。観客として参加してください。"
           : error.message.includes("PARTICIPANT_KICKED")
             ? "このライブへの参加はできません。"
-            : error.message;
+            : error.message.includes("ACCOUNT_SUSPENDED")
+              ? "現在アカウントが利用停止中のため、ライブに参加できません。"
+              : error.message;
       set({ error: reason });
       return;
     }
