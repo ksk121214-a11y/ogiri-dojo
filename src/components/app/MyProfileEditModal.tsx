@@ -114,17 +114,17 @@ export default function MyProfileEditModal({
         <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
 
         <div className="flex flex-col gap-3">
-          {/* 2026-08-31:「大きい現在アイコンを左に、小さい選択アイコンを右に縦の
-              列並びで」の要望で、これまでの縦積み（大アイコン→絵柄グリッド→色）から、
-              左＝現在のアイコン、右＝選べる絵柄（縦に伸びる列）の横並びに変更した。 */}
-          <div className="flex items-start gap-4">
+          {/* 2026-08-31: 現在のアイコン→絵柄（詰めて左寄せ）→色（縦一列）の
+              3ブロック横並びに変更。絵柄はcontentサイズ（flex-1にしない）にして
+              アイコンのすぐ右に詰め、余った右側を色の縦一列に充てる。 */}
+          <div className="flex items-start gap-3">
             <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--ink)]/20 bg-white">
               <AvatarGlyph iconSrc={getAvatarIconSrc(icon)} silhouetteSrc={getAvatarSilhouetteSrc(icon)} color={color} size={64} />
             </span>
 
-            <div className="min-w-0 flex-1">
+            <div className="shrink-0">
               <p className="mb-1.5 font-sans text-xs font-bold text-[var(--ink)]/70">絵柄</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {AVATAR_ICON_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
@@ -143,26 +143,26 @@ export default function MyProfileEditModal({
                 ))}
               </div>
             </div>
-          </div>
 
-          <div>
-            <p className="mb-1.5 text-center font-sans text-xs font-bold text-[var(--ink)]/70">色</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {AVATAR_COLOR_PRESETS.map((preset) => (
-                <button
-                  key={preset.value}
-                  type="button"
-                  onClick={() => setColor(preset.value)}
-                  aria-label={preset.label}
-                  aria-pressed={color === preset.value}
-                  className={`${styles.pressable} h-8 w-8 rounded-full border border-[var(--ink)]/15 transition ${
-                    color === preset.value
-                      ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--paper)]"
-                      : "hover:scale-110"
-                  }`}
-                  style={{ backgroundColor: preset.value }}
-                />
-              ))}
+            <div className="ml-auto flex flex-col items-center">
+              <p className="mb-1.5 font-sans text-xs font-bold text-[var(--ink)]/70">色</p>
+              <div className="flex flex-col gap-2">
+                {AVATAR_COLOR_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setColor(preset.value)}
+                    aria-label={preset.label}
+                    aria-pressed={color === preset.value}
+                    className={`${styles.pressable} h-8 w-8 rounded-full border border-[var(--ink)]/15 transition ${
+                      color === preset.value
+                        ? "ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--paper)]"
+                        : "hover:scale-110"
+                    }`}
+                    style={{ backgroundColor: preset.value }}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
