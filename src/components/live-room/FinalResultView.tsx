@@ -8,7 +8,7 @@ import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
 import MasteryGauge from "@/components/live-demo/MasteryGauge";
-import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
+import { MASTERY_GAIN } from "@/data/collectionData";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
@@ -30,9 +30,19 @@ const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 //   （closeLive→apply_live_rank_rewards）時にDB側で確定するため、ここでの表示は
 //   同じ計算式で見込み値を先出しするプレビューという位置づけ（現在のprofiles.mastery_meter
 //   を起点に、今回の得点ぶんだけゲージが伸びる）。
+// 2026-09-01：段位（熟練度メーター）用の順位ボーナスと、累計ポイント用の順位ボーナスが
+// 別の数字（100/60/30 と 300/200/100）だったため紛らわしいという指摘を受け、
+// 段位・ポイントとも同じ1つの式（MASTERY_GAIN、1位+100/2位+60/3位+30、参加+10、
+// ベストアンサー+50）に統一した。カード上の「表彰ボーナス」は順位ぶんだけ、末尾の
+// 「獲得ポイント」は参加基礎点＋得点＋順位ボーナスの合計、と役割が違うため
+// 同じ数字が二重に見える心配もなくなる。
 const RANK_LABEL = ["1位", "2位", "3位"];
 const RANK_COLOR = ["text-[#ffcf4a]", "text-[#8a93c7]", "text-[#ff8f4a]"];
-const RANK_BONUS_POINTS = [BONUS_BY_RANK.first, BONUS_BY_RANK.second, BONUS_BY_RANK.third];
+const RANK_BONUS_POINTS = [
+  MASTERY_GAIN.rankBonus.first,
+  MASTERY_GAIN.rankBonus.second,
+  MASTERY_GAIN.rankBonus.third,
+];
 
 export default function FinalResultView({
   data,
@@ -59,11 +69,12 @@ export default function FinalResultView({
     playSfx("rankReveal");
   }, [step]);
 
-  // 自分がプレイヤーとしてランキングに載っている場合のみ、今回の獲得ぶん（熟練度・
-  // 表彰ポイント）を計算する（観客は対象外＝ranking自体に登場しない）。
+  // 自分がプレイヤーとしてランキングに載っている場合のみ、今回の獲得ぶんを計算する
+  // （観客は対象外＝ranking自体に登場しない）。段位（熟練度メーター）と累計ポイント／
+  // ポイント残高は同じ1つの式で加算されるため、gainは1つだけ計算すればよい。
   const myEntry = data.ranking.find((r) => r.participantId === myParticipantId);
   const gotBestAnswer = data.bestAnswer?.participantId === myParticipantId;
-  const masteryRankBonus =
+  const rankBonus =
     data.myRank === 1
       ? MASTERY_GAIN.rankBonus.first
       : data.myRank === 2
@@ -71,21 +82,9 @@ export default function FinalResultView({
         : data.myRank === 3
           ? MASTERY_GAIN.rankBonus.third
           : 0;
-  const pointsRankBonus =
-    data.myRank === 1
-      ? BONUS_BY_RANK.first
-      : data.myRank === 2
-        ? BONUS_BY_RANK.second
-        : data.myRank === 3
-          ? BONUS_BY_RANK.third
-          : BONUS_BY_RANK.participation;
-  const masteryGain = myEntry
-    ? MASTERY_GAIN.participation +
-      myEntry.total +
-      masteryRankBonus +
-      (gotBestAnswer ? MASTERY_GAIN.bestAnswer : 0)
+  const gain = myEntry
+    ? MASTERY_GAIN.participation + myEntry.total + rankBonus + (gotBestAnswer ? MASTERY_GAIN.bestAnswer : 0)
     : 0;
-  const pointsGain = myEntry ? pointsRankBonus + (gotBestAnswer ? BEST_ANSWER_BONUS_POINTS : 0) : 0;
 
   return (
     <div className="w-full max-w-md rounded-[28px] border-[5px] border-[#3b5bff] bg-white p-5 text-[#1a1a3a] shadow-[0_0_40px_rgba(59,91,255,0.45)]">
@@ -198,11 +197,11 @@ export default function FinalResultView({
             熟練度メーター獲得
           </p>
           <div className="mt-3">
-            <MasteryGauge baseline={profile.masteryMeter} gained={masteryGain} />
+            <MasteryGauge baseline={profile.masteryMeter} gained={gain} />
           </div>
           <p className="mt-3 font-sans text-xs text-white/80">
             獲得ポイント：
-            <span className="font-bold text-[#ffcf4a]">+{pointsGain}pt</span>
+            <span className="font-bold text-[#ffcf4a]">+{gain}pt</span>
           </p>
         </motion.div>
       )}
