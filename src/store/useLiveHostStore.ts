@@ -1373,6 +1373,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: true };
     }
     await logAdminAction({ action: "live_closed", targetType: "lives", targetId: live.id });
+    // 参加した各プレイヤーへ、得点に応じた段位(mastery_meter)・累計ポイント・
+    // ポイント残高・参加回数・表彰回数・ベストアンサー回数を加算する
+    // （security definer関数側で二重付与防止済み）。失敗してもライブの終了自体は
+    // 止めない（logAdminActionと同じ「補助処理は本処理を止めない」方針）。
+    const { error: rewardError } = await supabase.rpc("apply_live_rank_rewards", { p_live_id: live.id });
+    if (rewardError) console.warn("[live] 段位・ポイントの加算に失敗", rewardError);
     cleanupChannels();
     useLiveBotStore.getState().removeAllBots();
     // closed状態の行を持ち続けると画面が「開始前」に戻らない(!liveでのみ判定しているため)。

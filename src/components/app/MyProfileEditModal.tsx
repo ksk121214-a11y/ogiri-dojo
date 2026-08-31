@@ -28,19 +28,23 @@ export default function MyProfileEditModal({
   onClose: () => void;
 }) {
   const user = useUserStore((s) => s.user);
-  const updateBio = useUserStore((s) => s.updateBio);
+  const updateLocalBio = useUserStore((s) => s.updateBio);
   const updateAvatarColor = useUserStore((s) => s.updateAvatarColor);
   const updateAvatarIcon = useUserStore((s) => s.updateAvatarIcon);
   const profile = useProfileStore((s) => s.profile);
   const updateDisplayName = useProfileStore((s) => s.updateDisplayName);
   const updateAvatar = useProfileStore((s) => s.updateAvatar);
+  const updateBio = useProfileStore((s) => s.updateBio);
 
   const currentName = profile?.displayName ?? user.displayName;
 
   const [color, setColor] = useState(user.avatarColor);
   const [icon, setIcon] = useState(user.avatarIcon);
   const [name, setName] = useState(currentName);
-  const [bio, setBio] = useState(user.bio);
+  // 2026-08-31: 一言コメントはログイン中ならprofiles.bio（実データ、他ユーザーの
+  // プロフィールにも表示される）を初期値にする。未ログイン時は従来どおり
+  // useUserStore（この端末のみのダミー）を使う。
+  const [bio, setBio] = useState(profile?.bio ?? user.bio);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -61,7 +65,7 @@ export default function MyProfileEditModal({
 
     updateAvatarColor(color);
     updateAvatarIcon(icon);
-    updateBio(bio.trim());
+    updateLocalBio(bio.trim());
 
     if (profile) {
       // 2026-08-29:「ライブ中、自分のアイコンが相手の画面ではランダムなアイコンに
@@ -78,6 +82,14 @@ export default function MyProfileEditModal({
       if (!result.ok) {
         setSubmitting(false);
         setError(result.reason);
+        return;
+      }
+      // 2026-08-31: 一言コメントもSupabase（profiles.bio）へ保存し、他ユーザーの
+      // プロフィールからも見られるようにする。
+      const bioResult = await updateBio(bio.trim());
+      if (!bioResult.ok) {
+        setSubmitting(false);
+        setError(bioResult.reason);
         return;
       }
     } else {
@@ -97,7 +109,7 @@ export default function MyProfileEditModal({
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
-        className={`${styles.grainPaper} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-3xl p-6 text-[var(--ink)] shadow-2xl`}
+        className={`${styles.grainPaper} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
       >
         <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
 

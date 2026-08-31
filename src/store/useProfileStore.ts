@@ -20,6 +20,18 @@ export interface DojoProfile {
   // 正しく伝わるよう、useUserStore（ローカルのみ）ではなくprofilesに保存する。
   avatarIcon: string;
   avatarColor: string;
+  // 2026-08-31（段位・ポイント・実績の実データ化）：一言コメントと、ライブ終了時に
+  // apply_live_rank_rewards()（security definer関数）が加算する各種実績値。
+  // これらはクライアントから直接updateできない列（bioのみ本人が自由に編集可）。
+  bio: string;
+  masteryMeter: number;
+  totalPoints: number;
+  pointsBalance: number;
+  liveCount: number;
+  awardCountFirst: number;
+  awardCountSecond: number;
+  awardCountThird: number;
+  bestAnswerCount: number;
 }
 
 interface ProfileState {
@@ -32,6 +44,7 @@ interface ProfileState {
     icon: string,
     color: string,
   ) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  updateBio: (bio: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 function toDojoProfile(row: {
@@ -43,6 +56,15 @@ function toDojoProfile(row: {
   role: string;
   avatar_icon: string;
   avatar_color: string;
+  bio: string | null;
+  mastery_meter: number;
+  total_points: number;
+  points_balance: number;
+  live_count: number;
+  award_count_first: number;
+  award_count_second: number;
+  award_count_third: number;
+  best_answer_count: number;
 }): DojoProfile {
   return {
     id: row.id,
@@ -57,13 +79,24 @@ function toDojoProfile(row: {
     isHost: row.role === "admin",
     avatarIcon: row.avatar_icon,
     avatarColor: row.avatar_color,
+    bio: row.bio ?? "",
+    masteryMeter: row.mastery_meter,
+    totalPoints: row.total_points,
+    pointsBalance: row.points_balance,
+    liveCount: row.live_count,
+    awardCountFirst: row.award_count_first,
+    awardCountSecond: row.award_count_second,
+    awardCountThird: row.award_count_third,
+    bestAnswerCount: row.best_answer_count,
   };
 }
 
 async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color")
+    .select(
+      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count",
+    )
     .eq("id", userId)
     .single();
   if (error || !data) return null;
@@ -111,6 +144,17 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     if (error) return { ok: false, reason: error.message };
 
     set((s) => (s.profile ? { profile: { ...s.profile, avatarIcon: icon, avatarColor: color } } : s));
+    return { ok: true };
+  },
+
+  updateBio: async (bio) => {
+    const userId = get().profile?.id;
+    if (!userId) return { ok: false, reason: "ログインしていません" };
+
+    const { error } = await supabase.from("profiles").update({ bio }).eq("id", userId);
+    if (error) return { ok: false, reason: error.message };
+
+    set((s) => (s.profile ? { profile: { ...s.profile, bio } } : s));
     return { ok: true };
   },
 }));

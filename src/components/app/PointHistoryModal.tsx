@@ -1,14 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
-import { POINT_HISTORY } from "@/data/pointHistoryData";
-import { useUserStore } from "@/store/useUserStore";
+import { supabase } from "@/lib/supabase";
+import { useProfileStore } from "@/store/useProfileStore";
+
+interface PointHistoryRow {
+  id: string;
+  points: number;
+  label: string;
+  created_at: string;
+}
 
 // ヘッダー（畳生成りテーマの/ranking・/gacha等）の「段位・名前・ポイント」バッジ、または
 // ホーム/マイページ（地下ライブハウステーマ）の「ポイント残高」表示を押すと開く獲得履歴モーダル。
 // 2026-08-28: ホーム下部のポイント残高（AccountSummary）から開けるようにしたのに合わせて、
 // variant="stadium"のときだけ見た目を地下ライブハウステーマに合わせられるようにした
 // （畳生成りテーマ側のAppHeaderからの利用は従来通りvariant="dojo"のまま）。
+// 2026-08-31（段位・ポイント・実績の実データ化）：固定ダミー配列(POINT_HISTORY)ではなく、
+// Supabaseのpoint_history（ライブ終了時にapply_live_rank_rewards()が1行ずつ記録する）を
+// ログイン中の自分の分だけ取得して表示するようにした。ポイント残高もuseProfileStoreの実データ。
 export default function PointHistoryModal({
   onClose,
   variant = "dojo",
@@ -16,8 +28,50 @@ export default function PointHistoryModal({
   onClose: () => void;
   variant?: "dojo" | "stadium";
 }) {
-  const points = useUserStore((s) => s.user.points);
+  const profile = useProfileStore((s) => s.profile);
+  const points = profile?.pointsBalance ?? 0;
   const isStadium = variant === "stadium";
+
+  const [history, setHistory] = useState<PointHistoryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("point_history")
+      .select("id, points, label, created_at")
+      .eq("user_id", profile.id)
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setHistory((data ?? []) as PointHistoryRow[]);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+
+  const listBody = !profile ? (
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+      ログインするとライブで獲得したポイントの履歴がここに表示されます。
+    </p>
+  ) : loading ? (
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">読み込み中…</p>
+  ) : history.length === 0 ? (
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+      まだ獲得履歴がありません。ライブに参加してみましょう。
+    </p>
+  ) : null;
 
   if (isStadium) {
     return (
@@ -50,7 +104,8 @@ export default function PointHistoryModal({
           </div>
 
           <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-            {POINT_HISTORY.map((entry) => (
+            {listBody}
+            {history.map((entry) => (
               <div
                 key={entry.id}
                 className="flex items-center justify-between gap-3 rounded-xl bg-[var(--ink)]/5 px-3 py-2"
@@ -60,16 +115,16 @@ export default function PointHistoryModal({
                     {entry.label}
                   </p>
                   <p className="font-sans text-[10px] text-[var(--ink)]/60">
-                    {entry.dateLabel}
+                    {formatDate(entry.created_at)}
                   </p>
                 </div>
                 <span
                   className={`shrink-0 font-sans text-sm font-bold tabular-nums ${
-                    entry.amount >= 0 ? "text-dojo-tatami-green" : "text-[var(--accent)]"
+                    entry.points >= 0 ? "text-dojo-tatami-green" : "text-[var(--accent)]"
                   }`}
                 >
-                  {entry.amount >= 0 ? "+" : ""}
-                  {entry.amount.toLocaleString()}pt
+                  {entry.points >= 0 ? "+" : ""}
+                  {entry.points.toLocaleString()}pt
                 </span>
               </div>
             ))}
@@ -109,7 +164,8 @@ export default function PointHistoryModal({
         </div>
 
         <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-          {POINT_HISTORY.map((entry) => (
+          {listBody}
+          {history.map((entry) => (
             <div
               key={entry.id}
               className="flex items-center justify-between gap-3 rounded-xl bg-dojo-tatami-cream/60 px-3 py-2"
@@ -119,16 +175,16 @@ export default function PointHistoryModal({
                   {entry.label}
                 </p>
                 <p className="font-sans text-[10px] text-dojo-dark-brown/60">
-                  {entry.dateLabel}
+                  {formatDate(entry.created_at)}
                 </p>
               </div>
               <span
                 className={`shrink-0 font-sans text-sm font-bold tabular-nums ${
-                  entry.amount >= 0 ? "text-dojo-tatami-green" : "text-dojo-deep-crimson"
+                  entry.points >= 0 ? "text-dojo-tatami-green" : "text-dojo-deep-crimson"
                 }`}
               >
-                {entry.amount >= 0 ? "+" : ""}
-                {entry.amount.toLocaleString()}pt
+                {entry.points >= 0 ? "+" : ""}
+                {entry.points.toLocaleString()}pt
               </span>
             </div>
           ))}

@@ -1,9 +1,13 @@
+"use client";
+
 import type { CSSProperties } from "react";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { ClockGlyph, HistoryClockGlyph } from "./icons";
 import type { LiveScheduleDate, LiveTicketInfo } from "@/data/liveScheduleData";
+import { useSnsStore } from "@/store/useSnsStore";
 import styles from "./StadiumHome.module.css";
 
 // ライブ予定ページ（/live-schedule）専用の3種類のチケットカード。
@@ -98,6 +102,18 @@ function TicketStub({ ticketNo, stubClass }: { ticketNo: string | null; stubClas
 // dateがnull（=「前回のライブ」がまだ割り当てられていない）場合も、チケットの枠自体は
 // そのまま保ち、中身だけ「準備中」表示に差し替える。
 export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
+  const router = useRouter();
+
+  // 「前回のライブ」はライブ予定管理側の表示専用データ(live_schedule_entries)から
+  // 来ており、特定のlives.id/sns_live_results.idとの紐付けを持たないため、その1件の
+  // 結果詳細へは飛ばせない。代わりにマイページの寄合帳「ライブ結果」タブへ飛ばす
+  // （タブの選択状態はuseSnsStoreに永続化済みのため、遷移前にセットしておけば
+  // マイページ側で自動的にそのタブが開いた状態になる）。
+  const handleShowResults = () => {
+    useSnsStore.getState().setFeedTab("results");
+    router.push("/mypage");
+  };
+
   return (
     <div className={styles.tornTicketRow}>
       <div
@@ -132,10 +148,19 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
         <span className="rounded-sm bg-[var(--ink)]/12 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
           終了
         </span>
-        {/* 結果を見る先の画面はまだ無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
-        <span className="cursor-not-allowed whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/35">
-          結果を見る ›
-        </span>
+        {date ? (
+          <button
+            type="button"
+            onClick={handleShowResults}
+            className="whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/70 transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          >
+            結果を見る ›
+          </button>
+        ) : (
+          <span className="cursor-not-allowed whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/35">
+            結果を見る ›
+          </span>
+        )}
       </div>
     </div>
   );

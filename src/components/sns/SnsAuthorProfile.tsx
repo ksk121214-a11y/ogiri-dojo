@@ -10,6 +10,7 @@ import StadiumPageShell from "@/components/home/StadiumPageShell";
 import ReportButton from "@/components/app/ReportButton";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
+import { getRankByMeter } from "@/data/collectionData";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { supabase } from "@/lib/supabase";
@@ -30,7 +31,14 @@ type ProfileAuthor =
       followerCount: number;
       followingCount: number;
     }
-  | { kind: "real"; displayName: string; avatarIcon: string; avatarColor: string };
+  | {
+      kind: "real";
+      displayName: string;
+      avatarIcon: string;
+      avatarColor: string;
+      rankLabel: string;
+      bio: string;
+    };
 
 // ダミー投稿者・実ユーザー投稿者どちらも同じ構成（プロフィール＋過去の回答＋出題したお題）で
 // 見られる簡易プロフィールページ。大喜利SNS本家のProfileDetail相当を道場流に作り直したもの。
@@ -95,6 +103,8 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           displayName: realAuthor.displayName,
           avatarIcon: realAuthor.avatarIcon,
           avatarColor: realAuthor.avatarColor,
+          rankLabel: getRankByMeter(realAuthor.masteryMeter).label,
+          bio: realAuthor.bio,
         }
       : null;
 
@@ -155,10 +165,11 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
         )}
         <div>
           <p className="font-sans text-2xl font-black text-[var(--ink)]">{author.displayName}</p>
-          {author.kind === "dummy" && (
-            <p className="mt-1 font-sans text-xs font-bold text-[var(--ink)]">
-              段位：{author.rankLabel}
-            </p>
+          <p className="mt-1 font-sans text-xs font-bold text-[var(--ink)]">
+            段位：{author.rankLabel}
+          </p>
+          {author.kind === "real" && author.bio && (
+            <p className="mt-1 font-sans text-xs text-[var(--ink)]/70">{author.bio}</p>
           )}
         </div>
 

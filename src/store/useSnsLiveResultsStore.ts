@@ -47,14 +47,22 @@ async function resolveAuthorNamesIntoSnsStore(profileIds: string[]): Promise<voi
   if (profileIds.length === 0) return;
   const { data } = await supabase.rpc("sns_author_names", { p_ids: profileIds });
   if (!data) return;
-  const map: Record<string, { displayName: string; avatarIcon: string; avatarColor: string }> = {};
+  const map: Record<string, { displayName: string; avatarIcon: string; avatarColor: string; masteryMeter: number; bio: string }> = {};
   for (const row of data as {
     id: string;
     display_name: string;
     avatar_icon: string;
     avatar_color: string;
+    mastery_meter: number;
+    bio: string | null;
   }[]) {
-    map[row.id] = { displayName: row.display_name, avatarIcon: row.avatar_icon, avatarColor: row.avatar_color };
+    map[row.id] = {
+      displayName: row.display_name,
+      avatarIcon: row.avatar_icon,
+      avatarColor: row.avatar_color,
+      masteryMeter: row.mastery_meter,
+      bio: row.bio ?? "",
+    };
   }
   useSnsStore.setState((s) => ({ realAuthorNames: { ...s.realAuthorNames, ...map } }));
 }
