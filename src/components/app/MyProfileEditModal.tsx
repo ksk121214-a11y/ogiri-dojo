@@ -113,30 +113,35 @@ export default function MyProfileEditModal({
       >
         <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
 
-        <div className="flex flex-col items-center gap-3">
-          <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--ink)]/20 bg-white">
-            <AvatarGlyph iconSrc={getAvatarIconSrc(icon)} silhouetteSrc={getAvatarSilhouetteSrc(icon)} color={color} size={64} />
-          </span>
+        <div className="flex flex-col gap-3">
+          {/* 2026-08-31:「大きい現在アイコンを左に、小さい選択アイコンを右に縦の
+              列並びで」の要望で、これまでの縦積み（大アイコン→絵柄グリッド→色）から、
+              左＝現在のアイコン、右＝選べる絵柄（縦に伸びる列）の横並びに変更した。 */}
+          <div className="flex items-start gap-4">
+            <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--ink)]/20 bg-white">
+              <AvatarGlyph iconSrc={getAvatarIconSrc(icon)} silhouetteSrc={getAvatarSilhouetteSrc(icon)} color={color} size={64} />
+            </span>
 
-          <div>
-            <p className="mb-1.5 text-center font-sans text-xs font-bold text-[var(--ink)]/70">絵柄</p>
-            <div className="grid grid-cols-4 gap-2">
-              {AVATAR_ICON_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => setIcon(preset.id)}
-                  aria-label={preset.label}
-                  aria-pressed={icon === preset.id}
-                  className={`${styles.pressable} flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border bg-white transition ${
-                    icon === preset.id
-                      ? "border-[var(--ink)] ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--paper)]"
-                      : "border-[var(--ink)]/15 hover:border-[var(--ink)]/40"
-                  }`}
-                >
-                  <AvatarGlyph iconSrc={preset.src} silhouetteSrc={preset.silhouetteSrc} color={color} size={36} />
-                </button>
-              ))}
+            <div className="min-w-0 flex-1">
+              <p className="mb-1.5 font-sans text-xs font-bold text-[var(--ink)]/70">絵柄</p>
+              <div className="grid grid-cols-3 gap-2">
+                {AVATAR_ICON_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => setIcon(preset.id)}
+                    aria-label={preset.label}
+                    aria-pressed={icon === preset.id}
+                    className={`${styles.pressable} flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border bg-white transition ${
+                      icon === preset.id
+                        ? "border-[var(--ink)] ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--paper)]"
+                        : "border-[var(--ink)]/15 hover:border-[var(--ink)]/40"
+                    }`}
+                  >
+                    <AvatarGlyph iconSrc={preset.src} silhouetteSrc={preset.silhouetteSrc} color={color} size={36} />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
