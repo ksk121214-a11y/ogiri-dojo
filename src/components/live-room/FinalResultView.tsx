@@ -7,20 +7,32 @@ import { useEffect, useState } from "react";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
+import MasteryGauge from "@/components/live-demo/MasteryGauge";
+import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 
 // 実バックエンド版ライブの最終結果発表。src/components/live-demo/FinalResultScreen.tsxと
-// 同じアクセントカラー（本日のベストアンサー＝赤枠、1〜3位＝青枠）を使うが、この
-// フォールバック画面自体は（live-demoのような常時ダーク背景の没入演出ではなく）
-// 明るい背景のページに埋め込まれるため、GroupResultViewと同じ白カードにして馴染ませる。
-// 熟練度メーター/表彰ポイント等のマイページ側メタ進行要素はこのライブ機能のスコープ外
-// として含めない（ランキングと本日のベストアンサーの表示に絞る）。
+// 同じアクセントカラー（1〜3位＝青枠）を使うが、この画面自体は（live-demoのような
+// 常時ダーク背景の没入演出ではなく）明るい背景のページに埋め込まれるため、
+// GroupResultViewと同じ白カードにして馴染ませる。
+// 2026-08-31：
+// - 「本日のベストアンサー」の表示はやめた（順位発表のみに絞る。ベストアンサー自体は
+//   引き続きgetBestAnswer()で正しく＝最高得点で決まっており、ランダムではない。
+//   ここでは表彰ボーナス／熟練度メーターの加算計算にだけ内部的に使う）。
+// - 1〜3位の発表カードに表彰ボーナス(+pt)を明記し、末尾に熟練度メーター（段位の
+//   進捗）が今回の得点に応じてどれだけ増えたかを、live-demoと同じ円形ゲージ演出
+//   （MasteryGauge、TimerRingの大きい版）で見せる。実際の加算はライブ終了
+//   （closeLive→apply_live_rank_rewards）時にDB側で確定するため、ここでの表示は
+//   同じ計算式で見込み値を先出しするプレビューという位置づけ（現在のprofiles.mastery_meter
+//   を起点に、今回の得点ぶんだけゲージが伸びる）。
 const RANK_LABEL = ["1位", "2位", "3位"];
 const RANK_COLOR = ["text-[#ffcf4a]", "text-[#8a93c7]", "text-[#ff8f4a]"];
+const RANK_BONUS_POINTS = [BONUS_BY_RANK.first, BONUS_BY_RANK.second, BONUS_BY_RANK.third];
 
 export default function FinalResultView({
   data,
@@ -31,8 +43,10 @@ export default function FinalResultView({
   myParticipantId: string | null;
   participantAvatars?: Record<string, ParticipantAvatarInfo>;
 }) {
-  const [step, setStep] = useState(0);
+  // ベストアンサーの発表ステップを廃止したため、1位分（従来のstep1〜3）から始める。
+  const [step, setStep] = useState(1);
   const top3 = data.ranking.slice(0, 3);
+  const profile = useProfileStore((s) => s.profile);
 
   useEffect(() => {
     if (step >= 4) return;
@@ -40,10 +54,38 @@ export default function FinalResultView({
     return () => clearTimeout(t);
   }, [step]);
 
-  // 3位→2位→1位と切り替わるたびに発表音を鳴らす（step0=ベストアンサーは対象外）。
+  // 3位→2位→1位と切り替わるたびに発表音を鳴らす（マウント時＝最初の3位発表でも鳴る）。
   useEffect(() => {
-    if (step >= 1) playSfx("rankReveal");
+    playSfx("rankReveal");
   }, [step]);
+
+  // 自分がプレイヤーとしてランキングに載っている場合のみ、今回の獲得ぶん（熟練度・
+  // 表彰ポイント）を計算する（観客は対象外＝ranking自体に登場しない）。
+  const myEntry = data.ranking.find((r) => r.participantId === myParticipantId);
+  const gotBestAnswer = data.bestAnswer?.participantId === myParticipantId;
+  const masteryRankBonus =
+    data.myRank === 1
+      ? MASTERY_GAIN.rankBonus.first
+      : data.myRank === 2
+        ? MASTERY_GAIN.rankBonus.second
+        : data.myRank === 3
+          ? MASTERY_GAIN.rankBonus.third
+          : 0;
+  const pointsRankBonus =
+    data.myRank === 1
+      ? BONUS_BY_RANK.first
+      : data.myRank === 2
+        ? BONUS_BY_RANK.second
+        : data.myRank === 3
+          ? BONUS_BY_RANK.third
+          : BONUS_BY_RANK.participation;
+  const masteryGain = myEntry
+    ? MASTERY_GAIN.participation +
+      myEntry.total +
+      masteryRankBonus +
+      (gotBestAnswer ? MASTERY_GAIN.bestAnswer : 0)
+    : 0;
+  const pointsGain = myEntry ? pointsRankBonus + (gotBestAnswer ? BEST_ANSWER_BONUS_POINTS : 0) : 0;
 
   return (
     <div className="w-full max-w-md rounded-[28px] border-[5px] border-[#3b5bff] bg-white p-5 text-[#1a1a3a] shadow-[0_0_40px_rgba(59,91,255,0.45)]">
@@ -53,40 +95,6 @@ export default function FinalResultView({
 
       <div className="mt-4 flex min-h-[220px] w-full flex-col items-center justify-center">
         <AnimatePresence mode="wait">
-          {step === 0 && data.bestAnswer && (
-            <motion.div
-              key="best"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="w-full rounded-xl border border-[#ff3b5b]/60 bg-[#fff5f6] p-4 text-left"
-            >
-              <p className="font-sans text-xs font-bold tracking-widest text-[#ff3b5b]">
-                本日のベストアンサー
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                {data.bestAnswer.participantId === myParticipantId ? (
-                  <MyIconAvatar size={22} bare />
-                ) : (
-                  <ParticipantIconAvatar
-                    participantId={data.bestAnswer.participantId}
-                    avatarIcon={participantAvatars[data.bestAnswer.participantId]?.icon}
-                    avatarColor={participantAvatars[data.bestAnswer.participantId]?.color}
-                    size={22}
-                    bare
-                  />
-                )}
-                <p className="font-sans text-xs text-[#6b6b90]">{data.bestAnswer.name}</p>
-              </div>
-              <p className="mt-1 font-sans text-lg font-bold leading-relaxed">
-                {data.bestAnswer.body}
-              </p>
-              <p className="mt-2 font-sans text-sm font-bold text-[#ff8f00]">
-                {data.bestAnswer.scoreTotal}点
-              </p>
-            </motion.div>
-          )}
-
           {step >= 1 && step <= 3 && top3[3 - step] && (
             <motion.div
               key={`rank-${step}`}
@@ -117,6 +125,9 @@ export default function FinalResultView({
               </div>
               <p className="mt-1 font-sans text-sm font-bold text-[#ff8f00]">
                 {top3[3 - step].total}点
+              </p>
+              <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
+                表彰ボーナス +{RANK_BONUS_POINTS[3 - step]}pt
               </p>
             </motion.div>
           )}
@@ -175,6 +186,26 @@ export default function FinalResultView({
           )}
         </AnimatePresence>
       </div>
+
+      {step >= 4 && myEntry && profile && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="mt-4 flex w-full flex-col items-center rounded-2xl bg-[#12101a] px-4 py-6"
+        >
+          <p className="font-sans text-xs tracking-widest text-white/60">
+            熟練度メーター獲得
+          </p>
+          <div className="mt-3">
+            <MasteryGauge baseline={profile.masteryMeter} gained={masteryGain} />
+          </div>
+          <p className="mt-3 font-sans text-xs text-white/80">
+            獲得ポイント：
+            <span className="font-bold text-[#ffcf4a]">+{pointsGain}pt</span>
+          </p>
+        </motion.div>
+      )}
     </div>
   );
 }
