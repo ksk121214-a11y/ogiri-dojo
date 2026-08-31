@@ -4,9 +4,11 @@ import { useState } from "react";
 import type { MouseEvent } from "react";
 
 import ReportButton from "@/components/app/ReportButton";
+import XShareButton from "@/components/app/XShareButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
+import { APP_NAME } from "@/lib/appInfo";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
 import type { SnsLiveResultAnswerCard, SnsLiveResultDetail, SnsLiveResultLabel } from "@/types/snsLiveResults";
@@ -51,6 +53,14 @@ export default function SnsLiveResultBody({
           {detail.title ? `　${detail.title}` : ""}
         </h1>
         <p className="mt-1 font-sans text-xs text-[var(--ink)]/60">{detail.endedAtLabel}</p>
+        {!readOnly && (
+          <div className="mt-3 flex justify-center">
+            <XShareButton
+              label="結果をXでシェア"
+              text={`${formatLiveTicketNo(detail.sequenceNumber)}${detail.title ? `　${detail.title}` : ""}の結果発表！\n#${APP_NAME}`}
+            />
+          </div>
+        )}
       </div>
 
       {detail.podium.length > 0 && (

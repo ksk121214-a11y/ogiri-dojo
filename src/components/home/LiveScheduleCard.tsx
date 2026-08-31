@@ -6,7 +6,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { ClockGlyph, HistoryClockGlyph } from "./icons";
+import XShareButton from "@/components/app/XShareButton";
 import type { LiveScheduleDate, LiveTicketInfo } from "@/data/liveScheduleData";
+import { APP_NAME } from "@/lib/appInfo";
 import { useSnsStore } from "@/store/useSnsStore";
 import styles from "./StadiumHome.module.css";
 
@@ -214,12 +216,18 @@ export function CurrentLiveCard({
                 /liveへ遷移すると、ホームの正式な入場フロー（useLiveJoinFlow、
                 半券アニメーション等）を経ずにいきなり参加扱いになってしまうため、
                 ホームへ誘導し、そちらの「参加する」から正式に入場してもらう。 */}
-            <Link
-              href="/"
-              className={`${styles.pressable} ${styles.grainAccent} mt-2 w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
-            >
-              参加する
-            </Link>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Link
+                href="/"
+                className={`${styles.pressable} ${styles.grainAccent} w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+              >
+                参加する
+              </Link>
+              <XShareButton
+                label="Xで告知する"
+                text={`${live.month}月${live.day}日（${live.weekday}）${live.time}〜、${APP_NAME}のオンライン大喜利ライブ大会があります。\n#${APP_NAME}`}
+              />
+            </div>
           </div>
         ) : (
           <PreparingTicketBody label="今回のライブは" />
