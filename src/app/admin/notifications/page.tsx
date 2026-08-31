@@ -19,6 +19,15 @@ interface SentAnnouncement {
   is_hidden: boolean;
 }
 
+interface ManagerBestNotification {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  is_hidden: boolean;
+}
+
 // よく使うお知らせの定型文。クリックするとタイトル・本文にセットされ、
 // その後は自由に書き換えられる（日時など個別の内容はセット後に書き換える想定）。
 const NOTIFICATION_TEMPLATES = [
@@ -57,6 +66,10 @@ export default function AdminNotificationsPage() {
   const [sent, setSent] = useState<SentAnnouncement[]>([]);
   const [loadingSent, setLoadingSent] = useState(true);
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
+  const [managerBestNotifications, setManagerBestNotifications] = useState<ManagerBestNotification[]>([]);
+  const [managerBestNames, setManagerBestNames] = useState<Record<string, string>>({});
+  const [loadingManagerBest, setLoadingManagerBest] = useState(true);
+  const [togglingManagerBestId, setTogglingManagerBestId] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
   const loadSent = async () => {
@@ -82,6 +95,30 @@ export default function AdminNotificationsPage() {
     setLoadingSent(false);
   };
 
+  // 運営ベストに選ばれた通知（type='manager_best'）。1件＝1人ぶんの通知のため、
+  // announcementのような(title,body,created_at)での間引きは不要で、idでそのまま扱える。
+  const loadManagerBest = async () => {
+    setLoadingManagerBest(true);
+    const { data } = await supabase
+      .from("notifications")
+      .select("id, user_id, title, body, created_at, is_hidden")
+      .eq("type", "manager_best")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    const rows = (data ?? []) as ManagerBestNotification[];
+    setManagerBestNotifications(rows);
+    const userIds = [...new Set(rows.map((r) => r.user_id))];
+    if (userIds.length > 0) {
+      const { data: namesData } = await supabase.rpc("sns_author_names", { p_ids: userIds });
+      const map: Record<string, string> = {};
+      for (const row of (namesData ?? []) as { id: string; display_name: string }[]) {
+        map[row.id] = row.display_name;
+      }
+      setManagerBestNames(map);
+    }
+    setLoadingManagerBest(false);
+  };
+
   useEffect(() => {
     const loadCount = async () => {
       const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true });
@@ -90,6 +127,7 @@ export default function AdminNotificationsPage() {
     loadCount();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSent();
+    loadManagerBest();
   }, []);
 
   const handleSend = async () => {
@@ -162,6 +200,27 @@ export default function AdminNotificationsPage() {
     });
     notifySuccess(nextHidden ? "非公開にしました。" : "再公開しました。");
     await loadSent();
+  };
+
+  // 運営ベスト選出通知は1人1件なので、idを指定して直接更新すればよい
+  // （announcementのような複数行の一括更新は不要）。
+  const handleToggleManagerBestHidden = async (row: ManagerBestNotification) => {
+    if (togglingManagerBestId) return;
+    const nextHidden = !row.is_hidden;
+    setTogglingManagerBestId(row.id);
+    const { error } = await supabase.from("notifications").update({ is_hidden: nextHidden }).eq("id", row.id);
+    setTogglingManagerBestId(null);
+    if (error) {
+      notifyError(error.message);
+      return;
+    }
+    await logAdminAction({
+      action: nextHidden ? "manager_best_notification_hidden" : "manager_best_notification_unhidden",
+      targetType: "notifications",
+      targetId: row.id,
+    });
+    notifySuccess(nextHidden ? "通知ベルから非公開にしました。" : "通知ベルに再表示しました。");
+    await loadManagerBest();
   };
 
   return (
@@ -244,6 +303,48 @@ export default function AdminNotificationsPage() {
                     onClick={() => handleToggleHidden(s)}
                   >
                     {togglingKey === s.id ? "処理中…" : s.is_hidden ? "再公開する" : "非公開にする"}
+                  </AdminButton>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </AdminCard>
+
+      <AdminCard title={`運営ベスト選出通知（${managerBestNotifications.length}件）`}>
+        <p className="mb-2 text-xs text-gray-500">
+          「ライブ結果（SNS掲載）」で運営ベストに選んだ時に、選ばれた本人の通知ベルへ
+          自動で届く通知です。ここで個別に非公開にできます。
+        </p>
+        {loadingManagerBest ? (
+          <p className="text-sm text-gray-500">読み込み中…</p>
+        ) : managerBestNotifications.length === 0 ? (
+          <p className="text-sm text-gray-500">まだありません。</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {managerBestNotifications.map((n) => (
+              <li key={n.id} className="rounded border border-gray-200 p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    {new Date(n.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                  </p>
+                  {n.is_hidden && (
+                    <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-500">
+                      非公開中
+                    </span>
+                  )}
+                </div>
+                <p className={`mt-0.5 text-sm font-bold ${n.is_hidden ? "text-gray-400" : "text-gray-900"}`}>
+                  {managerBestNames[n.user_id] ?? n.user_id.slice(0, 8)}
+                </p>
+                <p className={`mt-0.5 text-xs ${n.is_hidden ? "text-gray-400" : "text-gray-600"}`}>{n.body}</p>
+                <div className="mt-1.5">
+                  <AdminButton
+                    variant={n.is_hidden ? "secondary" : "danger"}
+                    disabled={togglingManagerBestId === n.id}
+                    onClick={() => handleToggleManagerBestHidden(n)}
+                  >
+                    {togglingManagerBestId === n.id ? "処理中…" : n.is_hidden ? "再表示する" : "非公開にする"}
                   </AdminButton>
                 </div>
               </li>

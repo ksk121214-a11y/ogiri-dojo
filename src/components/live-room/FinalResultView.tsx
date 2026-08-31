@@ -72,8 +72,11 @@ export default function FinalResultView({
   // 自分がプレイヤーとしてランキングに載っている場合のみ、今回の獲得ぶんを計算する
   // （観客は対象外＝ranking自体に登場しない）。段位（熟練度メーター）と累計ポイント／
   // ポイント残高は同じ1つの式で加算されるため、gainは1つだけ計算すればよい。
+  // 2026-09-01：「ベストアンサー」の自動+50付与は廃止し、運営がライブ結果（SNS掲載）
+  // 画面で選ぶ「運営ベスト」を選出した時点で+50を付与する方式に変更した
+  // （set_sns_live_result_manager_best()、この画面の時点ではまだ運営ベストは
+  // 決まっていないため、ここでは含めずに計算する）。
   const myEntry = data.ranking.find((r) => r.participantId === myParticipantId);
-  const gotBestAnswer = data.bestAnswer?.participantId === myParticipantId;
   const rankBonus =
     data.myRank === 1
       ? MASTERY_GAIN.rankBonus.first
@@ -82,9 +85,7 @@ export default function FinalResultView({
         : data.myRank === 3
           ? MASTERY_GAIN.rankBonus.third
           : 0;
-  const gain = myEntry
-    ? MASTERY_GAIN.participation + myEntry.total + rankBonus + (gotBestAnswer ? MASTERY_GAIN.bestAnswer : 0)
-    : 0;
+  const gain = myEntry ? MASTERY_GAIN.participation + myEntry.total + rankBonus : 0;
 
   return (
     <div className="w-full max-w-md rounded-[28px] border-[5px] border-[#3b5bff] bg-white p-5 text-[#1a1a3a] shadow-[0_0_40px_rgba(59,91,255,0.45)]">

@@ -50,6 +50,8 @@ export const ACTION_LABEL: Record<string, string> = {
   user_deleted: "アカウントを完全削除した",
   warning_notification_hidden: "警告の通知を非公開にした",
   warning_notification_unhidden: "警告の通知を再表示した",
+  manager_best_notification_hidden: "運営ベスト選出通知を非公開にした",
+  manager_best_notification_unhidden: "運営ベスト選出通知を再表示した",
 
   // ライブ結果（SNS掲載）
   sns_live_result_answer_excluded: "ライブ結果の掲載回答を除外した",

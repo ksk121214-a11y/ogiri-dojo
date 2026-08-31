@@ -292,10 +292,13 @@ export default function AdminLiveResultDetailPage() {
         { onConflict: "live_result_id,answer_id" },
       );
     }
-    const { error } = await supabase
-      .from("sns_live_results")
-      .update({ manager_best_answer_id: answerId, updated_at: new Date().toISOString() })
-      .eq("id", liveResult.id);
+    // 2026-09-01: 運営ベストの設定・変更・取り消し時に+50ポイント/段位の付与・取り消しと
+    // 選出通知の送信をまとめて行うsecurity definer関数を経由するようにした
+    // （profiles.mastery_meter等はクライアントから直接updateできないため）。
+    const { error } = await supabase.rpc("set_sns_live_result_manager_best", {
+      p_live_result_id: liveResult.id,
+      p_answer_id: answerId,
+    });
     if (error) {
       notifyError(error.message);
     } else {
