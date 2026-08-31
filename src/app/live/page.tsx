@@ -62,9 +62,11 @@ export default function LivePage() {
   // 2026-08-29:「お題発表・回答・審査で使う必須素材が、表示される瞬間に読み込み待ち
   // にならないようにする」対応。ページに滞在している間ずっと（フェーズがどう変わっても
   // アンマウントされずに）裏で進める必要があるため、フェーズごとの各Viewではなく
-  // このページ自体のトップレベルで呼ぶ。進捗表示はOpeningView（開幕＝実質的な
-  // 待機画面）にだけpropsで渡す。
-  const assetPreload = useLiveAssetPreload();
+  // このページ自体のトップレベルで呼ぶ。
+  // 2026-08-31:「準備中の進捗表示はプレイヤー画面ではなく司会コンソールに出す」
+  // 要望のため、読み込み自体はここで継続しつつ、進捗の表示（OpeningViewへの受け渡し）
+  // はやめた。進捗表示は/live/host（司会コンソール）側に用意している。
+  useLiveAssetPreload();
 
   useEffect(() => {
     const unsubscribe = subscribe();
@@ -189,7 +191,7 @@ export default function LivePage() {
           {live.current_phase === "interlude" ? (
             <InterludeScreen key="interlude" />
           ) : live.current_phase === "opening" ? (
-            <OpeningView key="opening" assetPreload={assetPreload} />
+            <OpeningView key="opening" />
           ) : live.current_phase === "topic_reveal" ? (
             <TopicRevealView key="topic_reveal" />
           ) : isMyGroupOnStage ? (

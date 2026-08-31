@@ -9,7 +9,6 @@ import { hasSeenCurtain } from "@/lib/curtainSeen";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
-import type { LiveAssetPreloadState } from "@/lib/useLiveAssetPreload";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
 const ROLE_LABEL: Record<ParticipantRole, string> = {
@@ -20,11 +19,7 @@ const ROLE_LABEL: Record<ParticipantRole, string> = {
 // 開幕（参加登録受付中）フェーズの実バックエンド版。src/components/live-demo/OpeningScreen.tsxは
 // 「組分け発表」の演出だが、実バックエンドのopeningフェーズはまだ組分け前の登録受付そのものなので、
 // デモ版をそのまま移植せず、実際の登録状況に合わせた専用の画面として作る。
-export default function OpeningView({
-  assetPreload,
-}: {
-  assetPreload?: LiveAssetPreloadState;
-}) {
+export default function OpeningView() {
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
   const participants = useLiveFollowerStore((s) => s.participants);
@@ -113,8 +108,6 @@ export default function OpeningView({
         <p className="mt-2 font-sans text-xs text-[#ff3b5b]">{followerError}</p>
       )}
 
-      {assetPreload && <LiveAssetPreloadStatus state={assetPreload} />}
-
       <div className="mt-10 w-full max-w-xl">
         <p className="font-sans text-xs tracking-widest text-white/60">
           現在の参加者：{participants.length}人
@@ -144,31 +137,5 @@ export default function OpeningView({
         </div>
       </div>
     </ScreenShell>
-  );
-}
-
-// お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込み進捗表示。
-// 「準備中 12/15」→「準備完了」、失敗が残った場合は再読み込みボタンを出す。
-function LiveAssetPreloadStatus({ state }: { state: LiveAssetPreloadState }) {
-  const { total, loaded, status, failedItems, retryFailed } = state;
-  return (
-    <div className="mt-4 flex flex-col items-center gap-1.5">
-      <p className="font-sans text-xs text-white/60">
-        {status === "ready"
-          ? "ライブ素材の準備完了"
-          : status === "error"
-            ? `ライブ素材を準備中 ${loaded}/${total}（一部読み込めていません）`
-            : `ライブ素材を準備中 ${loaded}/${total}`}
-      </p>
-      {status === "error" && (
-        <button
-          type="button"
-          onClick={retryFailed}
-          className="rounded-full border border-[#ff3b5b]/60 px-4 py-1.5 font-sans text-xs font-bold text-[#ff3b5b] transition hover:bg-[#ff3b5b]/10"
-        >
-          再読み込み（{failedItems.length}件）
-        </button>
-      )}
-    </div>
   );
 }

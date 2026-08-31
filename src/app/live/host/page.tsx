@@ -16,6 +16,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
+import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 
 const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
@@ -84,6 +85,10 @@ export default function LiveHostPage() {
   const [beginningGame, setBeginningGame] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
+  // 2026-08-31:「素材準備中の表示はプレイヤー画面ではなく司会コンソールに出す」要望で、
+  // お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込みをここで行う
+  // （進捗表示はこのページ側だけに出し、プレイヤー画面には出さない）。
+  const assetPreload = useLiveAssetPreload();
 
   useEffect(() => {
     if (profile?.isHost) init();
@@ -173,6 +178,14 @@ export default function LiveHostPage() {
       </div>
 
       <AdminNotice notice={notice} onClose={clear} />
+
+      <LiveAssetPreloadCard
+        total={assetPreload.total}
+        loaded={assetPreload.loaded}
+        status={assetPreload.status}
+        failedItems={assetPreload.failedItems}
+        onRetry={assetPreload.retryFailed}
+      />
 
       {loading ? (
         <p className="text-sm text-gray-500">状態を確認中…</p>
@@ -1000,6 +1013,40 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
           {live.announcement_sent_at &&
             `（${new Date(live.announcement_sent_at).toLocaleString("ja-JP")}送信）`}
         </p>
+      )}
+    </AdminCard>
+  );
+}
+
+// お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込み進捗表示。
+// 2026-08-31: 以前はプレイヤー画面（OpeningView.tsx）に出していたが、
+// 一般参加者には見せる必要が無い内部的な情報のため、司会コンソール側にだけ出すようにした。
+// 準備完了時はカード自体を隠し、進行中・失敗時のみ表示する。
+function LiveAssetPreloadCard({
+  total,
+  loaded,
+  status,
+  failedItems,
+  onRetry,
+}: {
+  total: number;
+  loaded: number;
+  status: "loading" | "ready" | "error";
+  failedItems: string[];
+  onRetry: () => void;
+}) {
+  if (status === "ready") return null;
+  return (
+    <AdminCard title="ライブ素材の準備状況">
+      <p className="text-sm text-gray-700">
+        {status === "error"
+          ? `準備中 ${loaded}/${total}（一部読み込めていません）`
+          : `準備中 ${loaded}/${total}`}
+      </p>
+      {status === "error" && (
+        <AdminButton variant="danger" onClick={onRetry} className="mt-2">
+          再読み込み（{failedItems.length}件）
+        </AdminButton>
       )}
     </AdminCard>
   );
