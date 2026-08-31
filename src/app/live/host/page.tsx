@@ -1021,7 +1021,8 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
 // お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込み進捗表示。
 // 2026-08-31: 以前はプレイヤー画面（OpeningView.tsx）に出していたが、
 // 一般参加者には見せる必要が無い内部的な情報のため、司会コンソール側にだけ出すようにした。
-// 準備完了時はカード自体を隠し、進行中・失敗時のみ表示する。
+// 準備完了時も「準備完了しました」と分かるように表示し続ける（進行中・失敗時と
+// 見た目を変えて一目で区別できるようにする）。
 function LiveAssetPreloadCard({
   total,
   loaded,
@@ -1035,13 +1036,14 @@ function LiveAssetPreloadCard({
   failedItems: string[];
   onRetry: () => void;
 }) {
-  if (status === "ready") return null;
   return (
     <AdminCard title="ライブ素材の準備状況">
-      <p className="text-sm text-gray-700">
-        {status === "error"
-          ? `準備中 ${loaded}/${total}（一部読み込めていません）`
-          : `準備中 ${loaded}/${total}`}
+      <p className={`text-sm ${status === "ready" ? "font-bold text-green-700" : "text-gray-700"}`}>
+        {status === "ready"
+          ? `準備完了しました（${total}/${total}）`
+          : status === "error"
+            ? `準備中 ${loaded}/${total}（一部読み込めていません）`
+            : `準備中 ${loaded}/${total}`}
       </p>
       {status === "error" && (
         <AdminButton variant="danger" onClick={onRetry} className="mt-2">
