@@ -8,6 +8,7 @@ import ReportButton, { type ReportTargetType } from "@/components/app/ReportButt
 import { getRankByMeter } from "@/data/collectionData";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -39,13 +40,15 @@ export default function SnsAuthorBadge({
   hideReportButton?: boolean;
 }) {
   const user = useUserStore((s) => s.user);
+  const profile = useProfileStore((s) => s.profile);
   // 2026-08-30: 早期returnより前でフックを呼ぶ必要がある（Rules of Hooks）ため、
   // isMeケースでは使わない値でも、ここで一度だけ呼んでおく。
   const realAuthor = useSnsStore((s) => s.realAuthorNames[authorId]);
   const isMe = authorId === "me";
 
   if (isMe) {
-    const rank = getRankByMeter(user.masteryMeter);
+    // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
+    const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
 
     return (
       <span className="flex min-w-0 items-center gap-2">

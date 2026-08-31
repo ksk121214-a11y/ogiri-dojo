@@ -23,8 +23,9 @@ export default function AppHeader() {
   const pathname = usePathname();
   const [historyOpen, setHistoryOpen] = useState(false);
   const user = useUserStore((s) => s.user);
-  const rank = getRankByMeter(user.masteryMeter);
   const profile = useProfileStore((s) => s.profile);
+  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
+  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
   const displayName = profile?.displayName ?? user.displayName;
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);

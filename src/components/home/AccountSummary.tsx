@@ -26,7 +26,8 @@ export default function AccountSummary() {
   const user = useUserStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
   const displayName = profile?.displayName ?? user.displayName;
-  const rank = getRankByMeter(user.masteryMeter);
+  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
+  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (

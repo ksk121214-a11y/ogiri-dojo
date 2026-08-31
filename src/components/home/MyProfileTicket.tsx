@@ -39,8 +39,11 @@ export default function MyProfileTicket({
   onOpenEdit: () => void;
 }) {
   const user = useUserStore((s) => s.user);
-  const rank = getRankByMeter(user.masteryMeter);
   const profile = useProfileStore((s) => s.profile);
+  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を
+  // 優先する。未ログイン時のみuseUserStore（ローカルダミー）にフォールバックする
+  // （「段位・実績を見る」モーダルと同じ優先順位に揃える）。
+  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
   const followerCount = useSnsStore((s) => s.myFollowerCount);
   const displayName = profile?.displayName ?? user.displayName;
