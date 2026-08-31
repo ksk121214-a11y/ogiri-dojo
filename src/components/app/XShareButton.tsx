@@ -17,7 +17,14 @@ export default function XShareButton({
   className?: string;
 }) {
   const handleClick = () => {
-    const shareUrl = url ?? (typeof window !== "undefined" ? window.location.href : "");
+    // urlが相対パス（例: "/live-schedule"）で渡された場合、Xの投稿画面はこのページの
+    // オリジンを知らないため、window.location.originを補って絶対URLにする。
+    const shareUrl =
+      typeof window === "undefined"
+        ? (url ?? "")
+        : url
+          ? new URL(url, window.location.origin).toString()
+          : window.location.href;
     const params = new URLSearchParams({ text: shareUrl ? `${text}\n${shareUrl}` : text });
     window.open(
       `https://twitter.com/intent/tweet?${params.toString()}`,

@@ -7,8 +7,10 @@ import { useEffect, useState } from "react";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import ReportButton from "@/components/app/ReportButton";
+import XShareButton from "@/components/app/XShareButton";
 import MasteryGauge from "@/components/live-demo/MasteryGauge";
 import { MASTERY_GAIN } from "@/data/collectionData";
+import { APP_NAME } from "@/lib/appInfo";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
@@ -86,6 +88,15 @@ export default function FinalResultView({
           ? MASTERY_GAIN.rankBonus.third
           : 0;
   const gain = myEntry ? MASTERY_GAIN.participation + myEntry.total + rankBonus : 0;
+
+  // シェア文面：自分が1〜3位の場合だけ順位を明記する（他の参加者の順位は一切含めない。
+  // 下位の順位を本人の意図に反してさらけ出さない、という既存の匿名性方針を踏まえた
+  // デフォルト文面。送信前のX投稿画面でユーザー自身が自由に編集できる）。
+  const shareText = myEntry
+    ? data.myRank !== null && data.myRank <= 3
+      ? `${APP_NAME}のライブで${data.myRank}位でした！獲得ポイント+${gain}pt\n#${APP_NAME}`
+      : `${APP_NAME}のライブに参加しました！獲得ポイント+${gain}pt\n#${APP_NAME}`
+    : `${APP_NAME}のライブを観戦しました！\n#${APP_NAME}`;
 
   return (
     <div className="w-full max-w-md rounded-[28px] border-[5px] border-[#3b5bff] bg-white p-5 text-[#1a1a3a] shadow-[0_0_40px_rgba(59,91,255,0.45)]">
@@ -174,7 +185,13 @@ export default function FinalResultView({
                   );
                 })}
               </div>
-              <div className="mt-4 flex justify-center">
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <XShareButton
+                  label="結果をXでシェア"
+                  text={shareText}
+                  url="/live-schedule"
+                  className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[#1a1a3a] bg-[#1a1a3a] px-5 py-2.5 font-sans text-sm font-bold text-white transition hover:opacity-90"
+                />
                 <Link
                   href="/"
                   className="rounded-full bg-[#3b5bff] px-6 py-2.5 font-sans text-sm font-bold text-white transition hover:bg-[#2947e0]"
