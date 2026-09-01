@@ -1,0 +1,12 @@
+-- 未ログインでのシェアボタン連打によるshare_click_eventsへのスパム記録を防ぐため、
+-- log_share_click（0045）の実行権限からanonを外し、ログイン中のユーザーだけに限定する。
+--
+-- 注意：これはあくまで「クリックの記録」を止めるだけで、シェア操作自体
+-- （Xの投稿画面を開くこと）には一切影響しない。src/lib/shareAnalytics.tsの
+-- logShareClickは元々失敗を握りつぶす設計（console.warnのみ）のため、
+-- クライアント側の変更は不要。
+--
+-- あわせて、/live-schedule・/sns/results/[id]等のページ自体は今まで通り
+-- 未ログインでも閲覧・シェアできる（Xでの拡散導線を維持するため、意図的に
+-- ページ自体はログイン必須にしない）。
+revoke execute on function public.log_share_click(text) from anon;
