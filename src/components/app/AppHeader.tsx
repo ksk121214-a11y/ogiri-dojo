@@ -8,7 +8,6 @@ import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
-import { useUserStore } from "@/store/useUserStore";
 
 const NAV_LINKS = [
   { href: "/", label: "ホーム" },
@@ -22,12 +21,13 @@ const NAV_LINKS = [
 export default function AppHeader() {
   const pathname = usePathname();
   const [historyOpen, setHistoryOpen] = useState(false);
-  const user = useUserStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
-  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
-  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
-  const displayName = profile?.displayName ?? user.displayName;
   const authUser = useAuthStore((s) => s.user);
+  // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、段位「前座」・
+  // ポイント5000pt等）が実データであるかのように表示されていた問題を修正。
+  // ログインしている場合のみ実データ（profiles）を出す。
+  const rank = getRankByMeter(authUser ? (profile?.masteryMeter ?? 0) : 0);
+  const displayName = authUser ? (profile?.displayName ?? "…") : null;
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const signOut = useAuthStore((s) => s.signOut);
@@ -46,19 +46,21 @@ export default function AppHeader() {
             爆笑スタジアム
           </Link>
           <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right transition hover:bg-dojo-curtain-gold/30 sm:gap-2 sm:px-3"
-            >
-              <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
-                <span className="hidden sm:inline">{rank.label}・</span>
-                {displayName}
-              </span>
-              <span className="shrink-0 font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
-                {(profile?.pointsBalance ?? user.points).toLocaleString()}pt
-              </span>
-            </button>
+            {authUser && (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right transition hover:bg-dojo-curtain-gold/30 sm:gap-2 sm:px-3"
+              >
+                <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
+                  <span className="hidden sm:inline">{rank.label}・</span>
+                  {displayName}
+                </span>
+                <span className="shrink-0 font-sans text-xs font-bold tabular-nums text-dojo-ink sm:text-sm">
+                  {(profile?.pointsBalance ?? 0).toLocaleString()}pt
+                </span>
+              </button>
+            )}
             {!authLoading && (
               authUser ? (
                 <button

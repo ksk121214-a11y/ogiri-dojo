@@ -9,7 +9,7 @@ export default function BackstageGreetingsPage() {
     <ComingSoonScreen
       emoji="🙇"
       title="楽屋挨拶"
-      description="道場の演者たちの楽屋に挨拶に行ける機能です。近日、実データに対応してから解禁予定です。"
+      description="演者たちの楽屋に挨拶に行ける機能です。近日、実データに対応してから解禁予定です。"
     />
   );
 }

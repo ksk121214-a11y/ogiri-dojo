@@ -98,6 +98,13 @@ export default function OpeningView() {
               参加人数が上限に達しました。観客として参加できます。
             </p>
           )}
+          {/* 2026-09-01: 「観客は採点できない」ことが画面上どこにも説明されておらず、
+              観客が採点UIの不在に戸惑う可能性があったため、選択の時点で一言添える
+              （QA部指摘）。 */}
+          <p className="mt-1 max-w-xs text-center font-sans text-[11px] text-white/50">
+            プレイヤー：舞台に立って回答し、自分の組の出番以外は採点も担当します。
+            観客：採点はできませんが、人数制限なくいつでも観戦できます。
+          </p>
         </div>
       ) : (
         <p className="mt-6 font-sans text-sm text-[#ffcf4a]">

@@ -36,15 +36,15 @@ export default function MyProfileEditModal({
   const updateAvatar = useProfileStore((s) => s.updateAvatar);
   const updateBio = useProfileStore((s) => s.updateBio);
 
-  const currentName = profile?.displayName ?? user.displayName;
+  // 2026-09-01: ログイン中（profileが存在する）場合は、名前・アイコン・一言コメントの
+  // 初期値を必ず実データ（profiles）から取る。未ログイン時のみuseUserStoreの
+  // ダミー値にフォールバックする（ローカルでしか使わない簡易編集用）。
+  const currentName = profile ? (profile.displayName ?? "") : user.displayName;
 
-  const [color, setColor] = useState(user.avatarColor);
-  const [icon, setIcon] = useState(user.avatarIcon);
+  const [color, setColor] = useState(profile ? (profile.avatarColor ?? user.avatarColor) : user.avatarColor);
+  const [icon, setIcon] = useState(profile ? (profile.avatarIcon ?? user.avatarIcon) : user.avatarIcon);
   const [name, setName] = useState(currentName);
-  // 2026-08-31: 一言コメントはログイン中ならprofiles.bio（実データ、他ユーザーの
-  // プロフィールにも表示される）を初期値にする。未ログイン時は従来どおり
-  // useUserStore（この端末のみのダミー）を使う。
-  const [bio, setBio] = useState(profile?.bio ?? user.bio);
+  const [bio, setBio] = useState(profile ? (profile.bio ?? "") : user.bio);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 

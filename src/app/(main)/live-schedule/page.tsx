@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
-
-import { BellGlyph, CalendarAddGlyph } from "@/components/home/icons";
+import { CalendarAddGlyph } from "@/components/home/icons";
 import LiveCalendar, { type CalendarMark } from "@/components/home/LiveCalendar";
 import { CurrentLiveCard, PreviousLiveCard, UpcomingLiveCard } from "@/components/home/LiveScheduleCard";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
@@ -46,7 +44,6 @@ function buildIcsContent(scheduledAtIso: string, ticketNo: string, reception: st
 // 2026-08-30（さらに追記）：「前回/今回/次回」の自動判定をやめ、運営が/admin/scheduleで
 // 手動割り当てるlive_schedule_entries（表示専用データ）から取得するように変更した。
 export default function LiveSchedulePage() {
-  const [notifyOn, setNotifyOn] = useState(true);
   const { previous, current, upcoming, loading } = useLiveSchedulePlan();
 
   const currentReception = current ? formatScheduleReception(current.reception_time) : null;
@@ -116,30 +113,19 @@ export default function LiveSchedulePage() {
         <LiveCalendar marks={calendarMarks} />
       </div>
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleAddToCalendar}
-          disabled={!current}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <CalendarAddGlyph />
-          カレンダーに追加
-        </button>
-        <button
-          type="button"
-          onClick={() => setNotifyOn((v) => !v)}
-          aria-pressed={notifyOn}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 font-sans text-xs font-bold transition ${
-            notifyOn
-              ? "border-[var(--accent)] text-[var(--accent)]"
-              : "border-[var(--ink)]/30 text-[var(--ink)]/60 hover:bg-[var(--ink)]/5"
-          }`}
-        >
-          <BellGlyph />
-          開催通知 {notifyOn ? "ON" : "OFF"}
-        </button>
-      </div>
+      {/* 2026-09-01: 「開催通知」トグルは見た目のON/OFFのみで実際の通知配信と
+          連携していないダミー機能だったため撤去した（QA部指摘）。開催通知の
+          実装（ベル通知への配信）は開催後の対応予定。カレンダー追加は実際に
+          .icsファイルを生成する本物の機能なのでそのまま残す。 */}
+      <button
+        type="button"
+        onClick={handleAddToCalendar}
+        disabled={!current}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <CalendarAddGlyph />
+        カレンダーに追加
+      </button>
     </StadiumPageShell>
   );
 }

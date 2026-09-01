@@ -5,7 +5,6 @@ import Link from "next/link";
 import NotificationBell from "@/components/app/NotificationBell";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
-import { useUserStore } from "@/store/useUserStore";
 
 import SoundSettingsToggle from "./SoundSettingsToggle";
 import styles from "./StadiumHome.module.css";
@@ -24,13 +23,14 @@ function nameSizeClass(name: string): string {
 // 移した（表示名だけは引き続きここに残す）。
 // 既存の認証（useAuthStore）はUIを変えずログイン/ログアウトの小さなリンクとして残す。
 export default function StadiumHeader() {
-  const user = useUserStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
-  const displayName = profile?.displayName ?? user.displayName;
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const signOut = useAuthStore((s) => s.signOut);
+  // 2026-09-01: 未ログイン時にローカルのダミー名（useUserStore）が実データであるかの
+  // ように表示されていた問題を修正。ログインしている場合のみ名前を出す。
+  const displayName = authUser ? (profile?.displayName ?? "…") : null;
 
   return (
     <header className={`${styles.grainDark} border-b border-[var(--paper)]/70`}>
@@ -46,9 +46,11 @@ export default function StadiumHeader() {
         <div className="flex min-w-0 items-center gap-1.5">
           {/* 2026-08-28: 「名前を10文字にしても...で切れず見れるように」の要望で、
               長い名前ほど自動的にフォントサイズを一段階ずつ落として省略されないようにする。 */}
-          <span className={`min-w-0 truncate text-[var(--muted-on-dark)] ${nameSizeClass(displayName)}`}>
-            {displayName}
-          </span>
+          {displayName && (
+            <span className={`min-w-0 truncate text-[var(--muted-on-dark)] ${nameSizeClass(displayName)}`}>
+              {displayName}
+            </span>
+          )}
 
           <NotificationBell />
           <SoundSettingsToggle />

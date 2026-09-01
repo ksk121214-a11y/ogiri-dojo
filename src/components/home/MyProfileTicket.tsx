@@ -7,10 +7,10 @@ import Link from "next/link";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import { getRankByMeter } from "@/data/collectionData";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 import { MAX_TICKETS, useTicketStore } from "@/store/useTicketStore";
-import { useUserStore } from "@/store/useUserStore";
 
 import { ClockGlyph, EditGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
@@ -38,15 +38,18 @@ export default function MyProfileTicket({
   onOpenStats: () => void;
   onOpenEdit: () => void;
 }) {
-  const user = useUserStore((s) => s.user);
+  const authUser = useAuthStore((s) => s.user);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
   const profile = useProfileStore((s) => s.profile);
-  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を
-  // 優先する。未ログイン時のみuseUserStore（ローカルダミー）にフォールバックする
-  // （「段位・実績を見る」モーダルと同じ優先順位に揃える）。
-  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
+  // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、名前「あなた」・
+  // 段位「前座」・固定bio等）が実データであるかのように表示されていた問題を修正。
+  // ログインしている場合のみ実データ（profiles）を出す。
+  const isLoggedIn = !!authUser;
+  const rank = getRankByMeter(isLoggedIn ? (profile?.masteryMeter ?? 0) : 0);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
   const followerCount = useSnsStore((s) => s.myFollowerCount);
-  const displayName = profile?.displayName ?? user.displayName;
+  const displayName = isLoggedIn ? (profile?.displayName ?? "…") : "ログインしてください";
+  const bio = isLoggedIn ? (profile?.bio ?? "") : "";
 
   const ticketCount = useTicketStore((s) => s.count);
   const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
@@ -93,7 +96,7 @@ export default function MyProfileTicket({
               </div>
             </div>
 
-            <p className="text-sm leading-snug text-[var(--ink)]/85">{user.bio}</p>
+            {bio && <p className="text-sm leading-snug text-[var(--ink)]/85">{bio}</p>}
 
             <div className="border-t-2 border-dashed border-[var(--ink)]/25" aria-hidden />
 
@@ -117,23 +120,33 @@ export default function MyProfileTicket({
 
             {/* 「段位・実績を見る」が参考画像では1行に収まっているのに対し、text-smだと
                 この列幅では折り返ってしまっていたため、text-xs・px-2に詰めてnowrapにしている。 */}
-            <div className="flex gap-1.5">
+            {isLoggedIn ? (
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenStats}
+                  className={`${styles.pressable} flex-1 whitespace-nowrap rounded-xl bg-[var(--ink)] px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                >
+                  段位・実績を見る
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenEdit}
+                  className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5`}
+                >
+                  <EditGlyph />
+                  編集する
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={onOpenStats}
-                className={`${styles.pressable} flex-1 whitespace-nowrap rounded-xl bg-[var(--ink)] px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                onClick={() => signInWithX()}
+                className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
               >
-                段位・実績を見る
+                Xでログイン
               </button>
-              <button
-                type="button"
-                onClick={onOpenEdit}
-                className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5`}
-              >
-                <EditGlyph />
-                編集する
-              </button>
-            </div>
+            )}
           </div>
         </div>
 

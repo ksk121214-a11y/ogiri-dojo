@@ -32,7 +32,7 @@ export default function MyPage() {
           <div className="h-px flex-1 bg-[var(--ink)]/20" aria-hidden />
         </div>
         <p className="mt-1.5 font-sans text-xs text-[var(--ink)]/70">
-          道場の仲間たちが出したお題に回答して、いいねやツッコミを送り合う簡易版SNS（ダミーデータ）
+          みんなが出したお題に回答して、いいねやツッコミを送り合う寄合帳
         </p>
       </div>
 

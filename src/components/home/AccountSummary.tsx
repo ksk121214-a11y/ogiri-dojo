@@ -5,8 +5,8 @@ import { useState } from "react";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
-import { useUserStore } from "@/store/useUserStore";
 
 import styles from "./StadiumHome.module.css";
 
@@ -22,13 +22,51 @@ function nameSizeClass(name: string): string {
 // アイコンは大喜利ライブと同じ線画（MyIconAvatar、マイページで変更した色がそのまま反映される）。
 // 2026-08-28: 「上のポイントは消して、こちらのポイント残高を押すと履歴が出るように」の
 // 要望で、獲得履歴モーダルを開く動線をヘッダーからこちらに移した。
+// 2026-09-01: 未ログイン時（またはprofile取得前）に、ローカルのダミー値（useUserStore、
+// 「あなた」「累計5000pt」等）が実データであるかのように表示されていた問題を修正。
+// 「ログイン中」表示・段位・ポイントは、実際にログインしていて(authUser)かつ
+// profileを取得できた場合にのみ出し、それ以外はログインを促す表示に切り替える。
 export default function AccountSummary() {
-  const user = useUserStore((s) => s.user);
+  const authUser = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.loading);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
   const profile = useProfileStore((s) => s.profile);
-  const displayName = profile?.displayName ?? user.displayName;
-  // 2026-08-31: 段位はライブ終了時に加算される実データ（profiles.mastery_meter）を優先する。
-  const rank = getRankByMeter(profile?.masteryMeter ?? user.masteryMeter);
+  const profileLoading = useProfileStore((s) => s.loading);
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  if (authLoading) {
+    return (
+      <section
+        className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]/40`}
+        aria-hidden
+      >
+        <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-[var(--ink)]/10" />
+        <div className="h-4 flex-1 animate-pulse rounded bg-[var(--ink)]/10" />
+      </section>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <section className={`${styles.grainPaper} flex items-center justify-between gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
+        <p className="text-sm font-bold text-[var(--ink)]/70">
+          ログインすると段位・ポイントが確認できます
+        </p>
+        <button
+          type="button"
+          onClick={() => signInWithX()}
+          className={`${styles.pressable} ${styles.grainAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+        >
+          Xでログイン
+        </button>
+      </section>
+    );
+  }
+
+  const displayName = profile?.displayName ?? (profileLoading ? "…" : "名無しの演者");
+  const rank = getRankByMeter(profile?.masteryMeter ?? 0);
+  const totalPoints = profile?.totalPoints ?? 0;
+  const pointsBalance = profile?.pointsBalance ?? 0;
 
   return (
     <section className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
@@ -53,18 +91,14 @@ export default function AccountSummary() {
         aria-haspopup="dialog"
         className={`${styles.pressable} shrink-0 rounded-xl px-2 py-1 text-right transition hover:bg-[var(--ink)]/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]`}
       >
-        {/* 2026-08-31: 固定ダミー値(5000pt)のまま変わらなかったのを修正し、
-            ライブ終了時に加算される実データ（profiles）を表示するようにした。
-            見出しは「累計ポイント」（消費されず積み上がる値）を主表示にし、
+        {/* 見出しは「累計ポイント」（消費されず積み上がる値）を主表示にし、
             その下に小さく「ポイント残高」（将来ガチャ等で消費されうる値）を添える。 */}
         <p className="text-xs text-[var(--ink)]/60">累計ポイント</p>
         <p className="text-2xl font-black tabular-nums text-[var(--accent)]">
-          {(profile?.totalPoints ?? user.points).toLocaleString()}
+          {totalPoints.toLocaleString()}
           <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/60">pt</span>
         </p>
-        <p className="text-[10px] text-[var(--ink)]/50">
-          残高 {(profile?.pointsBalance ?? user.points).toLocaleString()}pt
-        </p>
+        <p className="text-[10px] text-[var(--ink)]/50">残高 {pointsBalance.toLocaleString()}pt</p>
       </button>
 
       {historyOpen && <PointHistoryModal variant="stadium" onClose={() => setHistoryOpen(false)} />}

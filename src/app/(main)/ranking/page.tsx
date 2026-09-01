@@ -12,7 +12,7 @@ export default function RankingPage() {
     <ComingSoonScreen
       emoji="🏆"
       title="番付表・過去のライブ"
-      description="道場に集う演者たちの番付や、過去のライブの振り返りができる機能です。近日、実データに対応してから解禁予定です。"
+      description="演者たちの番付や、過去のライブの振り返りができる機能です。近日、実データに対応してから解禁予定です。"
     />
   );
 }

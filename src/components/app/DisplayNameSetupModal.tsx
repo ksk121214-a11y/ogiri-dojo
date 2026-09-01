@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { APP_NAME } from "@/lib/appInfo";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 
 // ログイン後、display_name_set=falseの間だけ表示する高座名(演者名)の初回設定モーダル。
@@ -34,7 +35,7 @@ export default function DisplayNameSetupModal() {
       >
         <h2 className="font-brush text-lg text-dojo-dark-brown">高座名を決めましょう</h2>
         <p className="mt-2 font-sans text-xs text-dojo-dark-brown">
-          道場で名乗る名前を{DISPLAY_NAME_MAX_LENGTH}文字以内で決めてください。後からでも変更できます。
+          {APP_NAME}で名乗る名前を{DISPLAY_NAME_MAX_LENGTH}文字以内で決めてください。後からでも変更できます。
         </p>
         <input
           type="text"

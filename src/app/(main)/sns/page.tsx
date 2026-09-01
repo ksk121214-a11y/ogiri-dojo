@@ -30,7 +30,7 @@ export default function SnsPage() {
           寄合帳
         </h1>
         <p className="mt-2 font-sans text-xs text-[var(--ink)]/70">
-          道場の仲間たちが出したお題に回答して、いいねやツッコミを送り合う簡易版SNS（ダミーデータ）
+          みんなが出したお題に回答して、いいねやツッコミを送り合う寄合帳
         </p>
       </div>
 

@@ -52,7 +52,10 @@ export default function HowToPlayPage() {
           <div className="h-12 shrink-0 border-l-2 border-dashed border-[var(--ink)]/25" aria-hidden />
           <PeopleTag label="観客" tone="ink" count={5} />
         </div>
-        <p className="mt-2">参加者：最大15人。回答と採点を担当。観客：人数制限なし。リアクションで観戦。</p>
+        <p className="mt-2">
+          参加者：最大15人。舞台に立って回答するほか、自分の組の出番以外は採点も担当。
+          観客：人数制限なし。採点はできず、リアクションで観戦する立場です。
+        </p>
       </StepCard>
 
       <StepCard number="4" icon={null} title="5人×3組で勝負">
