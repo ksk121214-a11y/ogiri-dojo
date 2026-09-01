@@ -224,6 +224,7 @@ export function CurrentLiveCard({
                 参加する
               </Link>
               <XShareButton
+                context="live_schedule"
                 label="Xで告知する"
                 text={`${live.month}月${live.day}日（${live.weekday}）${live.time}〜、${APP_NAME}のオンライン大喜利ライブ大会があります。\n#${APP_NAME}`}
               />

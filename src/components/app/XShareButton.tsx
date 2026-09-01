@@ -1,5 +1,7 @@
 "use client";
 
+import { logShareClick, type ShareClickContext } from "@/lib/shareAnalytics";
+
 // X(旧Twitter)の投稿画面をポップアップで開く共有ボタン。
 // intent/tweetエンドポイントはURLパラメータで本文・リンクを渡すだけなので、
 // アプリ側にX APIキー等は一切不要（ユーザー自身のXアカウントで投稿するかは
@@ -10,13 +12,18 @@ export default function XShareButton({
   url,
   label = "Xでシェア",
   className,
+  context,
 }: {
   text: string;
   url?: string;
   label?: string;
   className?: string;
+  // 2026-09-01: どのシェア導線が実際に使われているか計測するための識別子
+  // （事前告知／事後ハイライト／個人結果、の3箇所で使い分ける）。
+  context: ShareClickContext;
 }) {
   const handleClick = () => {
+    logShareClick(context);
     // urlが相対パス（例: "/live-schedule"）で渡された場合、Xの投稿画面はこのページの
     // オリジンを知らないため、window.location.originを補って絶対URLにする。
     const shareUrl =

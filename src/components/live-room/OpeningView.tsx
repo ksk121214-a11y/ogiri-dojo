@@ -27,6 +27,9 @@ export default function OpeningView() {
   const followerError = useLiveFollowerStore((s) => s.error);
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
   const [joining, setJoining] = useState(false);
+  // 2026-09-01: 集客施策の効果測定のため、参加登録時に「どこで知ったか」を
+  // 任意で選んでもらう（未選択のままでも参加はできる、選択必須にはしない）。
+  const [referralSource, setReferralSource] = useState("");
   // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
   // 開く演出・音・BGMを体験してもらうため、このタブでまだ見ていなければここで見せる。
   const [showCurtain] = useState(() => !hasSeenCurtain());
@@ -52,7 +55,7 @@ export default function OpeningView() {
   const handleJoin = async (role: ParticipantRole) => {
     if (role === "player") playSfx("joinAsPlayer");
     setJoining(true);
-    await joinLive(role);
+    await joinLive(role, referralSource || null);
     setJoining(false);
   };
 
@@ -74,6 +77,24 @@ export default function OpeningView() {
 
       {!myParticipant ? (
         <div className="mt-6 flex flex-col items-center gap-2">
+          {/* 2026-09-01: 集客施策の効果測定のための任意アンケート。選ばなくても
+              参加はできる（グロース部指摘：Xシェアの効果検証ができない問題への対応）。 */}
+          <label className="flex flex-col items-center gap-1 text-center">
+            <span className="font-sans text-[11px] text-white/50">
+              どこでこのライブを知りましたか？（任意）
+            </span>
+            <select
+              value={referralSource}
+              onChange={(e) => setReferralSource(e.target.value)}
+              className="rounded-full border border-white/30 bg-transparent px-3 py-1.5 font-sans text-xs text-white [&>option]:bg-[#12101a]"
+            >
+              <option value="">選択しない</option>
+              <option value="x">X（旧Twitter）</option>
+              <option value="friend">友人・知人の紹介</option>
+              <option value="app">アプリ内（寄合帳・ホーム等）で知った</option>
+              <option value="other">その他</option>
+            </select>
+          </label>
           <div className="flex flex-wrap justify-center gap-3">
             <button
               type="button"

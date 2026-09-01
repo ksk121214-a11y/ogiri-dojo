@@ -56,6 +56,7 @@ export default function SnsLiveResultBody({
         {!readOnly && (
           <div className="mt-3 flex justify-center">
             <XShareButton
+              context="live_result"
               label="結果をXでシェア"
               text={`${formatLiveTicketNo(detail.sequenceNumber)}${detail.title ? `　${detail.title}` : ""}の結果発表！\n#${APP_NAME}`}
             />

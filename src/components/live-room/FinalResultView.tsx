@@ -187,6 +187,7 @@ export default function FinalResultView({
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                 <XShareButton
+                  context="final_result"
                   label="結果をXでシェア"
                   text={shareText}
                   url="/live-schedule"

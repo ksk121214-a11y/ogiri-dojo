@@ -74,7 +74,7 @@ interface LiveFollowerState {
   error: string | null;
 
   subscribe: () => () => void;
-  joinLive: (preferredRole: ParticipantRole) => Promise<void>;
+  joinLive: (preferredRole: ParticipantRole, referralSource?: string | null) => Promise<void>;
   submitMyAnswer: (body: string) => Promise<{ ok: boolean; reason?: string }>;
   submitMyScore: (points: 0 | 1 | 2 | 3) => Promise<{ ok: boolean; reason?: string }>;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
@@ -446,7 +446,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     };
   },
 
-  joinLive: async (preferredRole) => {
+  joinLive: async (preferredRole, referralSource) => {
     const { live } = get();
     const userId = useAuthStore.getState().user?.id;
     if (!live || !userId) return;
@@ -456,9 +456,12 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // 人数を数えるため、同時押しでも上限を超えない。既存行があれば
     // on conflictでpreferred_roleだけ更新して返す（二重登録防止、
     // ページ再読み込み・再接続時も同じ結果になる）。
+    // 2026-09-01: 集客施策の効果測定のため、任意で「どこで知ったか」を
+    // referral_sourceとして一緒に記録できるようにした（未指定ならnull）。
     const { data, error } = await supabase.rpc("join_live", {
       p_live_id: live.id,
       p_preferred_role: preferredRole,
+      p_referral_source: referralSource ?? null,
     });
     if (error) {
       const reason = error.message.includes("PLAYER_LIMIT_REACHED")
