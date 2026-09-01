@@ -31,6 +31,8 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const [body, setBody] = useState("");
   const [likePending, setLikePending] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   // 取得を試みて完了したか（true になるまでは「読み込み中」、完了してもanswerが
   // 無ければ「見つかりませんでした」を出す）。
   const [loadAttempted, setLoadAttempted] = useState(false);
@@ -75,11 +77,18 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const liked = likedAnswerIds.includes(answer.id);
   const overLimit = body.length > MAX_LENGTH;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = body.trim();
-    if (!trimmed || overLimit) return;
-    addComment(answer.id, trimmed);
+    if (!trimmed || overLimit || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    const result = await addComment(answer.id, trimmed);
+    setSubmitting(false);
+    if (!result.ok) {
+      setSubmitError(result.reason);
+      return;
+    }
     setBody("");
   };
 
@@ -167,6 +176,9 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
           }`}
         />
+        {submitError && (
+          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
+        )}
         <div className="flex items-center justify-between gap-2">
           <span
             className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
@@ -175,10 +187,10 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           </span>
           <button
             type="submit"
-            disabled={!body.trim() || overLimit}
+            disabled={!body.trim() || overLimit || submitting}
             className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            ツッコむ
+            {submitting ? "送信中…" : "ツッコむ"}
           </button>
         </div>
       </form>

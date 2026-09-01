@@ -413,20 +413,29 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, refreshTurnDerived)
       .subscribe(onSubscribeStatus);
 
-    // つっこみ/拍手はDBに残さない演出専用のイベントなので、postgres_changesではなく
-    // Realtimeのブロードキャストで飛ばす(誰が送っても全員の画面にその場で浮かぶ)。
+    // 2026-09-02: 以前はDBに残さない演出専用イベントとして、認可設定のない生の
+    // Realtimeブロードキャスト（固定チャンネル名）で送受信していたが、チャンネル名さえ
+    // 分かれば誰でも任意のliveId/kind/textを送信できてしまっていた（初回ライブ実開催前
+    // レビュー対応）。他の4チャンネル(lives/participants/answers/scores)と同じ
+    // 「テーブルへのINSERT＋postgres_changes購読」パターンに揃え、送信自体は
+    // send_tsukkomi RPC（0044、参加登録済みユーザーのみ・許可されたkind/textのみ・
+    // レート制限あり）経由に限定する。
     tsukkomiChannel = supabase
-      .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
-      .on("broadcast", { event: "tsukkomi" }, ({ payload }) => {
-        const data = payload as { liveId: string; kind: "clap" | "stamp"; text: string };
-        const currentLive = useLiveFollowerStore.getState().live;
-        if (!currentLive || data.liveId !== currentLive.id) return;
-        tsukkomiIdCounter += 1;
-        useLiveFollowerStore.setState((s) => ({
-          tsukkomiSeq: s.tsukkomiSeq + 1,
-          lastTsukkomi: { id: tsukkomiIdCounter, kind: data.kind, text: data.text },
-        }));
-      })
+      .channel("follower-tsukkomi")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "live_tsukkomi_events" },
+        (payload) => {
+          const row = payload.new as { live_id: string; kind: "clap" | "stamp"; text: string };
+          const currentLive = useLiveFollowerStore.getState().live;
+          if (!currentLive || row.live_id !== currentLive.id) return;
+          tsukkomiIdCounter += 1;
+          useLiveFollowerStore.setState((s) => ({
+            tsukkomiSeq: s.tsukkomiSeq + 1,
+            lastTsukkomi: { id: tsukkomiIdCounter, kind: row.kind, text: row.text },
+          }));
+        },
+      )
       .subscribe(onSubscribeStatus);
 
     channels = [livesCh, participantsCh, answersCh, scoresCh, tsukkomiChannel];
@@ -549,15 +558,16 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   },
 
   sendTsukkomi: (kind, text) => {
+    // ここでのクールダウンはUX目的の間引き（連打でエフェクトが重ならないように）で
+    // あり、セキュリティ対策としては依存しない。実際のレート制限はsend_tsukkomi RPC
+    // （参加者ごとの最終送信時刻をDB側で見る）が担う。
     const now = Date.now();
     if (now - lastTsukkomiSentAt < TSUKKOMI_COOLDOWN_MS) return;
     const { live } = get();
-    if (!live || !tsukkomiChannel) return;
+    if (!live) return;
     lastTsukkomiSentAt = now;
-    tsukkomiChannel.send({
-      type: "broadcast",
-      event: "tsukkomi",
-      payload: { liveId: live.id, kind, text },
+    supabase.rpc("send_tsukkomi", { p_live_id: live.id, p_kind: kind, p_text: text }).then(({ error }) => {
+      if (error) console.warn("[tsukkomi] 送信に失敗", error);
     });
   },
 }));

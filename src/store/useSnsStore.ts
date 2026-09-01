@@ -20,11 +20,15 @@
 //   既存ロジック）は一切変更しない。DBのauthor_id列には実際のユーザーIDを保存するが、
 //   ローカルstateに載せる際は「閲覧者自身の投稿ならauthorId:'me'に変換する」ことで、
 //   既存の判定ロジックとの整合を保っている。
-// - 未ログイン時やDB書き込み失敗時、投稿（お題/回答/コメント）は従来どおりローカルのみの
-//   ダミー投稿にフォールバックする（寄合帳はログイン必須ページではないため）。ただし
-//   いいね・フォローは「ローカルに存在する」こと自体に意味が薄く、DB化した以上サイレント
-//   にローカルへ逃がすとリロードで消えて体験を損なうため、未ログイン時は失敗を返して
-//   ログインを促す（フォールバックしない）。
+//
+// 2026-09-02（初回ライブ実開催前レビュー対応）：以前は未ログイン時やDB書き込み失敗時、
+// 投稿（お題/回答/コメント）をローカルのみのダミー投稿にフォールバックしていたが、
+// これだとリロードで投稿が消える・寄合券だけ減る等の「見せかけ成功」が起きるため廃止した。
+// 未ログイン、または保存に失敗した場合は必ず{ok:false, reason}を返し、呼び出し元
+// （画面側）が入力内容を保持したままエラーを表示する。いいね・フォローと同じ方針に揃えた形。
+// お題・回答は寄合券を1枚消費するsecurity definer RPC（submit_sns_topic/submit_sns_answer、
+// 0043）経由で保存するため、保存と券消費が同一トランザクションで原子的に行われる
+// （保存に失敗すれば券は減らない）。コメントは寄合券を消費しない仕様のまま変更していない。
 import { create } from "zustand";
 
 import {
@@ -34,6 +38,7 @@ import {
 } from "@/data/snsData";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import type { SnsAnswer, SnsComment, SnsTopic } from "@/types/sns";
 
 const PAGE_SIZE = 30;
@@ -43,10 +48,16 @@ const PAGE_SIZE = 30;
 // 設定されるため、専用の環境変数は増やさない。
 const SHOW_DUMMY_DATA = process.env.NODE_ENV !== "production";
 
-let idSeq = 0;
-function genId(prefix: string) {
-  idSeq += 1;
-  return `${prefix}-local-${idSeq}`;
+// submit_sns_topic/submit_sns_answer（0043）が投げるエラーコードを日本語文言に変換する。
+function mapSnsSubmitError(message: string | undefined): string {
+  if (!message) return "投稿に失敗しました";
+  if (message.includes("NOT_LOGGED_IN")) return "投稿にはログインが必要です";
+  if (message.includes("NO_TICKETS")) return "寄合券が足りません。回復を待ってから投稿してください。";
+  if (message.includes("EMPTY_BODY")) return "本文を入力してください";
+  if (message.includes("BODY_TOO_LONG")) return "文字数が上限を超えています";
+  if (message.includes("ACCOUNT_SUSPENDED")) return "現在アカウントが利用停止中のため投稿できません";
+  if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
+  return message;
 }
 
 // DBのtimestamptzを表示用の相対時間ラベルに変換する（取得時点で1回だけ計算する
@@ -136,9 +147,18 @@ interface SnsState {
   // 抜け落ちるため、プロフィールを開いた時点でそのauthorIdの投稿を別途まとめて取得する
   // （N+1ではなく、1ユーザーにつき2回のクエリで完結する）。
   fetchAuthorPosts: (authorId: string) => Promise<void>;
-  addTopic: (body: string) => Promise<SnsTopic>;
-  addAnswer: (topicId: string, body: string) => Promise<SnsAnswer>;
-  addComment: (answerId: string, body: string) => Promise<SnsComment>;
+  // 2026-09-02: 投稿保存に失敗しても成功したように見せない（見せかけ成功の廃止）ため、
+  // 呼び出し元が成否を判定できる戻り値に変更した。お題・回答は寄合券を消費するRPC
+  // （submit_sns_topic/submit_sns_answer）経由で保存するため、券が無ければNO_TICKETSで失敗する。
+  addTopic: (body: string) => Promise<{ ok: true; topic: SnsTopic } | { ok: false; reason: string }>;
+  addAnswer: (
+    topicId: string,
+    body: string,
+  ) => Promise<{ ok: true; answer: SnsAnswer } | { ok: false; reason: string }>;
+  addComment: (
+    answerId: string,
+    body: string,
+  ) => Promise<{ ok: true; comment: SnsComment } | { ok: false; reason: string }>;
   toggleLike: (answerId: string) => Promise<ActionResult>;
   toggleFollow: (authorId: string) => Promise<ActionResult>;
   isFollowing: (authorId: string) => boolean;
@@ -532,90 +552,68 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // 自分の投稿はローカルstate上ではauthorId固定の"me"とし、表示名・段位・アイコンは
   // マイページと同じuseUserStoreを表示側（SnsAuthorBadge）で参照する（演者名の
   // 二重管理を避けるため保存しない）。ログイン中はSupabaseへも実データとして保存する。
+  // RPCが投げるエラーメッセージ（PostgreSQLのRAISE EXCEPTIONの文言がそのまま
+  // error.messageに載る）を日本語に変換する。想定外のエラーはそのまま表示する。
   addTopic: async (body) => {
     const userId = useAuthStore.getState().user?.id;
-    if (userId) {
-      const { data, error } = await supabase
-        .from("sns_topics")
-        .insert({ author_id: userId, body })
-        .select()
-        .single();
-      if (!error && data) {
-        const topic: SnsTopic = { id: data.id, body: data.body, authorId: "me", createdAtLabel: "たった今" };
-        set((s) => ({ topics: [topic, ...s.topics] }));
-        return topic;
-      }
-      console.warn("[sns] お題投稿の保存に失敗、ローカルのみで継続", error);
+    if (!userId) return { ok: false, reason: "投稿にはログインが必要です" };
+
+    const { data, error } = await supabase.rpc("submit_sns_topic", { p_body: body });
+    if (error || !data) {
+      return { ok: false, reason: mapSnsSubmitError(error?.message) };
     }
-    const topic: SnsTopic = { id: genId("sns-t"), body, authorId: "me", createdAtLabel: "たった今" };
+    const topic: SnsTopic = { id: data.id, body: data.body, authorId: "me", createdAtLabel: "たった今" };
     set((s) => ({ topics: [topic, ...s.topics] }));
-    return topic;
+    // 寄合券の残数表示（profiles.tickets_count）を最新化する。
+    useProfileStore.getState().refreshProfile();
+    return { ok: true, topic };
   },
 
   addAnswer: async (topicId, body) => {
     const userId = useAuthStore.getState().user?.id;
-    if (userId) {
-      const { data, error } = await supabase
-        .from("sns_answers")
-        .insert({ topic_id: topicId, author_id: userId, body })
-        .select()
-        .single();
-      if (!error && data) {
-        const answer: SnsAnswer = {
-          id: data.id,
-          topicId: data.topic_id,
-          body: data.body,
-          authorId: "me",
-          likes: 0,
-          createdAtLabel: "たった今",
-        };
-        set((s) => ({ answers: [answer, ...s.answers] }));
-        return answer;
-      }
-      console.warn("[sns] 回答投稿の保存に失敗、ローカルのみで継続", error);
+    if (!userId) return { ok: false, reason: "投稿にはログインが必要です" };
+
+    const { data, error } = await supabase.rpc("submit_sns_answer", {
+      p_topic_id: topicId,
+      p_body: body,
+    });
+    if (error || !data) {
+      return { ok: false, reason: mapSnsSubmitError(error?.message) };
     }
     const answer: SnsAnswer = {
-      id: genId("sns-a"),
-      topicId,
-      body,
+      id: data.id,
+      topicId: data.topic_id,
+      body: data.body,
       authorId: "me",
       likes: 0,
       createdAtLabel: "たった今",
     };
     set((s) => ({ answers: [answer, ...s.answers] }));
-    return answer;
+    useProfileStore.getState().refreshProfile();
+    return { ok: true, answer };
   },
 
   addComment: async (answerId, body) => {
     const userId = useAuthStore.getState().user?.id;
-    if (userId) {
-      const { data, error } = await supabase
-        .from("sns_comments")
-        .insert({ answer_id: answerId, author_id: userId, body })
-        .select()
-        .single();
-      if (!error && data) {
-        const comment: SnsComment = {
-          id: data.id,
-          answerId: data.answer_id,
-          authorId: "me",
-          body: data.body,
-          createdAtLabel: "たった今",
-        };
-        set((s) => ({ comments: [...s.comments, comment] }));
-        return comment;
-      }
-      console.warn("[sns] コメント投稿の保存に失敗、ローカルのみで継続", error);
+    if (!userId) return { ok: false, reason: "コメントにはログインが必要です" };
+
+    const { data, error } = await supabase
+      .from("sns_comments")
+      .insert({ answer_id: answerId, author_id: userId, body })
+      .select()
+      .single();
+    if (error || !data) {
+      return { ok: false, reason: error?.message ?? "コメントの投稿に失敗しました" };
     }
     const comment: SnsComment = {
-      id: genId("sns-c"),
-      answerId,
+      id: data.id,
+      answerId: data.answer_id,
       authorId: "me",
-      body,
+      body: data.body,
       createdAtLabel: "たった今",
     };
     set((s) => ({ comments: [...s.comments, comment] }));
-    return comment;
+    return { ok: true, comment };
   },
 
   // いいねの追加/解除。Supabase（sns_answer_likes）へ実際に保存し、リロード後も

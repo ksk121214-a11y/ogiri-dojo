@@ -307,12 +307,16 @@ export default function LivePage() {
             </p>
           )}
 
-          {/* デバッグ表示：自分の組と現在の出番の組が一致しているかその場で確認できるように */}
-          <p className="font-sans text-[10px] text-dojo-gray-purple">
-            debug: myGroup={myParticipant?.group_id?.slice(0, 8) ?? "-"} /
-            turnGroup={currentTurn?.group_id?.slice(0, 8) ?? "-"} / turnStatus=
-            {currentTurn?.status ?? "-"} / onStage={String(isMyGroupOnStage)}
-          </p>
+          {/* デバッグ表示：自分の組と現在の出番の組が一致しているかその場で確認できるように。
+              2026-09-02: 本番のユーザー向け画面に開発用の内部状態がそのまま出てしまって
+              いたため、開発環境でのみ表示するようにした（初回ライブ実開催前レビュー対応）。 */}
+          {process.env.NODE_ENV !== "production" && (
+            <p className="font-sans text-[10px] text-dojo-gray-purple">
+              debug: myGroup={myParticipant?.group_id?.slice(0, 8) ?? "-"} /
+              turnGroup={currentTurn?.group_id?.slice(0, 8) ?? "-"} / turnStatus=
+              {currentTurn?.status ?? "-"} / onStage={String(isMyGroupOnStage)}
+            </p>
+          )}
 
           {currentTopic &&
             live.current_phase !== "group_result" &&

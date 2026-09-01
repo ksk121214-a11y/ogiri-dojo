@@ -32,6 +32,10 @@ export interface DojoProfile {
   awardCountSecond: number;
   awardCountThird: number;
   bestAnswerCount: number;
+  // 2026-09-02（寄合券のサーバー管理化）：これまでuseTicketStore.ts（localStorageのみ）
+  // で管理していた寄合券の残数・次回回復時刻を、サーバー側の実データに一本化した。
+  ticketsCount: number;
+  ticketsNextRecoveryAt: string | null;
 }
 
 interface ProfileState {
@@ -45,6 +49,9 @@ interface ProfileState {
     color: string,
   ) => Promise<{ ok: true } | { ok: false; reason: string }>;
   updateBio: (bio: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  // 2026-09-02: 寄合券の消費（submit_sns_topic/submit_sns_answer）等、他のRPCが
+  // profilesを更新した後にクライアント側の表示を最新化するための汎用リフレッシュ。
+  refreshProfile: () => Promise<void>;
 }
 
 function toDojoProfile(row: {
@@ -65,6 +72,8 @@ function toDojoProfile(row: {
   award_count_second: number;
   award_count_third: number;
   best_answer_count: number;
+  tickets_count: number;
+  tickets_next_recovery_at: string | null;
 }): DojoProfile {
   return {
     id: row.id,
@@ -88,6 +97,8 @@ function toDojoProfile(row: {
     awardCountSecond: row.award_count_second,
     awardCountThird: row.award_count_third,
     bestAnswerCount: row.best_answer_count,
+    ticketsCount: row.tickets_count,
+    ticketsNextRecoveryAt: row.tickets_next_recovery_at,
   };
 }
 
@@ -95,7 +106,7 @@ async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count",
+      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at",
     )
     .eq("id", userId)
     .single();
@@ -156,6 +167,13 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
 
     set((s) => (s.profile ? { profile: { ...s.profile, bio } } : s));
     return { ok: true };
+  },
+
+  refreshProfile: async () => {
+    const userId = get().profile?.id;
+    if (!userId) return;
+    const profile = await fetchProfile(userId);
+    if (profile) set({ profile });
   },
 }));
 

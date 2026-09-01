@@ -7,17 +7,17 @@ import Link from "next/link";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import { getRankByMeter } from "@/data/collectionData";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { MAX_TICKETS, computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
-import { MAX_TICKETS, useTicketStore } from "@/store/useTicketStore";
 
 import { ClockGlyph, EditGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
 
 // マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋丸い切り欠き」の
 // チケット言語を流用し、半券側には寄合券（寄合帳に投稿・回答するためのスタミナ的リソース、
-// §useTicketStore）の残り枚数を5分割のスタンプ欄として表示する。
+// profiles.tickets_countで管理、§ticketRecovery）の残り枚数を5分割のスタンプ欄として表示する。
 // 2026-08-29: 「寄合券を使うとスタンプが消えるのではなく、そのチケットの部分ごと消えるように」
 // の要望で、本体と半券を（ライブ予定ページの.tornTicketRow／.tornTicketMainと同じ考え方で）
 // 別々の独立したカードに分離した。詳しくはTicketStubColumnのコメント参照。
@@ -51,20 +51,20 @@ export default function MyProfileTicket({
   const displayName = isLoggedIn ? (profile?.displayName ?? "…") : "ログインしてください";
   const bio = isLoggedIn ? (profile?.bio ?? "") : "";
 
-  const ticketCount = useTicketStore((s) => s.count);
-  const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
-  const recalculateTickets = useTicketStore((s) => s.recalculate);
-
-  // 「次の回復まで◯分」の表示を実時間の経過に合わせて更新するための再計算・再描画。
+  // 「次の回復まで◯分」の表示を実時間の経過に合わせて更新するための再描画
+  // （profile自体はサーバー側の値のスナップショットなので、時間経過ぶんの見た目上の
+  // 回復はcomputeDisplayedTicketsで都度計算し直す。実際に投稿できるかどうかは
+  // サーバー側のRPCが最終判定する）。
   const [, setTicketTick] = useState(0);
   useEffect(() => {
-    recalculateTickets();
-    const id = setInterval(() => {
-      recalculateTickets();
-      setTicketTick((n) => n + 1);
-    }, 30_000);
+    const id = setInterval(() => setTicketTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
-  }, [recalculateTickets]);
+  }, []);
+  const displayedTickets = profile
+    ? computeDisplayedTickets(profile.ticketsCount, profile.ticketsNextRecoveryAt)
+    : { count: 0, nextRecoveryAt: null };
+  const ticketCount = displayedTickets.count;
+  const nextTicketRecoveryAt = displayedTickets.nextRecoveryAt;
 
   return (
     <div className="flex flex-col gap-1.5">

@@ -1,47 +1,56 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
+import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
-import { useTicketStore } from "@/store/useTicketStore";
 
 const MAX_LENGTH = 60;
 
 // お題投稿フォーム。投稿後は寄合帳トップ（新着順の先頭に表示される）に戻る。
 // 2026-08-28: マイページ経由（「お題を投稿する」バナー）で来ることがほとんどのため、
 // 見た目もマイページと同じ地下ライブハウス風（StadiumPageShell）に統一した。
-// 2026-08-29: 投稿には寄合券を1枚消費するようにした（§useTicketStore）。
-// 0枚のときは投稿ボタン自体を押せなくし、フォームの上に回復までの目安時間を表示する。
+// 2026-08-29: 投稿には寄合券を1枚消費するようにした。
+// 2026-09-02: 寄合券をサーバー管理（profiles.tickets_count）に一本化し、投稿保存に
+// 成功した場合だけ券が減るようにした（submit_sns_topic RPC内で原子的に処理）。
+// 保存に失敗した場合は入力内容を残したままエラーを表示し、送信中は二重送信を防止する。
 export default function SnsNewTopicPage() {
   const router = useRouter();
   const addTopic = useSnsStore((s) => s.addTopic);
+  const profile = useProfileStore((s) => s.profile);
   const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const ticketCount = useTicketStore((s) => s.count);
-  const nextTicketRecoveryAt = useTicketStore((s) => s.nextRecoveryAt);
-  const recalculateTickets = useTicketStore((s) => s.recalculate);
-  const consumeTicket = useTicketStore((s) => s.consume);
-
-  useEffect(() => {
-    recalculateTickets();
-  }, [recalculateTickets]);
+  const displayedTickets = profile
+    ? computeDisplayedTickets(profile.ticketsCount, profile.ticketsNextRecoveryAt)
+    : { count: 0, nextRecoveryAt: null };
+  const ticketCount = displayedTickets.count;
+  const nextTicketRecoveryAt = displayedTickets.nextRecoveryAt;
 
   const overLimit = body.length > MAX_LENGTH;
   const noTicket = ticketCount <= 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = body.trim();
-    if (!trimmed || overLimit) return;
-    if (!consumeTicket()) return;
+    if (!trimmed || overLimit || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await addTopic(trimmed);
+    setSubmitting(false);
+    if (!result.ok) {
+      setError(result.reason);
+      return;
+    }
     // 静的サイト公開(GitHub Pages)では新規投稿のIDに対応する詳細ページが
     // 事前生成されておらず直接遷移すると404になるため、投稿後は寄合帳トップに戻す。
-    addTopic(trimmed);
     router.push("/mypage");
   };
 
@@ -60,7 +69,7 @@ export default function SnsNewTopicPage() {
           お題を出す
         </h1>
         <p className="mt-2 font-sans text-xs text-[var(--ink)]/70">
-          みんなに回答してもらうお題を投稿します（ダミー投稿・この端末内のみ反映されます）
+          みんなに回答してもらうお題を投稿します
         </p>
       </div>
 
@@ -92,12 +101,13 @@ export default function SnsNewTopicPage() {
             {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
           </p>
         )}
+        {error && <p className="font-sans text-xs font-bold text-[var(--accent)]">{error}</p>}
         <button
           type="submit"
-          disabled={!body.trim() || overLimit || noTicket}
+          disabled={!body.trim() || overLimit || noTicket || submitting}
           className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} w-full rounded-xl px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
         >
-          投稿する（寄合券を1枚使う）
+          {submitting ? "投稿中…" : "投稿する（寄合券を1枚使う）"}
         </button>
       </form>
     </StadiumPageShell>
