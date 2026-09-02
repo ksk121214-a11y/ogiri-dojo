@@ -169,10 +169,10 @@ export default function StageAnsweringView() {
         .filter((a) => !a.revealed_at)
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]
         ?.participant_id ?? null;
-  const eligibleJudgeCount = participants.filter(
-    (p) => p.role === "player" && p.group_id !== currentTurn.group_id,
-  ).length;
-  const maxBalls = Math.max(3, eligibleJudgeCount * 3);
+  // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
+  // participants一覧から毎回計算するのをやめ、ゲーム開始時にサーバー側で1回だけ
+  // 確定させたturns.eligible_judge_count（全クライアント共通）を使う（0049）。
+  const maxBalls = Math.max(3, currentTurn.eligible_judge_count * 3);
   // 審査サイクル中(=司会が持ち時間を一時停止している間)は送信を止める。lives.answering_pausedは
   // 「表示中の回答がある」だけでなく「直前の採点確定演出(reveal_sequence_until)が終わって
   // いない」間もtrueのままになるよう司会側(useLiveHostStore.ts)で拡張済みだが、これは司会の

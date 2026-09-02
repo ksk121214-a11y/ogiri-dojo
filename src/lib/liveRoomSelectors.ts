@@ -7,6 +7,27 @@ export interface RoomRankingEntry {
   participantId: string;
   name: string;
   total: number;
+  // 2026-09-03:「同点なのに1位・2位・3位のように別々の順位が付く」表示バグの修正で追加。
+  // 配列のインデックス(idx+1)をそのまま順位として使っていたため、同点でも必ず連番の
+  // 順位になっていた。SQL側のapply_live_rank_rewards()と同じrank()相当（同点は同じ順位、
+  // 次の順位は同点だった人数ぶん飛ぶ＝1,1,3のような振り方）の順位をここで確定させる。
+  rank: number;
+}
+
+// total降順に並べ替えつつ、同点には同じ順位を割り当てる（SQLのrank()と同じ考え方）。
+function withRanks(
+  entries: { participantId: string; name: string; total: number }[],
+): RoomRankingEntry[] {
+  const sorted = [...entries].sort((a, b) => b.total - a.total);
+  let rank = 0;
+  let prevTotal: number | null = null;
+  return sorted.map((entry, idx) => {
+    if (prevTotal === null || entry.total !== prevTotal) {
+      rank = idx + 1;
+      prevTotal = entry.total;
+    }
+    return { ...entry, rank };
+  });
 }
 
 // ライブ画面（舞台・客席・結果発表）で表示する参加者名の共通の丸め込み。
@@ -32,13 +53,13 @@ export function getGroupTurnRanking(
     totals.set(a.participant_id, (totals.get(a.participant_id) ?? 0) + a.score_total);
   }
   const members = participants.filter((p) => p.role === "player" && p.group_id === groupId);
-  return members
-    .map((p) => ({
+  return withRanks(
+    members.map((p) => ({
       participantId: p.id,
       name: namesByParticipantId[p.id] ?? "（名前未設定）",
       total: totals.get(p.id) ?? 0,
-    }))
-    .sort((a, b) => b.total - a.total);
+    })),
+  );
 }
 
 // 個人合計スコア（このライブ全体）による総合ランキング（最終結果用）。
@@ -52,13 +73,13 @@ export function getOverallRanking(
     totals.set(a.participant_id, (totals.get(a.participant_id) ?? 0) + a.score_total);
   }
   const players = participants.filter((p) => p.role === "player");
-  return players
-    .map((p) => ({
+  return withRanks(
+    players.map((p) => ({
       participantId: p.id,
       name: namesByParticipantId[p.id] ?? "（名前未設定）",
       total: totals.get(p.id) ?? 0,
-    }))
-    .sort((a, b) => b.total - a.total);
+    })),
+  );
 }
 
 // 本日のベストアンサー（単一回答で最高スコアの一撃。同点なら早い者勝ち）。

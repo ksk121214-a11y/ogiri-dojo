@@ -227,7 +227,11 @@ function buildRoster(myGroupSize: number = PREVIEW_MEMBERS_PER_GROUP): {
   return { participants: [me, ...bots], groups, participantNames };
 }
 
-function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: TopicRow } {
+function buildTurn(
+  round: number,
+  group: GroupRow,
+  eligibleJudgeCount: number,
+): { turn: TurnRow; topic: TopicRow } {
   const body = TOPIC_POOL[Math.floor(Math.random() * TOPIC_POOL.length)];
   const topic: TopicRow = {
     id: genId("topic"),
@@ -245,6 +249,7 @@ function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: Topi
     group_id: group.id,
     topic_id: topic.id,
     status: "active",
+    eligible_judge_count: eligibleJudgeCount,
   };
   return { turn, topic };
 }
@@ -252,7 +257,11 @@ function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: Topi
 // ターンの中身(お題・回答者組)だけを用意して画面に出す。回答受付の時計は
 // まだ動かさない(組分け発表→お題大写しの間、締切が消費されてしまわないように)。
 function prepareTurn(round: number, group: GroupRow): TurnRow {
-  const { turn, topic } = buildTurn(round, group);
+  const { participants } = useLiveDesignPreviewStore2.getState();
+  const eligibleJudgeCount = participants.filter(
+    (p) => p.role === "player" && p.group_id !== group.id,
+  ).length;
+  const { turn, topic } = buildTurn(round, group, eligibleJudgeCount);
   useLiveDesignPreviewStore2.setState(() => ({
     currentTurn: turn,
     currentTopic: topic,

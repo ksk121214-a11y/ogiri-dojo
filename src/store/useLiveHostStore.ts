@@ -1313,12 +1313,26 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     set({ live: guardedLive as LiveRow });
 
     const sortedGroups = [...groups].sort((a, b) => a.group_order - b.group_order);
+    // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
+    // 各ターンの審査資格者数(自分の組以外のplayer数)をゲーム開始時に1回だけここで
+    // 確定させ、turns.eligible_judge_countとして保存する（0049）。以前は各クライアントが
+    // その場のparticipants一覧から毎回計算しており、ターン開始のタイミングと参加者の
+    // 入退室が重なるとクライアントごとに結果がずれることがあった。
+    const playersByGroup = new Map<string, number>();
+    for (const p of players) {
+      if (!p.group_id) continue;
+      playersByGroup.set(p.group_id, (playersByGroup.get(p.group_id) ?? 0) + 1);
+    }
+    const eligibleJudgeCountByGroup = new Map<string, number>(
+      sortedGroups.map((g) => [g.id, players.length - (playersByGroup.get(g.id) ?? 0)]),
+    );
     const turnsToInsert: {
       live_id: string;
       round: number;
       group_id: string;
       topic_id: string;
       status: "pending" | "active";
+      eligible_judge_count: number;
     }[] = [];
     let topicCursor = 0;
     for (let round = 1; round <= ROUNDS_PER_LIVE_DEFAULT; round += 1) {
@@ -1329,6 +1343,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
           group_id: group.id,
           topic_id: topics[topicCursor].id,
           status: "pending",
+          eligible_judge_count: eligibleJudgeCountByGroup.get(group.id) ?? 0,
         });
         topicCursor += 1;
       }

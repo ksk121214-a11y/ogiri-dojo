@@ -46,10 +46,9 @@ export default function TopicRevealView() {
   );
   const onStage = !!myParticipant && myParticipant.group_id === currentTurn.group_id;
   // 回答画面の採点ボードと同じ「審査員数×3」の満杯基準にして、右上の数字表示を揃える。
-  const eligibleJudgeCount = participants.filter(
-    (p) => p.role === "player" && p.group_id !== currentTurn.group_id,
-  ).length;
-  const maxBalls = Math.max(3, eligibleJudgeCount * 3);
+  // 2026-09-03: participants一覧から毎回計算するのをやめ、ゲーム開始時にサーバー側で
+  // 1回だけ確定させたturns.eligible_judge_count（全クライアント共通）を使う（0049）。
+  const maxBalls = Math.max(3, currentTurn.eligible_judge_count * 3);
 
   return (
     <ScreenShell>

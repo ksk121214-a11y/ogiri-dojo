@@ -181,7 +181,11 @@ function buildRoster(): {
   return { participants: [me, ...botsA, ...botsB], groups, participantNames };
 }
 
-function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: TopicRow } {
+function buildTurn(
+  round: number,
+  group: GroupRow,
+  eligibleJudgeCount: number,
+): { turn: TurnRow; topic: TopicRow } {
   const body = TOPIC_POOL[Math.floor(Math.random() * TOPIC_POOL.length)];
   const topic: TopicRow = {
     id: genId("topic"),
@@ -199,13 +203,17 @@ function buildTurn(round: number, group: GroupRow): { turn: TurnRow; topic: Topi
     group_id: group.id,
     topic_id: topic.id,
     status: "active",
+    eligible_judge_count: eligibleJudgeCount,
   };
   return { turn, topic };
 }
 
 function startTurn(round: number, group: GroupRow) {
-  const { turn, topic } = buildTurn(round, group);
   const { participants } = useLiveDesignPreviewStore.getState();
+  const eligibleJudgeCount = participants.filter(
+    (p) => p.role === "player" && p.group_id !== group.id,
+  ).length;
+  const { turn, topic } = buildTurn(round, group, eligibleJudgeCount);
   const members = participants.filter((p) => p.group_id === group.id);
   botAnswerRemaining = new Map(
     members

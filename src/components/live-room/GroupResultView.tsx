@@ -56,7 +56,8 @@ export default function GroupResultView({
               }`}
             >
               <span className="flex min-w-0 items-center gap-2.5 font-sans text-sm text-[#1a1a3a]">
-                <span className="text-[#8a8ab0]">{idx + 1}位</span>
+                {/* 2026-09-03: 配列の位置(idx+1)ではなく、同点を同じ順位にするentry.rankを表示する。 */}
+                <span className="text-[#8a8ab0]">{entry.rank}位</span>
                 {isMe ? (
                   <MyIconAvatar size={28} bare />
                 ) : (

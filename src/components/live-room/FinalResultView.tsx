@@ -38,13 +38,22 @@ const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 // ベストアンサー+50）に統一した。カード上の「表彰ボーナス」は順位ぶんだけ、末尾の
 // 「獲得ポイント」は参加基礎点＋得点＋順位ボーナスの合計、と役割が違うため
 // 同じ数字が二重に見える心配もなくなる。
-const RANK_LABEL = ["1位", "2位", "3位"];
-const RANK_COLOR = ["text-[#ffcf4a]", "text-[#8a93c7]", "text-[#ff8f4a]"];
-const RANK_BONUS_POINTS = [
-  MASTERY_GAIN.rankBonus.first,
-  MASTERY_GAIN.rankBonus.second,
-  MASTERY_GAIN.rankBonus.third,
-];
+// 2026-09-03:「同点なのに1位・2位・3位のように別々の順位が付く」表示バグの修正。
+// 以前は配列の位置(3-step)でラベル・色・ボーナスを決めていたため、同点で
+// 複数人が同じ順位になっている場合でも、単に見せる順番が3位→2位→1位に
+// なっているだけなのに「2位」「3位」と表示されてしまっていた。各エントリが
+// 既に持っているrank（同点は同じ順位、liveRoomSelectors.tsのwithRanks参照）を
+// キーにして引く方式に変え、見せる順番（配列位置）と実際の順位表示を分離する。
+const RANK_COLOR_BY_RANK: Record<number, string> = {
+  1: "text-[#ffcf4a]",
+  2: "text-[#8a93c7]",
+  3: "text-[#ff8f4a]",
+};
+const RANK_BONUS_POINTS_BY_RANK: Record<number, number> = {
+  1: MASTERY_GAIN.rankBonus.first,
+  2: MASTERY_GAIN.rankBonus.second,
+  3: MASTERY_GAIN.rankBonus.third,
+};
 
 export default function FinalResultView({
   data,
@@ -115,8 +124,10 @@ export default function FinalResultView({
               transition={{ type: "spring", stiffness: 200, damping: 16 }}
               className="w-full rounded-xl border border-[#3b5bff]/60 bg-[#eef1ff] p-6 text-center"
             >
-              <p className={`font-sans text-3xl font-black ${RANK_COLOR[3 - step]}`}>
-                {RANK_LABEL[3 - step]}
+              <p
+                className={`font-sans text-3xl font-black ${RANK_COLOR_BY_RANK[top3[3 - step].rank] ?? RANK_COLOR_BY_RANK[3]}`}
+              >
+                {top3[3 - step].rank}位
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 {top3[3 - step].participantId === myParticipantId ? (
@@ -138,7 +149,7 @@ export default function FinalResultView({
                 {top3[3 - step].total}点
               </p>
               <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
-                表彰ボーナス +{RANK_BONUS_POINTS[3 - step]}pt
+                表彰ボーナス +{RANK_BONUS_POINTS_BY_RANK[top3[3 - step].rank] ?? 0}pt
               </p>
             </motion.div>
           )}
@@ -153,7 +164,7 @@ export default function FinalResultView({
                 </p>
               )}
               <div className="mt-3 max-h-64 w-full space-y-1.5 overflow-y-auto">
-                {data.ranking.map((r, idx) => {
+                {data.ranking.map((r) => {
                   const isMe = r.participantId === myParticipantId;
                   return (
                     <div
@@ -163,7 +174,8 @@ export default function FinalResultView({
                       }`}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="shrink-0 text-[#8a8ab0]">{idx + 1}位</span>
+                        {/* 2026-09-03: 配列の位置(idx+1)ではなく、同点を同じ順位にするr.rankを表示する。 */}
+                        <span className="shrink-0 text-[#8a8ab0]">{r.rank}位</span>
                         {isMe ? (
                           <MyIconAvatar size={24} bare />
                         ) : (

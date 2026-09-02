@@ -100,6 +100,11 @@ export interface TurnRow {
   group_id: string;
   topic_id: string;
   status: TurnStatus;
+  // 2026-09-03: このターンで採点できる資格を持つ参加者数（自分の組以外のplayer数）。
+  // ゲーム開始時にサーバー側で1回だけ確定させる（0049）。ScoringPhysicsBoardの
+  // 分母(maxBalls)を全クライアントで一致させるため、各クライアントがその場の
+  // participants一覧から都度計算するのをやめ、この値を共通の正として使う。
+  eligible_judge_count: number;
 }
 
 export interface AnswerRow {

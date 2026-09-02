@@ -260,11 +260,14 @@ async function refreshFinalResult() {
         scoreTotal: bestAnswerRow.score_total,
       }
     : null;
-  const myRankIndex = myParticipant
-    ? ranking.findIndex((r) => r.participantId === myParticipant.id)
-    : -1;
+  // 2026-09-03:「同点なのに1位・2位・3位のように別々の順位が付く」表示バグの修正。
+  // 配列のインデックス(findIndex+1)ではなく、rankingが既に確定させたrank
+  // （同点は同じ順位、SQL側のapply_live_rank_rewards()と同じ考え方）を使う。
+  const myRank = myParticipant
+    ? (ranking.find((r) => r.participantId === myParticipant.id)?.rank ?? null)
+    : null;
   useLiveFollowerStore.setState({
-    finalResult: { bestAnswer, ranking, myRank: myRankIndex >= 0 ? myRankIndex + 1 : null },
+    finalResult: { bestAnswer, ranking, myRank },
   });
 }
 
