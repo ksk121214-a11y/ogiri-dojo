@@ -6,10 +6,13 @@ import { useEffect, useState } from "react";
 
 import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 import InterludeScreen from "@/components/live-demo/InterludeScreen";
+import ScreenShell from "@/components/live-demo/ScreenShell";
 import SoundToggle from "@/components/live-demo/SoundToggle";
 import AnnouncementBanner from "@/components/live-room/AnnouncementBanner";
 import AudienceAnsweringView from "@/components/live-room/AudienceAnsweringView";
 import AudienceHomeButton from "@/components/live-room/AudienceHomeButton";
+import AudienceJoinButton from "@/components/live-room/AudienceJoinButton";
+import AudienceJoinPrompt from "@/components/live-room/AudienceJoinPrompt";
 import FinalResultView from "@/components/live-room/FinalResultView";
 import GroupResultView from "@/components/live-room/GroupResultView";
 import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
@@ -169,14 +172,29 @@ export default function LivePage() {
   const isMyGroupOnStage =
     !!myParticipant && !!currentTurn && myParticipant.group_id === currentTurn.group_id;
 
+  // 2026-09-03: 以前はtopic_reveal/answering中に「まだ参加登録していない人
+  // （観客として途中参加しようとしている人）」と、group_result/final_result
+  // フェーズ全体（参加者・観客問わず）が、この没入デザインに入れず、下の
+  // 旧デザイン（和風・washi配色、font-brush見出し）のフォールバック画面に
+  // 流れてしまっていた。実況で「途中で観客として入ってくる画面が旧デザインの
+  // ままだった」と発覚した不具合。進行中の全フェーズ（interlude〜final_result）を
+  // 没入デザインの対象にし、フォールバック画面は「ライブ開始前(scheduled)」
+  // 「終了後(closed)」「ライブ自体が無い」場合専用にする。
   const showImmersive =
     !!live &&
     (live.current_phase === "interlude" ||
       live.current_phase === "opening" ||
-      (!!myParticipant &&
-        (live.current_phase === "topic_reveal" || live.current_phase === "answering")));
+      live.current_phase === "topic_reveal" ||
+      live.current_phase === "answering" ||
+      live.current_phase === "group_result" ||
+      live.current_phase === "final_result");
 
   if (showImmersive && live) {
+    // 没入画面に入ってからも観客はいつでも出入りできる方針を維持する。opening
+    // フェーズはOpeningView自体に参加登録UIがあるため二重に出さない
+    // （interludeはまだ参加受付が始まっていないので出さない）。
+    const showJoinButton =
+      !myParticipant && live.current_phase !== "interlude" && live.current_phase !== "opening";
     return (
       // 2026-08-31: position:fixed化 + JSでのvisualViewport高さ反映を試したが、
       // viewportのinteractive-widget=resizes-content指定と競合し、実機でキーボード
@@ -194,12 +212,41 @@ export default function LivePage() {
             <OpeningView key="opening" />
           ) : live.current_phase === "topic_reveal" ? (
             <TopicRevealView key="topic_reveal" />
-          ) : isMyGroupOnStage ? (
-            <StageAnsweringView key="stage" />
-          ) : (
-            <AudienceAnsweringView key="audience" />
-          )}
+          ) : live.current_phase === "answering" ? (
+            isMyGroupOnStage ? (
+              <StageAnsweringView key="stage" />
+            ) : myParticipant ? (
+              <AudienceAnsweringView key="audience" />
+            ) : (
+              <AudienceJoinPrompt key="join-prompt" />
+            )
+          ) : live.current_phase === "group_result" ? (
+            <ScreenShell key="group-result">
+              {groupResult ? (
+                <GroupResultView
+                  data={groupResult}
+                  myParticipantId={myParticipant?.id ?? null}
+                  participantAvatars={participantAvatars}
+                />
+              ) : (
+                <p className="font-sans text-sm text-white/70">結果を集計中…</p>
+              )}
+            </ScreenShell>
+          ) : live.current_phase === "final_result" ? (
+            <ScreenShell key="final-result">
+              {finalResult ? (
+                <FinalResultView
+                  data={finalResult}
+                  myParticipantId={myParticipant?.id ?? null}
+                  participantAvatars={participantAvatars}
+                />
+              ) : (
+                <p className="font-sans text-sm text-white/70">結果を集計中…</p>
+              )}
+            </ScreenShell>
+          ) : null}
         </AnimatePresence>
+        {showJoinButton && <AudienceJoinButton />}
         <LaughEffectOverlay />
         <SoundToggle />
       </main>

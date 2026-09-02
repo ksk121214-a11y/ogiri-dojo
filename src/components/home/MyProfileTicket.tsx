@@ -196,7 +196,7 @@ function TicketStubColumn({ count }: { count: number }) {
       {Array.from({ length: MAX_TICKETS }).map((_, i) => {
         const filled = i >= MAX_TICKETS - count;
         return (
-          <div key={i} className="relative flex flex-1 items-center justify-center">
+          <div key={i} className="relative flex items-center justify-center">
             {i > 0 && (
               <div className={`${styles.scallopDividerHorizontal} ${styles.scallopKraft}`} aria-hidden />
             )}
@@ -204,7 +204,12 @@ function TicketStubColumn({ count }: { count: number }) {
               <>
                 <div className={`${styles.grainPaper} absolute inset-0`} aria-hidden />
                 <div className="relative z-[1]">
-                  <OgiriStamp size={52} />
+                  {/* 2026-09-03: 5分割セルは.profileCardMainの高さ（bio欄が無いと
+                      約200px程度）を必ず均等5等分した高さしか無く、実測で
+                      1セルあたり最短約40pxしか無いことを確認した。52pxのままだと
+                      枠からはみ出してoverflow:hiddenに切られ、「一番下の券だけ
+                      小さい」ように見えていたため、確実に収まる大きさへ縮小した。 */}
+                  <OgiriStamp size={34} />
                 </div>
               </>
             )}
