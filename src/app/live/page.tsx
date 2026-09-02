@@ -55,6 +55,8 @@ export default function LivePage() {
   const finalResult = useLiveFollowerStore((s) => s.finalResult);
   const participantAvatars = useLiveFollowerStore((s) => s.participantAvatars);
   const liveLoading = useLiveFollowerStore((s) => s.loading);
+  const syncError = useLiveFollowerStore((s) => s.syncError);
+  const retrySync = useLiveFollowerStore((s) => s.retrySync);
   const followerError = useLiveFollowerStore((s) => s.error);
   const subscribe = useLiveFollowerStore((s) => s.subscribe);
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
@@ -144,6 +146,35 @@ export default function LivePage() {
         >
           Xでログイン
         </button>
+      </CenterMessage>
+    );
+  }
+
+  // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策。
+  // live/participants/myParticipant/currentTurn/currentTopicの取得が一度も
+  // 揃って成功していない(liveLoading===true)間は、以降のisMyGroupOnStage・
+  // showImmersiveの判定を一切行わない。以前はここを素通りしてしまい、
+  // まだcurrentTurnが届いていない一瞬に「自分の組の出番ではない」と誤判定して
+  // 観客画面になっていた（取得エラーで再試行中の場合も同様に、判定材料が
+  // 揃うまでは絶対に舞台/観客を決めない）。
+  if (liveLoading) {
+    return (
+      <CenterMessage>
+        <p>{syncError ? "ライブ状態の取得に失敗しました" : "ライブ状態を復元中…"}</p>
+        {syncError && (
+          <>
+            <p className="mt-2 max-w-xs font-sans text-xs text-dojo-dark-brown/70">
+              {syncError}。自動的に再試行しています。
+            </p>
+            <button
+              type="button"
+              onClick={() => retrySync()}
+              className="mt-4 rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+            >
+              今すぐ再試行
+            </button>
+          </>
+        )}
       </CenterMessage>
     );
   }
@@ -266,9 +297,8 @@ export default function LivePage() {
         {profile?.displayName ?? "..."}
       </h1>
 
-      {liveLoading ? (
-        <p className="font-sans text-sm text-dojo-dark-brown">状態を確認中…</p>
-      ) : !live ? (
+      {/* liveLoadingはこの時点で必ずfalse（上のガードで既に抜けている）。 */}
+      {!live ? (
         <>
           <p className="font-sans text-sm text-dojo-dark-brown">
             まだライブは開演していません。司会の開始をお待ちください。

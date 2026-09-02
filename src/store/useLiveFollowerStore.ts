@@ -70,10 +70,26 @@ interface LiveFollowerState {
   tsukkomiSeq: number; // つっこみ/拍手のブロードキャストを受け取るたびに増える通し番号
   lastTsukkomi: TsukkomiEvent | null;
   laughEventSeq: number; // 誰かの回答が笑いエフェクト付きで確定するたびに増える通し番号
+  // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策で意味を
+  // 厳密化した。loading===trueの間は、live/participants/myParticipant/currentTurn/
+  // currentTopicの取得が「auth確定→live確定→participants/myParticipant確定→
+  // currentTurn/currentTopic確定」の順で一度も揃って成功しておらず、舞台/観客のどちらの
+  // 画面を出すべきかまだ判定できない状態を表す（呼び出し元のLivePage側は、loading中は
+  // 判定を一切行わず「復元中」を表示すること）。一度trueからfalseになった後は、
+  // 以降の背景更新が一時的に失敗しても（syncError参照）falseに保たれ続け、
+  // 既に確定済みの表示を勝手に観客画面などへ後退させない。
   loading: boolean;
+  // 直近の取得試行が失敗した理由（表示用）。nullなら直近の取得は成功している。
+  // loadingがtrueのままsyncErrorが立っている＝初回同期に失敗して自動再試行中。
+  // loadingがfalse（一度は成功済み）でsyncErrorが立っている＝背景更新が一時的に
+  // 失敗しているだけで、画面は直前の正常な状態を保ったまま裏で再試行している。
+  syncError: string | null;
   error: string | null;
 
   subscribe: () => () => void;
+  // syncErrorが出ている時に画面から手動で今すぐ再試行するためのアクション
+  // （自動再試行の間隔を待たずに済むように用意する）。
+  retrySync: () => void;
   joinLive: (preferredRole: ParticipantRole, referralSource?: string | null) => Promise<void>;
   submitMyAnswer: (body: string) => Promise<{ ok: boolean; reason?: string }>;
   submitMyScore: (points: 0 | 1 | 2 | 3) => Promise<{ ok: boolean; reason?: string }>;
@@ -83,6 +99,9 @@ interface LiveFollowerState {
 let channels: ReturnType<typeof supabase.channel>[] = [];
 let tsukkomiChannel: ReturnType<typeof supabase.channel> | null = null;
 let tsukkomiIdCounter = 0;
+// retrySyncアクションから、subscribe()内で今動いているrefetchAllを直接叩けるようにする
+// ための参照（subscribe()のクリーンアップでnullに戻す）。
+let currentRefetchAllRef: (() => void) | null = null;
 // ツッコミ・爆笑・拍手ボタンの連打制限（1秒に1回まで）。ボタン自体の見た目は
 // 変えず、裏で黙って間引く。ボタンはUIから常にsendTsukkomiを直接呼ぶだけなので、
 // ここ1箇所でガードすれば全ボタンに効く。
@@ -116,11 +135,6 @@ export async function fetchMyParticipant(liveId: string, userId: string): Promis
     .eq("user_id", userId)
     .maybeSingle();
   return data as ParticipantRow | null;
-}
-
-async function fetchParticipantsForLive(liveId: string): Promise<ParticipantRow[]> {
-  const { data } = await supabase.from("participants").select("*").eq("live_id", liveId);
-  return (data ?? []) as ParticipantRow[];
 }
 
 async function fetchGroupsForLive(liveId: string): Promise<GroupRow[]> {
@@ -172,17 +186,33 @@ async function fetchResolvedAnswersForLive(liveId: string): Promise<AnswerRow[]>
   return (data ?? []) as AnswerRow[];
 }
 
+// 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策で、
+// 取得エラーと「正常に取得できたが行が無い」を区別できるようにした
+// （以前はどちらも{turn:null,topic:null}に潰され、呼び出し元がエラー時にも
+// 「現在進行中のターンが無い」と誤確定してcurrentTurnをnullで上書きしていた）。
 async function fetchTurnAndTopic(
   turnId: string,
-): Promise<{ turn: TurnRow | null; topic: TopicRow | null }> {
-  const { data: turn } = await supabase.from("turns").select("*").eq("id", turnId).maybeSingle();
-  if (!turn) return { turn: null, topic: null };
-  const { data: topic } = await supabase
+): Promise<{ ok: true; turn: TurnRow | null; topic: TopicRow | null } | { ok: false }> {
+  const { data: turn, error: turnError } = await supabase
+    .from("turns")
+    .select("*")
+    .eq("id", turnId)
+    .maybeSingle();
+  if (turnError) {
+    console.warn("[live] turns取得に失敗", turnError);
+    return { ok: false };
+  }
+  if (!turn) return { ok: true, turn: null, topic: null };
+  const { data: topic, error: topicError } = await supabase
     .from("topics")
     .select("*")
     .eq("id", (turn as TurnRow).topic_id)
     .maybeSingle();
-  return { turn: turn as TurnRow, topic: topic as TopicRow | null };
+  if (topicError) {
+    console.warn("[live] topics取得に失敗", topicError);
+    return { ok: false };
+  }
+  return { ok: true, turn: turn as TurnRow, topic: topic as TopicRow | null };
 }
 
 async function fetchAnswersAndScoreForTurn(
@@ -245,7 +275,12 @@ async function refreshFinalResult() {
 // 「今から始める呼び出しが最新か」を通し番号で管理し、追い越された古い結果は捨てる。
 let turnDerivedRequestId = 0;
 
-async function refreshTurnDerived() {
+// 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策。
+// 戻り値で成功/失敗を呼び出し元（refetchAll）に伝えるようにした。falseを返した
+// 場合はcurrentTurn/currentTopicを含め一切stateを書き換えない（既に確定している
+// 正常な値を、取得エラーによる一時的なnullで上書きしない）。呼び出し元は失敗時、
+// loading:falseへの遷移を保留し、再試行する。
+async function refreshTurnDerived(): Promise<boolean> {
   const requestId = ++turnDerivedRequestId;
   const {
     live,
@@ -256,7 +291,7 @@ async function refreshTurnDerived() {
     currentTurn: prevTurn,
   } = useLiveFollowerStore.getState();
   if (!live?.current_turn_id) {
-    if (requestId !== turnDerivedRequestId) return;
+    if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
     useLiveFollowerStore.setState({
       currentTurn: null,
       currentTopic: null,
@@ -267,12 +302,15 @@ async function refreshTurnDerived() {
       myAnswerCount: 0,
       groupResult: null,
     });
-    return;
+    return true; // 「現在進行中のターンが無い」という正常に確定した状態（interlude/opening等）
   }
-  const { turn, topic } = await fetchTurnAndTopic(live.current_turn_id);
+  const turnResult = await fetchTurnAndTopic(live.current_turn_id);
+  if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
+  if (!turnResult.ok) return false; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
+  const { turn, topic } = turnResult;
   const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } =
     await fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id);
-  if (requestId !== turnDerivedRequestId) return; // より新しい呼び出しに追い越された
+  if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
 
   let groupResult: GroupResultData | null = null;
   if (live.current_phase === "group_result" && turn && topic) {
@@ -321,6 +359,7 @@ async function refreshTurnDerived() {
   if (live.current_phase === "final_result") {
     await refreshFinalResult();
   }
+  return true;
 }
 
 export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
@@ -343,10 +382,16 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   lastTsukkomi: null,
   laughEventSeq: 0,
   loading: true,
+  syncError: null,
   error: null,
+
+  retrySync: () => {
+    currentRefetchAllRef?.();
+  },
 
   subscribe: () => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // lives/participantsテーブルの変更イベントで短時間に何度も呼ばれるため、
     // refreshTurnDerivedと同様に「今回の呼び出しが最新か」を通し番号で管理する。
@@ -354,20 +399,23 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // 古い）呼び出しの結果が遅れて届いて上書きしてしまうことがあった。
     let refetchRequestId = 0;
 
-    // 2026-09-03:「回答者としてリロードすると観客画面になる（1回目のリロードでは
-    // 直らず、2回目でやっと直ることがある）」実機バグの追加対応。
+    // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策
+    // （認証復元待ちだけでは不十分だったため全面的に作り直した）。
     // refetchAllはページ表示直後の1回だけでなく、Realtimeの各チャンネルが
     // (再)接続するたびにも(下のonSubscribeStatus経由で)何度も呼ばれ、
     // 「一番最後に呼ばれたrefetchAll」の結果が最終的な表示を決める設計になっている
-    // （このstore内のrequestIdガード参照）。ログイン状態の復元（useAuthStore.loading）
-    // がまだ終わっていないタイミングで、たまたまそれが「一番最後の呼び出し」に
-    // なってしまうと、myParticipantがnullで確定し、以降さらに別の呼び出しが
-    // 起きるまで直らない（＝直るまでの時間がその時々でばらつき、「もう一度
-    // リロードすると直ることがある」という不安定な見え方になっていたと考えられる）。
-    // どの呼び出し経路であっても、ログイン状態の復元が終わるまでは実際のデータ
-    // 取得に進まないようにし、未確定のuserIdでこのstoreの表示を一度も確定
-    // させないようにする（前段のuseAuthStore.subscribeによる「復元後の再取得」とは
-    // 独立に、すべての呼び出し経路に効かせる）。
+    // （このstore内のrequestIdガード参照）。
+    //
+    // 状態遷移は必ず auth確定 → live確定 → participants/myParticipant確定 →
+    // currentTurn/currentTopic確定（refreshTurnDerived） の順で進め、途中の
+    // どの段階であってもエラーが起きたら：
+    //   - 一度も成功していない(loading===true)間は、syncErrorを立てて短い間隔
+    //     （2秒後）で自動的に再試行する。loadingはtrueのままなので、LivePage側は
+    //     判定を一切せず「復元中」を表示し続ける。
+    //   - 一度でも成功していれば(loading===false)、既に確定済みのlive/
+    //     participants/myParticipant/currentTurn/currentTopicは一切書き換えず、
+    //     syncErrorだけ立てて裏で再試行する（一時的な通信失敗を理由に、既に
+    //     正しく出ている画面を観客画面などへ後退させない）。
     const waitForAuthResolved = () =>
       new Promise<void>((resolve) => {
         if (!useAuthStore.getState().loading) {
@@ -381,29 +429,72 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         });
       });
 
+    const RETRY_DELAY_MS = 2_000;
+    const scheduleRetry = () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!cancelled) refetchAll();
+      }, RETRY_DELAY_MS);
+    };
+    const failStage = (message: string) => {
+      console.warn("[live]", message);
+      set({ syncError: message });
+      scheduleRetry();
+    };
+
     const refetchAll = async () => {
       const requestId = ++refetchRequestId;
       await waitForAuthResolved();
       if (cancelled || requestId !== refetchRequestId) return;
-      const live = await fetchActiveLive();
-      if (cancelled || requestId !== refetchRequestId) return;
       const userId = useAuthStore.getState().user?.id ?? null;
-      const myParticipant = live && userId ? await fetchMyParticipant(live.id, userId) : null;
-      if (cancelled || requestId !== refetchRequestId) return;
 
+      // 段階1：live確定。
+      const { data: liveData, error: liveError } = await supabase
+        .from("lives")
+        .select("*")
+        .neq("current_phase", "closed")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || requestId !== refetchRequestId) return;
+      if (liveError) {
+        failStage("ライブ情報の取得に失敗しました");
+        return;
+      }
+      const live = liveData as LiveRow | null;
+
+      // 段階2：participants一覧確定。myParticipantは別クエリ(fetchMyParticipant)に
+      // 頼らず、同じスナップショットのparticipants一覧からuser_idで導出する
+      // （2つの別々の問い合わせの間で結果がずれるレースを構造的に無くす）。
       let participants: ParticipantRow[] = [];
+      let myParticipant: ParticipantRow | null = null;
       let groups: GroupRow[] = [];
       // 2026-08-30:「採点確定のたびにボット全員のアイコンがランダムに変わって見える」
       // 不具合対策。participant_display_names RPCが一時的なエラーで取得できなかった
       // 場合は、空の結果で上書きせず直前の値を保持する（fetchParticipantProfiles参照）。
       let { participantNames, participantAvatars } = get();
       if (live) {
-        const [participantsResult, groupsResult, profiles] = await Promise.all([
-          fetchParticipantsForLive(live.id),
+        const { data: participantsData, error: participantsError } = await supabase
+          .from("participants")
+          .select("*")
+          .eq("live_id", live.id);
+        if (cancelled || requestId !== refetchRequestId) return;
+        if (participantsError) {
+          failStage("参加者情報の取得に失敗しました");
+          return;
+        }
+        participants = (participantsData ?? []) as ParticipantRow[];
+        myParticipant = userId ? (participants.find((p) => p.user_id === userId) ?? null) : null;
+
+        // グループ一覧・表示名/アイコンは舞台/観客の判定そのものには使わない
+        // 表示用データのため、ここは既存どおり緩やかに扱う（取得エラー時は
+        // 直前の値を保持するだけで、readyへの遷移は妨げない）。
+        const [groupsResult, profiles] = await Promise.all([
           fetchGroupsForLive(live.id),
           fetchParticipantProfiles(live.id),
         ]);
-        participants = participantsResult;
+        if (cancelled || requestId !== refetchRequestId) return;
         groups = groupsResult;
         if (profiles.ok) {
           participantNames = profiles.names;
@@ -411,10 +502,20 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         }
       }
       if (cancelled || requestId !== refetchRequestId) return;
-      set({ live, myParticipant, participants, groups, participantNames, participantAvatars, loading: false });
-      await refreshTurnDerived();
+      set({ live, myParticipant, participants, groups, participantNames, participantAvatars });
+
+      // 段階3：currentTurn/currentTopic確定。ここまで揃って初めて舞台/観客の
+      // 判定材料が出揃うため、これが成功するまではloadingをfalseにしない。
+      const turnOk = await refreshTurnDerived();
+      if (cancelled || requestId !== refetchRequestId) return;
+      if (!turnOk) {
+        failStage("進行状況の取得に失敗しました");
+        return;
+      }
+      set({ loading: false, syncError: null });
     };
 
+    currentRefetchAllRef = refetchAll;
     refetchAll();
 
     // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す。
@@ -492,6 +593,8 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (currentRefetchAllRef === refetchAll) currentRefetchAllRef = null;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
       unsubscribeAuth();
