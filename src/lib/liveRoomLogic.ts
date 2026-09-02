@@ -37,13 +37,20 @@ export function assignParticipantsToGroups(
 // TOPIC_POOL(src/data/liveDemoData.ts)から、運営者が管理する
 // topic_bankテーブル（お題管理画面から追加・編集・使用停止できるマスター）に
 // 変更した。使用停止(is_active=false)されたお題は対象から除外する。
+// 2026-09-03: 受付中に組数を後から増やした時に、そのライブに既に割り当て済みの
+// お題（topic_bank_id）を再度選んでしまうと同じお題が2組に重複してしまうため、
+// 除外できるexcludeIdsを追加した（既存呼び出し元は省略時=除外無しのまま動く）。
 export async function pickRandomTopicBankEntries(
   count: number,
+  excludeIds: string[] = [],
 ): Promise<Pick<TopicBankRow, "id" | "body" | "format">[]> {
   const { data, error } = await supabase
     .from("topic_bank")
     .select("id, body, format")
     .eq("is_active", true);
   if (error || !data) return [];
-  return shuffle(data as Pick<TopicBankRow, "id" | "body" | "format">[]).slice(0, count);
+  const candidates = (data as Pick<TopicBankRow, "id" | "body" | "format">[]).filter(
+    (entry) => !excludeIds.includes(entry.id),
+  );
+  return shuffle(candidates).slice(0, count);
 }

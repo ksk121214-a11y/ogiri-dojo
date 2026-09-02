@@ -1207,10 +1207,46 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 調整できるようにする。組数を変えても既存のgroups/participantsの割り当ては
   // 自動では変更しない（randomizeGroupsを呼び直すとplanned_group_countに
   // 合わせて再割り当てされる）。
+  // 2026-09-03: 組数を後から増やしても、ライブ作成時に用意したお題の枚数は
+  // 自動では増えず、「ゲームを開始する」の時点で初めて「お題の準備が不足して
+  // います」と分かる不親切な作りだった。組数を変更するたびに必要枚数
+  // (groupCount×ROUNDS_PER_LIVE_DEFAULT)を再計算し、足りない分だけprepareLive()と
+  // 同じ考え方(pickRandomTopicBankEntries)でtopic_bankから自動的に追加する。
   updateCapacity: async ({ maxPlayers, groupCount }) => {
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     if (groupCount < 1) return { ok: false, reason: "組数は1以上にしてください" };
+
+    const { data: existingTopicRows, error: fetchTopicsError } = await supabase
+      .from("topics")
+      .select("topic_bank_id")
+      .eq("live_id", live.id);
+    if (fetchTopicsError) return { ok: false, reason: fetchTopicsError.message };
+    const existingTopics = (existingTopicRows ?? []) as { topic_bank_id: string | null }[];
+    const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
+    const shortfall = neededTopics - existingTopics.length;
+    if (shortfall > 0) {
+      const usedTopicBankIds = existingTopics
+        .map((t) => t.topic_bank_id)
+        .filter((id): id is string => id !== null);
+      const additionalEntries = await pickRandomTopicBankEntries(shortfall, usedTopicBankIds);
+      if (additionalEntries.length < shortfall) {
+        return {
+          ok: false,
+          reason: `組数を増やすにはお題があと${shortfall}件必要です（お題管理から追加してください）`,
+        };
+      }
+      const { error: insertTopicsError } = await supabase.from("topics").insert(
+        additionalEntries.map((entry) => ({
+          live_id: live.id,
+          body: entry.body,
+          format: entry.format,
+          topic_bank_id: entry.id,
+        })),
+      );
+      if (insertTopicsError) return { ok: false, reason: insertTopicsError.message };
+    }
+
     const { error } = await updateLive(live.id, {
       max_players: maxPlayers,
       planned_group_count: groupCount,
