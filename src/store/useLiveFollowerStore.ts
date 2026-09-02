@@ -447,10 +447,25 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("online", handleOnline);
 
+    // 2026-09-03: リロード直後、Supabaseのセッション復元（useAuthStore.loading）が
+    // 完了する前にrefetchAll()が実行されると、その時点でuser?.idがまだnullのため
+    // myParticipantがnullのまま確定してしまい、以降DBに何も変化が起きない限り
+    // 再取得されず「回答者のはずが観客画面のまま」になっていた（実機ライブで発覚）。
+    // useAuthStoreのuser idの変化（ログイン確定・別ユーザーへの切替）を購読し、
+    // 変化するたびに必ず取り直す。
+    let lastAuthUserId = useAuthStore.getState().user?.id ?? null;
+    const unsubscribeAuth = useAuthStore.subscribe((state) => {
+      const nextUserId = state.user?.id ?? null;
+      if (nextUserId === lastAuthUserId) return;
+      lastAuthUserId = nextUserId;
+      refetchAll();
+    });
+
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
+      unsubscribeAuth();
       cleanupChannels();
     };
   },
