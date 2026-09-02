@@ -354,8 +354,37 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // 古い）呼び出しの結果が遅れて届いて上書きしてしまうことがあった。
     let refetchRequestId = 0;
 
+    // 2026-09-03:「回答者としてリロードすると観客画面になる（1回目のリロードでは
+    // 直らず、2回目でやっと直ることがある）」実機バグの追加対応。
+    // refetchAllはページ表示直後の1回だけでなく、Realtimeの各チャンネルが
+    // (再)接続するたびにも(下のonSubscribeStatus経由で)何度も呼ばれ、
+    // 「一番最後に呼ばれたrefetchAll」の結果が最終的な表示を決める設計になっている
+    // （このstore内のrequestIdガード参照）。ログイン状態の復元（useAuthStore.loading）
+    // がまだ終わっていないタイミングで、たまたまそれが「一番最後の呼び出し」に
+    // なってしまうと、myParticipantがnullで確定し、以降さらに別の呼び出しが
+    // 起きるまで直らない（＝直るまでの時間がその時々でばらつき、「もう一度
+    // リロードすると直ることがある」という不安定な見え方になっていたと考えられる）。
+    // どの呼び出し経路であっても、ログイン状態の復元が終わるまでは実際のデータ
+    // 取得に進まないようにし、未確定のuserIdでこのstoreの表示を一度も確定
+    // させないようにする（前段のuseAuthStore.subscribeによる「復元後の再取得」とは
+    // 独立に、すべての呼び出し経路に効かせる）。
+    const waitForAuthResolved = () =>
+      new Promise<void>((resolve) => {
+        if (!useAuthStore.getState().loading) {
+          resolve();
+          return;
+        }
+        const unsub = useAuthStore.subscribe((state) => {
+          if (state.loading) return;
+          unsub();
+          resolve();
+        });
+      });
+
     const refetchAll = async () => {
       const requestId = ++refetchRequestId;
+      await waitForAuthResolved();
+      if (cancelled || requestId !== refetchRequestId) return;
       const live = await fetchActiveLive();
       if (cancelled || requestId !== refetchRequestId) return;
       const userId = useAuthStore.getState().user?.id ?? null;
