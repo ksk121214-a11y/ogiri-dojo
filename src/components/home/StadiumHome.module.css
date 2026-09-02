@@ -483,8 +483,21 @@
   border-radius: 20px 0 0 20px;
   color: var(--ink);
 }
+/*
+ * 2026-09-02: 寄合券を消費して空欄セルが増えると、5分割スタンプ欄自体の
+ * 「中身の高さ」（OgiriStamp SVG分の高さの合計）が減り、grid行の高さ計算に
+ * 巻き込まれて本体側(.profileCardMain)ごとカードが縮んで見える不具合があった
+ * （空欄セルはコンテンツが無く高さゼロ、埋まっているセルだけがスタンプの高さを
+ * 持つため、枚数が減るほど.profileCardStubの「自然な高さ」も縮んでいた）。
+ * 半券側はグリッドの通常配置から外し、本体側の高さに合わせて絶対配置で
+ * 覆う形にすることで、枚数に関わらず常に本体と同じ高さになるようにした。
+ */
 .profileCardStub {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 92px;
   overflow: hidden;
   border-radius: 0 20px 20px 0;
   display: flex;
