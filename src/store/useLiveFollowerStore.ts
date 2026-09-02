@@ -232,16 +232,37 @@ async function fetchAnswersAndScoreForTurn(
     ? rows.filter((a) => a.participant_id === myParticipantId).length
     : 0;
 
+  // 2026-09-03:「締切直前の最後の1票が、採点した本人以外の画面ではボールとして
+  // 出ない」不具合対策。以前はactiveAnswer(revealedかつ未resolved)がある時にしか
+  // scoresを取得しておらず、scoresのINSERT直後にanswers.resolved=trueへの更新を
+  // 先に受信してしまった端末では、その時点で既にactiveAnswerがnullになっており、
+  // 最後の1票を含んだscoresを一度も取得できないまま終わっていた（確定得点
+  // (answers.score_total)自体はホストがDBから直接集計するため必ず正しいが、
+  // ボール演出の内訳だけがその端末で欠けて見えていた＝Realtimeイベントの到着順に
+  // 結果が左右されていた）。
+  // 「今まさに審査中の回答」だけでなく「このターンで直近にrevealedされた回答」
+  // （resolved済みでも、弾ける演出がまだ終わっていない可能性がある）を対象にscoresを
+  // 取得することで、resolvedになったかどうかに関わらず必ず最終形のscores一覧に
+  // 追いつけるようにする。
+  const boardTargetAnswer =
+    activeAnswer ??
+    [...rows]
+      .filter((a) => a.revealed_at)
+      .sort((a, b) => new Date(b.revealed_at!).getTime() - new Date(a.revealed_at!).getTime())[0] ??
+    null;
+
   // 採点ボードの玉演出は全員分の採点を見る必要がある（自分の分だけでなく）ため、
-  // 表示中の回答についたscores行を丸ごと取得する。myScoreはその中から自分の分を拾う。
+  // 表示対象の回答についたscores行を丸ごと取得する。myScoreはactiveAnswer（今まさに
+  // 審査中で、まだ自分が投票済みかどうかの判定に使う）に限定して拾う。
   let activeAnswerScores: ScoreRow[] = [];
-  if (activeAnswer) {
-    const { data } = await supabase.from("scores").select("*").eq("answer_id", activeAnswer.id);
+  if (boardTargetAnswer) {
+    const { data } = await supabase.from("scores").select("*").eq("answer_id", boardTargetAnswer.id);
     activeAnswerScores = (data ?? []) as ScoreRow[];
   }
-  const myScore = myParticipantId
-    ? (activeAnswerScores.find((s) => s.judge_participant_id === myParticipantId)?.points ?? null)
-    : null;
+  const myScore =
+    activeAnswer && myParticipantId
+      ? (activeAnswerScores.find((s) => s.judge_participant_id === myParticipantId)?.points ?? null)
+      : null;
   return { answers: rows, activeAnswer, myScore, myAnswerCount, activeAnswerScores };
 }
 
@@ -338,10 +359,6 @@ async function refreshTurnDerived(): Promise<boolean> {
   );
 
   // ターン（組）自体が切り替わったら、前のターンの採点内訳を持ち越さない。
-  // 「activeAnswerが無い間は前の値を保持する」のは同一ターン内で次の回答が
-  // 表示されるまでの一瞬の猶予のためであり、組が変わった後まで残ると、
-  // 新しい組の1件目の回答に前の組の最後の得点ぶんの玉がいきなり降ってくる
-  // 不具合になる。
   const turnChanged = (prevTurn?.id ?? null) !== (turn?.id ?? null);
 
   useLiveFollowerStore.setState((s) => ({
@@ -349,10 +366,14 @@ async function refreshTurnDerived(): Promise<boolean> {
     currentTopic: topic,
     activeAnswer,
     turnAnswers: answers,
-    // 確定した直後はactiveAnswerがnullになるが、玉が弾けるアニメーションぶんの猶予中は
-    // 直前の採点内訳を表示し続けたいので、activeAnswerが無い間は前の値を保持する
-    // （次のactiveAnswerが立った瞬間に新しい内訳へ自然に置き換わる）。
-    activeAnswerScores: activeAnswer ? activeAnswerScores : turnChanged ? [] : s.activeAnswerScores,
+    // 2026-09-03:「締切直前の最後の1票のボールが端末によって出ない」不具合対策。
+    // fetchAnswersAndScoreForTurnが、確定直後(resolved後)も含めて「このターンで
+    // 直近にrevealedされた回答」のscoresを常に取得し直すようになったため、ここでは
+    // 常にその最新の取得結果(activeAnswerScores)をそのまま使う。以前はactiveAnswerが
+    // 無い間（＝確定直後）だけ古いstate(s.activeAnswerScores)を保持し続けていたが、
+    // それだとRealtimeイベントの到着順によっては最後の1票を含まないまま固まって
+    // しまうことがあった。ターンが切り替わった時だけ明示的に空にする。
+    activeAnswerScores: turnChanged ? [] : activeAnswerScores,
     myScore,
     myAnswerCount,
     groupResult,

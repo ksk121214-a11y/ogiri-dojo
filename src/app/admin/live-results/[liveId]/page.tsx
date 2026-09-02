@@ -76,9 +76,16 @@ export default function AdminLiveResultDetailPage() {
     () => computeLiveResultCandidates(resolvedAnswers, participants),
     [resolvedAnswers, participants],
   );
-  const podiumParticipantIdByRank = useMemo(() => {
-    const map = new Map<1 | 2 | 3, string>();
-    for (const g of candidates.podiumGroups) map.set(g.rank, g.participantId);
+  // 2026-09-03: 同点で同じ順位に複数人いる場合、Map<rank, string>だと後勝ちで
+  // 1人しか残らず、もう一方の「別の回答へ差し替える」候補が消えてしまっていた。
+  // rankごとに参加者IDを配列で持つようにした。
+  const podiumParticipantIdsByRank = useMemo(() => {
+    const map = new Map<1 | 2 | 3, string[]>();
+    for (const g of candidates.podiumGroups) {
+      const list = map.get(g.rank) ?? [];
+      list.push(g.participantId);
+      map.set(g.rank, list);
+    }
     return map;
   }, [candidates]);
   const answerById = useMemo(() => new Map(resolvedAnswers.map((a) => [a.id, a])), [resolvedAnswers]);
@@ -488,12 +495,15 @@ export default function AdminLiveResultDetailPage() {
 
       {([1, 2, 3] as const).map((rank) => {
         const rows = resultAnswers.filter((r) => r.rank === rank);
-        const participantId = podiumParticipantIdByRank.get(rank);
-        const otherAnswers = participantId
-          ? resolvedAnswers.filter(
-              (a) => a.participant_id === participantId && !rows.some((r) => r.answer_id === a.id),
-            )
-          : [];
+        const participantIds = podiumParticipantIdsByRank.get(rank) ?? [];
+        const otherAnswers =
+          participantIds.length > 0
+            ? resolvedAnswers.filter(
+                (a) =>
+                  participantIds.includes(a.participant_id) &&
+                  !rows.some((r) => r.answer_id === a.id),
+              )
+            : [];
         return (
           <AdminCard key={rank} title={`${rank}位 最高得点回答`}>
             {rows.length === 0 ? (

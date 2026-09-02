@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
@@ -11,7 +11,7 @@ import XShareButton from "@/components/app/XShareButton";
 import MasteryGauge from "@/components/live-demo/MasteryGauge";
 import { MASTERY_GAIN } from "@/data/collectionData";
 import { APP_NAME } from "@/lib/appInfo";
-import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
+import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
@@ -66,14 +66,32 @@ export default function FinalResultView({
 }) {
   // ベストアンサーの発表ステップを廃止したため、1位分（従来のstep1〜3）から始める。
   const [step, setStep] = useState(1);
-  const top3 = data.ranking.slice(0, 3);
+  // 2026-09-03:「上位3順位に同点で4人以上いる場合、一部が表彰演出から漏れる」
+  // 不具合の修正。以前はdata.ranking.slice(0,3)で配列の先頭3件（＝配列の"位置"）を
+  // 固定で3人ぶんだけ発表していたため、例えば1位が2人同点だと3人目（実際には
+  // 2位の人）が表彰演出から漏れていた。rank<=3の全員を、同じ順位ごとにまとめて
+  // （タイの場合は複数人まとめて）扱う。存在する順位の数だけステップが進む
+  // （常に3ステップとは限らない：1位が2人・2位以降がいなければ1ステップだけ）。
+  const podiumTiers = useMemo(() => {
+    const byRank = new Map<number, RoomRankingEntry[]>();
+    for (const entry of data.ranking) {
+      if (entry.rank > 3) continue;
+      const list = byRank.get(entry.rank) ?? [];
+      list.push(entry);
+      byRank.set(entry.rank, list);
+    }
+    // 3位相当→2位相当→1位相当の順に見せたいので、順位の降順に並べる
+    // （存在する順位だけが入る。例：1位が2人・3位が1人なら[[3,[...]],[1,[...]]]）。
+    return [...byRank.entries()].sort((a, b) => b[0] - a[0]);
+  }, [data.ranking]);
+  const totalSteps = podiumTiers.length;
   const profile = useProfileStore((s) => s.profile);
 
   useEffect(() => {
-    if (step >= 4) return;
+    if (step > totalSteps) return;
     const t = setTimeout(() => setStep((s) => s + 1), 2000);
     return () => clearTimeout(t);
-  }, [step]);
+  }, [step, totalSteps]);
 
   // 3位→2位→1位と切り替わるたびに発表音を鳴らす（マウント時＝最初の3位発表でも鳴る）。
   useEffect(() => {
@@ -115,46 +133,52 @@ export default function FinalResultView({
 
       <div className="mt-4 flex min-h-[220px] w-full flex-col items-center justify-center">
         <AnimatePresence mode="wait">
-          {step >= 1 && step <= 3 && top3[3 - step] && (
-            <motion.div
-              key={`rank-${step}`}
-              initial={{ opacity: 0, y: 30, scale: 0.85 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ type: "spring", stiffness: 200, damping: 16 }}
-              className="w-full rounded-xl border border-[#3b5bff]/60 bg-[#eef1ff] p-6 text-center"
-            >
-              <p
-                className={`font-sans text-3xl font-black ${RANK_COLOR_BY_RANK[top3[3 - step].rank] ?? RANK_COLOR_BY_RANK[3]}`}
+          {step >= 1 && step <= totalSteps && podiumTiers[step - 1] && (() => {
+            const [rank, entries] = podiumTiers[step - 1];
+            return (
+              <motion.div
+                key={`rank-${step}`}
+                initial={{ opacity: 0, y: 30, scale: 0.85 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ type: "spring", stiffness: 200, damping: 16 }}
+                className="w-full rounded-xl border border-[#3b5bff]/60 bg-[#eef1ff] p-6 text-center"
               >
-                {top3[3 - step].rank}位
-              </p>
-              <div className="mt-3 flex items-center justify-center gap-2">
-                {top3[3 - step].participantId === myParticipantId ? (
-                  <MyIconAvatar size={28} bare />
-                ) : (
-                  <ParticipantIconAvatar
-                    participantId={top3[3 - step].participantId}
-                    avatarIcon={participantAvatars[top3[3 - step].participantId]?.icon}
-                    avatarColor={participantAvatars[top3[3 - step].participantId]?.color}
-                    size={28}
-                    bare
-                  />
-                )}
-                <p className="font-sans text-lg font-bold">
-                  {truncateLiveDisplayName(top3[3 - step].name)}
+                <p className={`font-sans text-3xl font-black ${RANK_COLOR_BY_RANK[rank] ?? RANK_COLOR_BY_RANK[3]}`}>
+                  {rank}位
                 </p>
-              </div>
-              <p className="mt-1 font-sans text-sm font-bold text-[#ff8f00]">
-                {top3[3 - step].total}点
-              </p>
-              <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
-                表彰ボーナス +{RANK_BONUS_POINTS_BY_RANK[top3[3 - step].rank] ?? 0}pt
-              </p>
-            </motion.div>
-          )}
+                {/* 同着（同じ順位）の人が複数いる場合、全員をまとめて表示する。 */}
+                <div className="mt-3 flex flex-col items-center gap-3">
+                  {entries.map((entry) => (
+                    <div key={entry.participantId} className="flex flex-col items-center gap-1">
+                      <div className="flex items-center justify-center gap-2">
+                        {entry.participantId === myParticipantId ? (
+                          <MyIconAvatar size={28} bare />
+                        ) : (
+                          <ParticipantIconAvatar
+                            participantId={entry.participantId}
+                            avatarIcon={participantAvatars[entry.participantId]?.icon}
+                            avatarColor={participantAvatars[entry.participantId]?.color}
+                            size={28}
+                            bare
+                          />
+                        )}
+                        <p className="font-sans text-lg font-bold">
+                          {truncateLiveDisplayName(entry.name)}
+                        </p>
+                      </div>
+                      <p className="font-sans text-sm font-bold text-[#ff8f00]">{entry.total}点</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
+                  表彰ボーナス +{RANK_BONUS_POINTS_BY_RANK[rank] ?? 0}pt
+                </p>
+              </motion.div>
+            );
+          })()}
 
-          {step >= 4 && (
+          {step > totalSteps && (
             <motion.div key="overall" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full">
               {data.myRank !== null && (
                 <p className="text-center font-sans text-sm text-[#6b6b90]">
@@ -217,7 +241,7 @@ export default function FinalResultView({
         </AnimatePresence>
       </div>
 
-      {step >= 4 && myEntry && profile && (
+      {step > totalSteps && myEntry && profile && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}

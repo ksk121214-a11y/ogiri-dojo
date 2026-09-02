@@ -134,6 +134,7 @@ export default function ScoringPhysicsBoard({
   maxBalls = MAX_BALLS_DEFAULT,
   scoreEvents,
   resolved = false,
+  confirmedPerfect = null,
   resolvedPopDelayMs = RESOLVED_POP_DELAY_DEFAULT_MS,
   roundKey = null,
   onBigLaugh,
@@ -145,6 +146,16 @@ export default function ScoringPhysicsBoard({
   maxBalls?: number;
   scoreEvents: ScoreEvent[];
   resolved?: boolean;
+  // 2026-09-03:「満点じゃないのに金になる」不具合対策。以前はresolved時の弾けが
+  // 「このクライアントが積み上げたボール数(totalSpawned) >= 分母(maxBalls)」という
+  // クライアントローカルな判定だけに頼っていた。分母自体は全端末共通になった
+  // （0049）が、ボールのスポーンはRealtimeイベントの到着順序の影響を受けうるため、
+  // 「今この端末に何個描画できているか」はまだ満点判定の正としては使えない。
+  // resolved（採点確定）と同時に、呼び出し元がanswers.judge_count>0 &&
+  // answers.top_score_votes===answers.judge_countというDBの確定値から渡せる場合は
+  // それを優先する（true=満点確定／false=満点でないことが確定／null=まだ確定前
+  // ＝満点到達によるボーナス演出用の従来のローカル判定にフォールバック）。
+  confirmedPerfect?: boolean | null;
   // resolvedになってから実際に玉が弾けるまでの猶予（既定400ms＝一呼吸）。
   // その後「次の回答/持ち時間再開」までの約1.5秒の間は、この値ではなく
   // 呼び出し側（司会サーバー側のLIVE_ROOM_TIMING.revealDelayMs）が担う。
@@ -186,6 +197,7 @@ export default function ScoringPhysicsBoard({
   const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const rafRef = useRef<number | null>(null);
   const prevWidthRef = useRef<number | null>(null);
+  const prevHeightRef = useRef<number | null>(null);
   // 2026-08-30:「満点じゃないのに金になる／点数分の玉が出ない／玉が出ない時がある」
   // 対策。maxBallsは呼び出し元でeligibleJudgeCount（審査資格のある参加者数）から
   // 動的に計算されており、審査サイクルの最中にも参加者の入退室で変動しうる値。
@@ -199,6 +211,8 @@ export default function ScoringPhysicsBoard({
   const maxBallsRef = useRef(maxBalls);
   const latestMaxBallsPropRef = useRef(maxBalls);
   const onBigLaughRef = useRef(onBigLaugh);
+  // 2026-09-03: 満点判定をDBの確定値に委ねるための参照（confirmedPerfect参照）。
+  const confirmedPerfectRef = useRef<boolean | null>(confirmedPerfect);
   const spawnedEventIdsRef = useRef<Set<string>>(new Set());
   const prevRoundKeyRef = useRef<string | null>(null);
 
@@ -214,6 +228,9 @@ export default function ScoringPhysicsBoard({
   useEffect(() => {
     onBigLaughRef.current = onBigLaugh;
   }, [onBigLaugh]);
+  useEffect(() => {
+    confirmedPerfectRef.current = confirmedPerfect;
+  }, [confirmedPerfect]);
 
   // コンテナのリサイズに追従して物理ワールドの境界を再構築する。
   useEffect(() => {
@@ -272,21 +289,35 @@ export default function ScoringPhysicsBoard({
       // 既存のボールはMatter.jsの剛体として固定px半径を持っているため、
       // 何もしないとコンテナが縮んでも元のpxサイズのままになり、
       // 「ボックスに対するボールの相対サイズ」が画面サイズによってズレてしまう。
-      // 幅の変化率と同じ比率で既存ボールの半径・座標をスケールし直すことで、
-      // ボックスとボールの見た目の比率を常に一定に保つ。
+      // 幅の変化率と同じ比率で既存ボールの半径をスケールし直すことで、
+      // ボックスとボールの見た目の比率を常に一定に保つ（半径の計算式自体が
+      // computeLayoutで幅基準になっているため、半径は幅の変化率だけを使う）。
+      //
+      // 2026-09-03:「リサイズ後にボールが枠を無視する／はみ出す」不具合対策。
+      // 以前はy座標も幅の変化率(scaleX)でスケールしていたため、幅と高さが
+      // 異なる比率で変化するリサイズ（アスペクト比が変わる場合。スマホの
+      // キーボード表示・画面回転・親要素のレイアウト変化等）が起きると、
+      // 縦方向の位置だけ実際の高さの変化と食い違って計算され、既存のボールが
+      // 新しい壁の外（画面下端の外や、逆に浮いた位置）に取り残されることが
+      // あった。x/yそれぞれの実際の変化率(scaleX/scaleY)で個別にスケールする。
       const prevWidth = prevWidthRef.current;
-      if (prevWidth && Math.abs(prevWidth - rect.width) > 0.5) {
-        const scale = rect.width / prevWidth;
+      const prevHeight = prevHeightRef.current;
+      const widthChanged = prevWidth !== null && Math.abs(prevWidth - rect.width) > 0.5;
+      const heightChanged = prevHeight !== null && Math.abs(prevHeight - rect.height) > 0.5;
+      if (widthChanged || heightChanged) {
+        const scaleX = prevWidth ? rect.width / prevWidth : 1;
+        const scaleY = prevHeight ? rect.height / prevHeight : 1;
         for (const body of engine.world.bodies) {
           if (!body.circleRadius) continue;
-          Matter.Body.scale(body, scale, scale);
+          Matter.Body.scale(body, scaleX, scaleX);
           Matter.Body.setPosition(body, {
-            x: body.position.x * scale,
-            y: body.position.y * scale,
+            x: body.position.x * scaleX,
+            y: body.position.y * scaleY,
           });
         }
       }
       prevWidthRef.current = rect.width;
+      prevHeightRef.current = rect.height;
 
       rebuildBounds(l);
       setLayout(l);
@@ -447,7 +478,13 @@ export default function ScoringPhysicsBoard({
       onPerfect?.();
       return;
     }
-    const isPerfectScore = totalSpawnedRef.current >= maxBallsRef.current;
+    // 2026-09-03:「満点じゃないのに金になる」不具合対策。DBの確定値
+    // (confirmedPerfectRef、answers.judge_count>0 && answers.top_score_votes===
+    // answers.judge_countから呼び出し元が渡す)が分かっていればそれを最優先する。
+    // まだ確定前（理論上の満点まで溜まった時点でのボーナス演出、resolved前）は
+    // 従来通りローカルの積み上げ数で判定する。
+    const isPerfectScore =
+      confirmedPerfectRef.current ?? totalSpawnedRef.current >= maxBallsRef.current;
     poppingBallsRef.current = balls.map((b) => ({
       x: b.position.x,
       y: b.position.y,
@@ -488,6 +525,9 @@ export default function ScoringPhysicsBoard({
     flashAlphaRef.current = 0;
     poppingBallsRef.current = [];
     confettiRef.current = [];
+    // 前の回答のconfirmedPerfectを次の回答へ持ち越さない（新しい回答自身の
+    // resolved更新が来るまではnull＝未確定として扱う）。
+    confirmedPerfectRef.current = null;
 
     const engine = engineRef.current;
     if (engine) {

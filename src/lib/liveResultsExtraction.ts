@@ -28,12 +28,17 @@ export function isPerfectAnswer(answer: AnswerRow): boolean {
 
 // ライブ全体のresolved(確定済み)なプレイヤー回答から、最終順位1〜3位の参加者を決める。
 // 同点の扱い・並び順はgetOverallRanking()（最終結果発表画面と同一ロジック）に従う。
+// 2026-09-03:「上位3順位に同点で4人以上いる場合、一部が抽出から漏れる」不具合を修正。
+// 以前はranking.slice(0,3)で配列の先頭3件（＝配列の"位置"）を切り出していたため、
+// 例えば1位が2人同点の場合、3人目（実際には2位）が漏れていた。getOverallRanking()が
+// 既に確定させているrank（同点は同じ順位、liveRoomSelectors.tsのwithRanks参照）を見て、
+// rank<=3の該当者を人数に関わらず全員含める。
 export function getPodiumParticipantIds(
   resolvedAnswers: AnswerRow[],
   participants: ParticipantRow[],
 ): string[] {
   const ranking = getOverallRanking(resolvedAnswers, participants, {});
-  return ranking.slice(0, 3).map((r) => r.participantId);
+  return ranking.filter((r) => r.rank <= 3).map((r) => r.participantId);
 }
 
 // 指定した参加者の、そのライブ中の最高得点回答をすべて返す（同点ならすべて）。
@@ -46,18 +51,21 @@ function getMaxScoreAnswers(resolvedAnswers: AnswerRow[], participantId: string)
 
 // 1〜3位それぞれの最高得点回答（同点はすべて）をまとめて返す。
 // 参加プレイヤーが3人未満のライブでは、存在する順位分だけ返す。
+// 2026-09-03: 以前は配列の位置(index)からranks[index]で1位・2位・3位を付け直して
+// おり、同点順位（例：1位が2人）と矛盾していた（2人とも1位のはずが、片方が
+// 「2位」にされてしまう）。getOverallRanking()が確定させたrankをそのまま使う。
 export function getPodiumGroups(
   resolvedAnswers: AnswerRow[],
   participants: ParticipantRow[],
 ): PodiumGroup[] {
-  const podiumParticipantIds = getPodiumParticipantIds(resolvedAnswers, participants);
-  const ranks: PodiumRank[] = [1, 2, 3];
+  const ranking = getOverallRanking(resolvedAnswers, participants, {});
   const groups: PodiumGroup[] = [];
-  podiumParticipantIds.forEach((participantId, index) => {
-    const answers = getMaxScoreAnswers(resolvedAnswers, participantId);
-    if (answers.length === 0) return;
-    groups.push({ rank: ranks[index], participantId, answers });
-  });
+  for (const entry of ranking) {
+    if (entry.rank > 3) continue;
+    const answers = getMaxScoreAnswers(resolvedAnswers, entry.participantId);
+    if (answers.length === 0) continue;
+    groups.push({ rank: entry.rank as PodiumRank, participantId: entry.participantId, answers });
+  }
   return groups;
 }
 

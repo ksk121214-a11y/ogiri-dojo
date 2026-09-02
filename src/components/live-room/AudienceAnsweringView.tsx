@@ -211,6 +211,14 @@ export default function AudienceAnsweringView() {
                 maxBalls={maxBalls}
                 scoreEvents={scoreEvents}
                 resolved={boardAnswer?.resolved ?? false}
+                // 2026-09-03:「満点じゃないのに金になる」不具合対策。確定済みなら
+                // DBの確定値(answers.judge_count/top_score_votes)で満点かどうかを
+                // 判定し、クライアントローカルなボール数の積み上げに依存しない。
+                confirmedPerfect={
+                  boardAnswer?.resolved
+                    ? boardAnswer.judge_count > 0 && boardAnswer.top_score_votes === boardAnswer.judge_count
+                    : null
+                }
                 resolvedPopDelayMs={LIVE_ROOM_TIMING.revealGraceMs + LIVE_ROOM_TIMING.ballPopPauseMs}
                 roundKey={boardRoundId}
               />
