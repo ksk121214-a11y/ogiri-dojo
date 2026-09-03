@@ -42,6 +42,9 @@ export interface LiveRow {
   announcement_scope: "player" | "all" | null;
   announcement_sent_at: string | null;
   created_by: string | null;
+  // ライブ終了時の段位・ポイント付与(apply_live_rank_rewards)が完了済みかどうか
+  // （0033で追加、二重付与防止に使う列）。TS側の型定義に無かったため追加した。
+  rank_rewards_applied: boolean;
 }
 
 export interface GroupRow {

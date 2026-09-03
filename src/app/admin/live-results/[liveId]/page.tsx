@@ -15,6 +15,7 @@ import { computeLiveResultCandidates, isPerfectAnswer } from "@/lib/liveResultsE
 import type { AnswerRow, LiveRow, ParticipantRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
 import { supabase } from "@/lib/supabase";
+import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
 
 interface LiveResultRow {
@@ -68,6 +69,11 @@ export default function AdminLiveResultDetailPage() {
   const [managerCommentDraft, setManagerCommentDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  // 2026-09-03:「closeLiveのポイント取りこぼし」対策。段位・ポイント付与
+  // (apply_live_rank_rewards)が失敗した場合に、closed後いつでも運営画面から
+  // 単独で再試行できるようにする（既存の二重付与防止ガードは維持したまま）。
+  const [retryingRewards, setRetryingRewards] = useState(false);
+  const retryRankRewards = useLiveHostStore((s) => s.retryRankRewards);
 
   const previewDetail = useSnsLiveResultsStore((s) => (liveResult ? s.details[liveResult.id] : undefined));
   const fetchDetail = useSnsLiveResultsStore((s) => s.fetchDetail);
@@ -368,6 +374,19 @@ export default function AdminLiveResultDetailPage() {
     setPublishing(false);
   };
 
+  const handleRetryRankRewards = async () => {
+    if (!live || retryingRewards) return;
+    setRetryingRewards(true);
+    const result = await retryRankRewards(live.id);
+    if (!result.ok) {
+      notifyError(`段位・ポイントの付与に失敗しました: ${result.reason ?? "不明なエラー"}`);
+    } else {
+      setLive({ ...live, rank_rewards_applied: true });
+      notifySuccess("段位・ポイントを付与しました。");
+    }
+    setRetryingRewards(false);
+  };
+
   const handleToggleCommentHidden = async (comment: CommentRow) => {
     if (busy) return;
     let reason: string | null = null;
@@ -492,6 +511,23 @@ export default function AdminLiveResultDetailPage() {
           )}
         </div>
       </AdminCard>
+
+      {live.current_phase === "closed" && !live.rank_rewards_applied && (
+        <AdminCard>
+          <p className="text-sm font-bold text-red-600">
+            段位・ポイントの付与に失敗しています
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            ライブ終了時の段位・累計ポイント・参加回数等の加算処理が完了していません。
+            再試行しても、既に付与済みの分が重複して加算されることはありません。
+          </p>
+          <div className="mt-2">
+            <AdminButton disabled={retryingRewards} onClick={handleRetryRankRewards}>
+              {retryingRewards ? "再試行中…" : "段位・ポイントの付与を再試行する"}
+            </AdminButton>
+          </div>
+        </AdminCard>
+      )}
 
       {([1, 2, 3] as const).map((rank) => {
         const rows = resultAnswers.filter((r) => r.rank === rank);

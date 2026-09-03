@@ -137,9 +137,16 @@ export async function fetchMyParticipant(liveId: string, userId: string): Promis
   return data as ParticipantRow | null;
 }
 
-async function fetchGroupsForLive(liveId: string): Promise<GroupRow[]> {
-  const { data } = await supabase.from("groups").select("*").eq("live_id", liveId);
-  return (data ?? []) as GroupRow[];
+// 2026-09-03:「Supabase取得エラーを空配列として上書きしない」対応。以前は
+// エラーを確認せず、失敗時も黙って空配列を返していた（呼び出し元がそれを
+// そのままgroupsに反映すると、一時的な通信失敗でgroups=[]になってしまう）。
+async function fetchGroupsForLive(liveId: string): Promise<{ ok: boolean; data: GroupRow[] }> {
+  const { data, error } = await supabase.from("groups").select("*").eq("live_id", liveId);
+  if (error) {
+    console.warn("[live] groups取得に失敗", error);
+    return { ok: false, data: [] };
+  }
+  return { ok: true, data: (data ?? []) as GroupRow[] };
 }
 
 // 組結果・最終結果で他人の表示名を出すための安全な経路（生のprofilesは自分の行しか読めないため）。
@@ -176,14 +183,25 @@ async function fetchParticipantProfiles(liveId: string): Promise<{
   return { ok: true, names, avatars };
 }
 
-async function fetchResolvedAnswersForLive(liveId: string): Promise<AnswerRow[]> {
-  const { data } = await supabase
+// 2026-09-03:「最終結果を一時的な全員0点で上書きしない」対応。以前はエラーを
+// 確認せず、失敗時も黙って空配列を返していた。呼び出し元(refreshFinalResult)が
+// それをそのまま集計すると、通信が一瞬失敗しただけで「全員0点」の最終結果に
+// 見えてしまう（実機ライブで発覚した「全員0点なのに1位に100点」と同種の症状を
+// 再現しうる経路）。
+async function fetchResolvedAnswersForLive(
+  liveId: string,
+): Promise<{ ok: boolean; data: AnswerRow[] }> {
+  const { data, error } = await supabase
     .from("answers")
     .select("*")
     .eq("live_id", liveId)
     .eq("resolved", true)
     .order("created_at", { ascending: true });
-  return (data ?? []) as AnswerRow[];
+  if (error) {
+    console.warn("[live] resolved answers取得に失敗", error);
+    return { ok: false, data: [] };
+  }
+  return { ok: true, data: (data ?? []) as AnswerRow[] };
 }
 
 // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策で、
@@ -215,17 +233,31 @@ async function fetchTurnAndTopic(
   return { ok: true, turn: turn as TurnRow, topic: topic as TopicRow | null };
 }
 
+// 2026-09-03:「Supabase取得エラーを空配列として上書きしない」対応。answers/scores
+// の取得に失敗した場合はok:falseを返し、呼び出し元(refreshTurnDerived)で
+// 既存の正常なstateを維持させる（以前はエラーを確認せず空配列で上書きしていた）。
 async function fetchAnswersAndScoreForTurn(
   turnId: string,
   myParticipantId: string | undefined,
-): Promise<{
-  answers: AnswerRow[];
-  activeAnswer: AnswerRow | null;
-  myScore: number | null;
-  myAnswerCount: number;
-  activeAnswerScores: ScoreRow[];
-}> {
-  const { data: answersData } = await supabase.from("answers").select("*").eq("turn_id", turnId);
+): Promise<
+  | {
+      ok: true;
+      answers: AnswerRow[];
+      activeAnswer: AnswerRow | null;
+      myScore: number | null;
+      myAnswerCount: number;
+      activeAnswerScores: ScoreRow[];
+    }
+  | { ok: false }
+> {
+  const { data: answersData, error: answersError } = await supabase
+    .from("answers")
+    .select("*")
+    .eq("turn_id", turnId);
+  if (answersError) {
+    console.warn("[live] answers取得に失敗", answersError);
+    return { ok: false };
+  }
   const rows = (answersData ?? []) as AnswerRow[];
   const activeAnswer = rows.find((a) => a.revealed_at && !a.resolved) ?? null;
   const myAnswerCount = myParticipantId
@@ -256,21 +288,31 @@ async function fetchAnswersAndScoreForTurn(
   // 審査中で、まだ自分が投票済みかどうかの判定に使う）に限定して拾う。
   let activeAnswerScores: ScoreRow[] = [];
   if (boardTargetAnswer) {
-    const { data } = await supabase.from("scores").select("*").eq("answer_id", boardTargetAnswer.id);
-    activeAnswerScores = (data ?? []) as ScoreRow[];
+    const { data: scoresData, error: scoresError } = await supabase
+      .from("scores")
+      .select("*")
+      .eq("answer_id", boardTargetAnswer.id);
+    if (scoresError) {
+      console.warn("[live] scores取得に失敗", scoresError);
+      return { ok: false };
+    }
+    activeAnswerScores = (scoresData ?? []) as ScoreRow[];
   }
   const myScore =
     activeAnswer && myParticipantId
       ? (activeAnswerScores.find((s) => s.judge_participant_id === myParticipantId)?.points ?? null)
       : null;
-  return { answers: rows, activeAnswer, myScore, myAnswerCount, activeAnswerScores };
+  return { ok: true, answers: rows, activeAnswer, myScore, myAnswerCount, activeAnswerScores };
 }
 
 async function refreshFinalResult() {
   const { live, myParticipant, participants, participantNames } =
     useLiveFollowerStore.getState();
   if (!live) return;
-  const resolvedAnswers = await fetchResolvedAnswersForLive(live.id);
+  const resolvedResult = await fetchResolvedAnswersForLive(live.id);
+  // 取得エラー時は既存のfinalResultを一切書き換えず、次の再試行に任せる。
+  if (!resolvedResult.ok) return;
+  const resolvedAnswers = resolvedResult.data;
   const ranking = getOverallRanking(resolvedAnswers, participants, participantNames);
   const bestAnswerRow = getBestAnswer(resolvedAnswers);
   const bestAnswer = bestAnswerRow
@@ -332,9 +374,10 @@ async function refreshTurnDerived(): Promise<boolean> {
   if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
   if (!turnResult.ok) return false; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
   const { turn, topic } = turnResult;
-  const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } =
-    await fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id);
+  const answersResult = await fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id);
   if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
+  if (!answersResult.ok) return false; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
+  const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } = answersResult;
 
   let groupResult: GroupResultData | null = null;
   if (live.current_phase === "group_result" && turn && topic) {
@@ -359,7 +402,12 @@ async function refreshTurnDerived(): Promise<boolean> {
   );
 
   // ターン（組）自体が切り替わったら、前のターンの採点内訳を持ち越さない。
-  const turnChanged = (prevTurn?.id ?? null) !== (turn?.id ?? null);
+  // 2026-09-03:「リロード直後、採点ボールが消えて見える」不具合対策。以前は
+  // prevTurnがnull（＝ページ読み込み直後でまだ一度も確定させていないだけ、
+  // 本当のターン切り替えではない）というだけでもturnChangedがtrueになり、
+  // せっかく取得できたactiveAnswerScoresを毎回空にしてしまっていた。
+  // 「前回のターンが実際にあり、かつ今回と違う」場合だけを本当の切り替えとする。
+  const turnChanged = prevTurn !== null && prevTurn.id !== (turn?.id ?? null);
 
   useLiveFollowerStore.setState((s) => ({
     currentTurn: turn,
@@ -493,11 +541,12 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // （2つの別々の問い合わせの間で結果がずれるレースを構造的に無くす）。
       let participants: ParticipantRow[] = [];
       let myParticipant: ParticipantRow | null = null;
-      let groups: GroupRow[] = [];
       // 2026-08-30:「採点確定のたびにボット全員のアイコンがランダムに変わって見える」
       // 不具合対策。participant_display_names RPCが一時的なエラーで取得できなかった
       // 場合は、空の結果で上書きせず直前の値を保持する（fetchParticipantProfiles参照）。
-      let { participantNames, participantAvatars } = get();
+      // 2026-09-03: groupsもgroups取得エラー時に既存の値を保持できるよう、
+      // 同様にget()から初期値を引き継ぐようにした。
+      let { participantNames, participantAvatars, groups } = get();
       if (live) {
         const { data: participantsData, error: participantsError } = await supabase
           .from("participants")
@@ -519,11 +568,17 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
           fetchParticipantProfiles(live.id),
         ]);
         if (cancelled || requestId !== refetchRequestId) return;
-        groups = groupsResult;
+        if (groupsResult.ok) {
+          groups = groupsResult.data;
+        }
         if (profiles.ok) {
           participantNames = profiles.names;
           participantAvatars = profiles.avatars;
         }
+      } else {
+        // liveが無いこと自体は取得エラーではなく確定した状態なので、
+        // 前のライブのgroupsを引き継がず明示的に空にする。
+        groups = [];
       }
       if (cancelled || requestId !== refetchRequestId) return;
       set({ live, myParticipant, participants, groups, participantNames, participantAvatars });

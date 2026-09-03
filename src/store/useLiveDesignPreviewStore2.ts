@@ -707,6 +707,7 @@ export const useLiveDesignPreviewStore2 = create<LiveDesignPreviewState>()((set,
       announcement_scope: null,
       announcement_sent_at: null,
       created_by: null,
+      rank_rewards_applied: false,
     };
     set({
       live,

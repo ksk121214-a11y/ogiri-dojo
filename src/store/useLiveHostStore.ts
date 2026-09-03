@@ -102,6 +102,9 @@ interface LiveHostState {
   updateCapacity: (input: { maxPlayers: number | null; groupCount: number }) => Promise<{ ok: boolean; reason?: string }>;
   beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
   closeLive: () => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-03: closeLiveのポイント付与が失敗した場合に、closed後いつでも
+  // 単独で再試行するためのアクション（管理画面のライブ結果詳細から呼ぶ）。
+  retryRankRewards: (liveId: string) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -398,8 +401,11 @@ async function resolveIfDue() {
   const turn = state.turns.find((t) => t.id === active.turn_id);
   if (!turn) return;
 
+  // 2026-09-03:「途中退場した参加者を審査対象から除外する」対応。退場済み
+  // (kicked_at)の参加者は、以降このライブで採点したことにされる／採点済み
+  // 扱いの分母に含まれることが無いようにする（DB側のRLSでも別途拒否している）。
   const eligibleJudges = state.participants.filter(
-    (p) => p.role === "player" && p.group_id !== turn.group_id,
+    (p) => p.role === "player" && p.group_id !== turn.group_id && !p.kicked_at,
   );
   const votedJudgeIds = new Set(state.scores.map((s) => s.judge_participant_id));
   const allVoted =
@@ -1182,6 +1188,26 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     }
     const children = await fetchLiveChildren(live.id);
     set({ participants: children.participants });
+    // 2026-09-03:「途中退場した参加者を審査対象から除外する」対応。退場した人が
+    // プレイヤーだった場合、まだ始まっていない(pending)ターンの
+    // eligible_judge_count（審査資格者数、0049で導入・全端末共通の分母）を
+    // 退場後の参加者一覧から再計算し直す。既に進行中/終了済みのターンは、
+    // 審査ボードの表示・満点判定が既に確定しているため変更しない
+    // （「これから始まるターン」だけ全端末で同じ値になっていればよい）。
+    if (target?.role === "player") {
+      const remainingPlayers = children.participants.filter(
+        (p) => p.role === "player" && !p.kicked_at,
+      );
+      const { data: pendingTurns } = await supabase
+        .from("turns")
+        .select("id, group_id")
+        .eq("live_id", live.id)
+        .eq("status", "pending");
+      for (const t of (pendingTurns ?? []) as { id: string; group_id: string }[]) {
+        const eligibleJudgeCount = remainingPlayers.filter((p) => p.group_id !== t.group_id).length;
+        await supabase.from("turns").update({ eligible_judge_count: eligibleJudgeCount }).eq("id", t.id);
+      }
+    }
     return { ok: true };
   },
 
@@ -1265,147 +1291,58 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 作成済みのtopics（live_id紐づけ）とrandomizeGroupsで確定済みのgroups/participants
   // を使ってturnsを作成し、topic_revealへ遷移する。以降のゲーム進行は一切変更しない。
   beginGame: async () => {
-    const { live, groups } = get();
+    const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
 
-    const { data: participantsData } = await supabase
-      .from("participants")
-      .select("*")
-      .eq("live_id", live.id)
-      .eq("role", "player");
-    const players = (participantsData ?? []) as ParticipantRow[];
-    if (players.length === 0) {
-      return { ok: false, reason: "組分けされたプレイヤーがいません" };
+    // 2026-09-03:「beginGameの部分成功防止」対応。以前はここで
+    // 「lives更新(topic_reveal)→turns一括作成→topics施錠→最初のturn有効化→
+    // lives.current_turn_id確定」を5回の別々のSupabase呼び出しに分けており、
+    // 後半3つはエラーを一切確認していなかった。途中で失敗すると
+    // current_phase='topic_reveal'なのにcurrent_turn_idがnullという不整合な
+    // 状態のまま「ゲームを開始しました」と表示されうる状態だった。
+    // begin_game()に一括化し、Postgresの関数呼び出し自体が1トランザクション
+    // になる性質を利用して、途中のどこで失敗しても何も変更されない
+    // （＝openingへ安全に戻ったのと同じ状態）ようにした。
+    const { data, error } = await supabase.rpc("begin_game", { p_live_id: live.id }).single();
+    if (error) {
+      return { ok: false, reason: error.message };
     }
-
-    const { data: topicRows } = await supabase
-      .from("topics")
-      .select("*")
-      .eq("live_id", live.id)
-      .order("created_at", { ascending: true });
-    const topics = (topicRows ?? []) as TopicRow[];
-    const groupCount = groups.length || live.planned_group_count || 1;
-    const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
-    if (topics.length < neededTopics) {
-      return { ok: false, reason: "お題の準備が不足しています" };
-    }
-
-    // 事故防止：連打・複数タブからの同時実行でturns等が重複作成されないための関所。
-    // 「opening・かつまだturnsが割り当てられていない(current_turn_id is null)」状態からしか
-    // 離脱できないガード付きupdateにし、成功できるのは最初の1回だけになるようにする。
-    const topicRevealDeadline = new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString();
-    const { data: guardedLive, error: guardError } = await supabase
-      .from("lives")
-      .update({ current_phase: "topic_reveal", phase_deadline: topicRevealDeadline })
-      .eq("id", live.id)
-      .eq("current_phase", "opening")
-      .is("current_turn_id", null)
-      .select()
-      .maybeSingle();
-    if (guardError) {
-      return { ok: false, reason: guardError.message };
-    }
-    if (!guardedLive) {
-      const message = "ライブの状態が別の操作によって変更されています。最新状態を取得してください。";
+    const result = data as { ok: boolean; reason: string | null; first_turn_id: string | null };
+    if (!result.ok || !result.first_turn_id) {
+      const message = result.reason ?? "ゲームの開始に失敗しました";
       set({ error: message });
       return { ok: false, reason: message };
     }
-    set({ live: guardedLive as LiveRow });
-
-    const sortedGroups = [...groups].sort((a, b) => a.group_order - b.group_order);
-    // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
-    // 各ターンの審査資格者数(自分の組以外のplayer数)をゲーム開始時に1回だけここで
-    // 確定させ、turns.eligible_judge_countとして保存する（0049）。以前は各クライアントが
-    // その場のparticipants一覧から毎回計算しており、ターン開始のタイミングと参加者の
-    // 入退室が重なるとクライアントごとに結果がずれることがあった。
-    const playersByGroup = new Map<string, number>();
-    for (const p of players) {
-      if (!p.group_id) continue;
-      playersByGroup.set(p.group_id, (playersByGroup.get(p.group_id) ?? 0) + 1);
-    }
-    const eligibleJudgeCountByGroup = new Map<string, number>(
-      sortedGroups.map((g) => [g.id, players.length - (playersByGroup.get(g.id) ?? 0)]),
-    );
-    const turnsToInsert: {
-      live_id: string;
-      round: number;
-      group_id: string;
-      topic_id: string;
-      status: "pending" | "active";
-      eligible_judge_count: number;
-    }[] = [];
-    let topicCursor = 0;
-    for (let round = 1; round <= ROUNDS_PER_LIVE_DEFAULT; round += 1) {
-      for (const group of sortedGroups) {
-        turnsToInsert.push({
-          live_id: live.id,
-          round,
-          group_id: group.id,
-          topic_id: topics[topicCursor].id,
-          status: "pending",
-          eligible_judge_count: eligibleJudgeCountByGroup.get(group.id) ?? 0,
-        });
-        topicCursor += 1;
-      }
-    }
-    const { data: turnRows, error: turnError } = await supabase
-      .from("turns")
-      .insert(turnsToInsert)
-      .select();
-    if (turnError || !turnRows) {
-      // ロールバック：opening状態に戻し、もう一度「ゲームを開始する」をやり直せるようにする
-      // （このガードを通過できるのは1回だけなので、戻さないと二度と開始できなくなる）。
-      await updateLive(live.id, { current_phase: "opening", phase_deadline: null });
-      return { ok: false, reason: turnError?.message ?? "ターンの作成に失敗しました" };
-    }
-
-    // 使用が確定したお題だけlocked=trueにする（実際にturnsに紐づいた分のみ）。
-    await supabase
-      .from("topics")
-      .update({ locked: true })
-      .in("id", turnsToInsert.map((t) => t.topic_id));
-
-    const firstTurn = orderedTurns(turnRows as TurnRow[], sortedGroups)[0];
-    await supabase.from("turns").update({ status: "active" }).eq("id", firstTurn.id);
 
     await logAdminAction({
       action: "game_started",
       targetType: "lives",
       targetId: live.id,
-      detail: { playerCount: players.length, groupCount },
     });
 
     const children = await fetchLiveChildren(live.id);
     const profiles = await fetchProfilesFor(children.participants);
     set({ ...children, profiles, error: null });
-
-    // current_phase/phase_deadlineは既に上のガード付きupdateで設定済みのため、
-    // ここではcurrent_turn_idの確定だけを行う。
-    await updateLive(live.id, {
-      current_turn_id: firstTurn.id,
-      answering_paused: false,
-      answering_remaining_ms: null,
-    });
-    await refreshAnswersForTurn(firstTurn.id);
+    await refreshAnswersForTurn(result.first_turn_id);
     return { ok: true };
   },
 
   closeLive: async () => {
     const { live } = get();
     if (!live) return { ok: true };
-    // 終了ボタン連打で二重実行されないよう、対象をcurrent_phase<>'closed'に絞る。
-    // 既に他の呼び出し（別タブ等）でclosed済みなら対象0件で何も起きない。
-    const { data, error } = await supabase
-      .from("lives")
-      .update({ current_phase: "closed", phase_deadline: null, ended_at: new Date().toISOString() })
-      .eq("id", live.id)
-      .neq("current_phase", "closed")
-      .select();
+    // 2026-09-03:「closeLiveのポイント取りこぼし」対策。以前はlives更新と
+    // apply_live_rank_rewards呼び出しが別々のSupabase呼び出しで、後者の失敗は
+    // console.warnで握りつぶされ、運営が気づく・再試行する手段も無かった。
+    // close_live()はこの2つを1つのSECURITY DEFINER関数にまとめ、ポイント付与
+    // 側だけ失敗してもライブの終了自体はロールバックさせず、成功/失敗を
+    // 戻り値で返す（既存のrank_rewards_appliedによる二重付与防止は維持）。
+    const { data, error } = await supabase.rpc("close_live", { p_live_id: live.id }).single();
     if (error) {
       set({ error: error.message });
       return { ok: false, reason: error.message };
     }
-    if (!data || data.length === 0) {
+    const result = data as { closed: boolean; rewards_applied: boolean; rewards_error: string | null };
+    if (!result.closed) {
       // 既に終了済み（二重クリック等）。UIだけ「開始前」に戻す。
       cleanupChannels();
       set({
@@ -1424,17 +1361,19 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: true };
     }
     await logAdminAction({ action: "live_closed", targetType: "lives", targetId: live.id });
-    // 参加した各プレイヤーへ、得点に応じた段位(mastery_meter)・累計ポイント・
-    // ポイント残高・参加回数・表彰回数・ベストアンサー回数を加算する
-    // （security definer関数側で二重付与防止済み）。失敗してもライブの終了自体は
-    // 止めない（logAdminActionと同じ「補助処理は本処理を止めない」方針）。
-    const { error: rewardError } = await supabase.rpc("apply_live_rank_rewards", { p_live_id: live.id });
-    if (rewardError) console.warn("[live] 段位・ポイントの加算に失敗", rewardError);
+    // ポイント付与が失敗した場合は、成功扱いにせず運営に見える形で残す
+    // （ライブの終了自体は完了しているのでok:trueのまま、errorだけ立てる。
+    // 管理画面のライブ結果詳細から後でretryRankRewardsを呼べば再試行できる）。
+    if (!result.rewards_applied) {
+      const message = `段位・ポイントの加算に失敗しました（あとで管理画面から再試行できます）：${result.rewards_error ?? "不明なエラー"}`;
+      console.warn("[live]", message);
+      set({ error: message });
+    }
     cleanupChannels();
     useLiveBotStore.getState().removeAllBots();
     // closed状態の行を持ち続けると画面が「開始前」に戻らない(!liveでのみ判定しているため)。
-    // ライブそのものを無かった状態に戻す。
-    set({
+    // ライブそのものを無かった状態に戻す（errorは上で立てていれば維持する）。
+    set((s) => ({
       live: null,
       participants: [],
       profiles: [],
@@ -1445,8 +1384,18 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       scores: [],
       resolvedAnswers: [],
       resolvedScoresByAnswer: {},
-      error: null,
-    });
+      error: result.rewards_applied ? null : s.error,
+    }));
+    return { ok: true };
+  },
+
+  retryRankRewards: async (liveId: string) => {
+    const { data, error } = await supabase.rpc("retry_live_rank_rewards", { p_live_id: liveId }).single();
+    if (error) return { ok: false, reason: error.message };
+    const result = data as { rewards_applied: boolean; rewards_error: string | null };
+    if (!result.rewards_applied) {
+      return { ok: false, reason: result.rewards_error ?? "不明なエラー" };
+    }
     return { ok: true };
   },
 }));

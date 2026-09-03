@@ -217,6 +217,15 @@ export default function ScoringPhysicsBoard({
   const prevRoundKeyRef = useRef<string | null>(null);
 
   const [layout, setLayout] = useState<Layout | null>(null);
+  // 2026-09-03:「setTimeout内では古いlayoutではなく最新を使う」対策。
+  // spawnBallsForPointsは玉ごとに数十〜数百msの遅延を挟んでMatter.jsへ追加するため、
+  // 呼び出し時点でクロージャに閉じ込めたlayout(state)のままだと、その間にリサイズが
+  // 起きた場合に古い壁の内側基準で座標を計算してしまい、新しい壁の外側に出現する
+  // ことがあった。setTimeoutの中では常にこのrefの最新値を読む。
+  const layoutRef = useRef<Layout | null>(null);
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
   const [totalBalls, setTotalBalls] = useState(0);
   // "X / Y"表示のYも、ロジックと同じ固定値を見せる（propsのmaxBallsをそのまま
   // 表示すると、審査サイクル中に分母だけ動いて見える不整合になるため）。
@@ -600,7 +609,7 @@ export default function ScoringPhysicsBoard({
   // 再試行されないため）。false時は呼び出し側で既読登録せず、layoutが整って
   // spawnBallsForPointsの参照が変わった時に自動的に再試行されるようにする。
   const spawnBallsForPoints = useCallback(
-    (points: 0 | 1 | 2 | 3): boolean => {
+    (points: 0 | 1 | 2 | 3, batchIndexRef: { current: number }): boolean => {
       const engine = engineRef.current;
       const l = layout;
       if (perfectTriggeredRef.current) return true;
@@ -615,15 +624,44 @@ export default function ScoringPhysicsBoard({
       if (count === 0) return true;
 
       for (let i = 0; i < count; i++) {
-        const delay = i * (80 + Math.random() * 90);
+        // 2026-09-03:「scoreEvents全体で共通のspawnキューを使い、同時出現を防ぐ」対策。
+        // 以前はイベントごとに独立してi=0から遅延を数えており、複数のscoreEventsが
+        // 同じ描画バッチで届くと、別イベントの玉同士がほぼ同じタイミングで出現し
+        // 重なりやすくなっていた。呼び出し元(useEffect)から共有されるbatchIndexRefで、
+        // このバッチ全体を通した連番にして遅延をずらす。
+        const spawnIndex = batchIndexRef.current;
+        batchIndexRef.current += 1;
+        const delay = spawnIndex * (80 + Math.random() * 90);
         const id = setTimeout(() => {
           timeoutsRef.current.delete(id);
           const currentEngine = engineRef.current;
-          if (!currentEngine) return;
-          const margin = l.ballRadius + 6;
-          const x = margin + Math.random() * (l.width - margin * 2);
-          const y = -l.ballRadius * 2 - Math.random() * 40;
-          const ball = Matter.Bodies.circle(x, y, l.ballRadius, {
+          // 2026-09-03:「setTimeout内では古いlayoutではなく最新のlayoutRefを使う」対策。
+          // 玉ごとに数十〜数百ms遅延するため、呼び出し時点でクロージャに閉じ込めた
+          // layout(l)のままだと、その間にリサイズが起きた場合、古い壁の内側基準で
+          // 座標を計算してしまい新しい壁の外側に出現することがあった。
+          const currentLayout = layoutRef.current;
+          if (!currentEngine || !currentLayout) return;
+          const margin = currentLayout.ballRadius + 6;
+          const minX = margin;
+          const maxX = Math.max(margin, currentLayout.width - margin);
+
+          // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。既存の玉のx位置から
+          // 十分離れた候補が見つかるまで数回だけ試す（見つからなければ最後の候補を
+          // そのまま使う＝無限ループにはしない。物理演算側の衝突解決にも任せられるため）。
+          const existingXs = currentEngine.world.bodies
+            .filter((b) => b.circleRadius)
+            .map((b) => b.position.x);
+          const minGap = currentLayout.ballRadius * 1.3;
+          let x = minX + Math.random() * Math.max(0, maxX - minX);
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const tooClose = existingXs.some((ex) => Math.abs(ex - x) < minGap);
+            if (!tooClose) break;
+            x = minX + Math.random() * Math.max(0, maxX - minX);
+          }
+          // 出現位置は現在の壁とballRadiusの内側へ必ずclampする（念のための二重の安全策）。
+          x = Math.min(maxX, Math.max(minX, x));
+          const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
+          const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
             restitution: 0.45,
             friction: 0.08,
             frictionAir: 0.003,
@@ -647,9 +685,11 @@ export default function ScoringPhysicsBoard({
   // scoreEventsに新しく増えた分だけ玉を降らせる。誰の採点でも(自分の投票でも
   // 他人の採点がRealtime経由で増えた分でも)必ずここを通るので、全員の画面で同じ挙動になる。
   useEffect(() => {
+    // このuseEffect呼び出し（＝1回の描画バッチ）全体で共有する連番。
+    const batchIndexRef = { current: 0 };
     for (const ev of scoreEvents) {
       if (spawnedEventIdsRef.current.has(ev.id)) continue;
-      if (spawnBallsForPoints(ev.points)) {
+      if (spawnBallsForPoints(ev.points, batchIndexRef)) {
         spawnedEventIdsRef.current.add(ev.id);
       }
     }

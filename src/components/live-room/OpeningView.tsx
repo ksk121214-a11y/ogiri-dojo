@@ -52,14 +52,16 @@ export default function OpeningView() {
   const playerCount = participants.filter((p) => p.preferred_role === "player").length;
   const isPlayerFull = live.max_players != null && playerCount >= live.max_players;
 
-  // 2026-09-03:「間違って観客を押すと後からプレイヤーに変更できない（逆も同様）」
-  // ための事故防止。確定前に一度確認する（他の画面で使っているwindow.confirmと
-  // 同じパターン、既存の参加処理自体は変更しない）。
+  // 2026-09-03: 仕様書_v2.md §2.1「一度見学希望で登録した人が後からプレイヤー
+  // 希望に変更することも、上限内であれば可能」に合わせて確認文を修正した。
+  // 観客→プレイヤーへの変更は実際に可能なため「あとから変更できません」と
+  // 案内するのは誤りだった（以前はここが不正確だった）。プレイヤー→観客の
+  // 変更は仕様上想定されていないため、こちらの警告はそのまま残す。
   const handleJoin = async (role: ParticipantRole) => {
     const confirmed = window.confirm(
       role === "player"
         ? "プレイヤーとして参加しますか？あとから観客に変更することはできません。"
-        : "観客として参加しますか？あとからプレイヤーに変更することはできません。",
+        : "観客として参加しますか？（人数に空きがあれば、あとからプレイヤーへ変更できます）",
     );
     if (!confirmed) return;
     if (role === "player") playSfx("joinAsPlayer");
@@ -135,6 +137,25 @@ export default function OpeningView() {
             プレイヤー：舞台に立って回答し、自分の組の出番以外は採点も担当します。
             観客：採点はできませんが、人数制限なくいつでも観戦できます。
           </p>
+        </div>
+      ) : myParticipant.preferred_role === "audience" ? (
+        // 2026-09-03: 仕様書_v2.md §2.1「一度見学希望で登録した人が後から
+        // プレイヤー希望に変更することも、上限内であれば可能」に対応。
+        // 以前はここが確認済みの静的な表示だけで、変更する手段が無かった。
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <p className="font-sans text-sm text-[#ffcf4a]">観客希望で参加登録済みです</p>
+          <button
+            type="button"
+            disabled={joining || isPlayerFull}
+            onClick={() => handleJoin("player")}
+            title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
+            className="rounded-full bg-[#ff3b5b] px-6 py-2.5 font-sans text-xs font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {joining ? "変更処理中…" : isPlayerFull ? "満員です" : "プレイヤーに変更する"}
+          </button>
+          {isPlayerFull && (
+            <p className="font-sans text-xs text-[#ffcf4a]">参加人数が上限に達しています。</p>
+          )}
         </div>
       ) : (
         <p className="mt-6 font-sans text-sm text-[#ffcf4a]">
