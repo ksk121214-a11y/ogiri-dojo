@@ -374,14 +374,15 @@
  */
 .ringHole {
   position: absolute;
-  /* 2026-09-03: 最初10px/18pxで内側に置いたところ、カードの内側の文字（左上詰めの
-     テキスト）に丸穴が重なってしまった。既存の.scallopCapTop/Leftと同じ考え方
-     （角の境界線をまたぐように半分だけ外へはみ出させる）に変え、カード内側の
-     コンテンツと衝突しないようにした。 */
-  top: -8px;
-  left: -8px;
-  width: 16px;
-  height: 16px;
+  /* 2026-09-03: 「角の境界線をまたぐ」配置ではなく、上から・左からそれぞれ
+     指定px の位置にある、カードの内側に完全に収まった穴という指定に修正
+     （ノート・バインダーの綴じ穴のイメージ）。中身のテキスト・アイコンと
+     重ならないよう、呼び出し側(AccountSummary)でこの穴のぶんだけ
+     padding-top/padding-leftを広げて場所を空けている。 */
+  top: 8px;
+  left: 8px;
+  width: 14px;
+  height: 14px;
   border-radius: 9999px;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
   pointer-events: none;
