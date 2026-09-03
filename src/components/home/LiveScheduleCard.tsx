@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,7 +37,17 @@ const BARCODE_PATTERN = [
 const BARCODE_HEIGHT = 76;
 const BARCODE_WIDTH = 38;
 
-function DateLine({ date, timeTone }: { date: LiveScheduleDate; timeTone: "accent" | "ink" }) {
+// extra: 開演時刻の右横に並べたい要素（例：受付時間）。渡さない呼び出し元
+// （UpcomingLiveCard）は今まで通り時刻だけの行になる。
+function DateLine({
+  date,
+  timeTone,
+  extra,
+}: {
+  date: LiveScheduleDate;
+  timeTone: "accent" | "ink";
+  extra?: ReactNode;
+}) {
   return (
     <>
       <p className="text-sm font-bold text-[var(--ink)]/60">{date.year}年</p>
@@ -48,13 +58,18 @@ function DateLine({ date, timeTone }: { date: LiveScheduleDate; timeTone: "accen
         <span className="text-base font-bold">日</span>
         <span className="ml-0.5 text-sm font-bold">（{date.weekday}）</span>
       </p>
-      <p
-        className={`mt-0.5 text-2xl font-black ${
-          timeTone === "accent" ? "text-[var(--accent)]" : "text-[var(--ink)]"
-        }`}
-      >
-        {date.time}
-      </p>
+      {/* 2026-09-03:「時間と受付時間を横並びに」の要望で、開演時刻とextra（受付時間）を
+          同じ行に並べられるようにした。 */}
+      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <p
+          className={`text-2xl font-black ${
+            timeTone === "accent" ? "text-[var(--accent)]" : "text-[var(--ink)]"
+          }`}
+        >
+          {date.time}
+        </p>
+        {extra}
+      </div>
     </>
   );
 }
@@ -207,19 +222,26 @@ export function CurrentLiveCard({
         {live && reception ? (
           <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
             <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
-            <DateLine date={live} timeTone="accent" />
-            <p className="mt-0.5 flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
-              <ClockGlyph />
-              受付 {reception}
-            </p>
+            <DateLine
+              date={live}
+              timeTone="accent"
+              extra={
+                <p className="flex items-center gap-1 whitespace-nowrap font-sans text-xs font-bold text-[var(--ink)]">
+                  <ClockGlyph />
+                  受付 {reception}
+                </p>
+              }
+            />
             {/* 2026-08-30:「参加するを押したら参加してしまう」対策。ここから直接
                 /liveへ遷移すると、ホームの正式な入場フロー（useLiveJoinFlow、
                 半券アニメーション等）を経ずにいきなり参加扱いになってしまうため、
-                ホームへ誘導し、そちらの「参加する」から正式に入場してもらう。 */}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+                ホームへ誘導し、そちらの「参加する」から正式に入場してもらう。
+                2026-09-03:「Xで告知するが参加するの下に来る」の要望で、折り返さず
+                必ず横並びになるようにした（flex-wrap→flex-nowrap）。 */}
+            <div className="mt-2 flex flex-nowrap items-center gap-2">
               <Link
                 href="/"
-                className={`${styles.pressable} ${styles.grainAccent} w-fit px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+                className={`${styles.pressable} ${styles.grainAccent} w-fit shrink-0 px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
               >
                 参加する
               </Link>
@@ -227,6 +249,7 @@ export function CurrentLiveCard({
                 context="live_schedule"
                 label="Xで告知する"
                 text={`${live.month}月${live.day}日（${live.weekday}）${live.time}〜、${APP_NAME}のオンライン大喜利ライブ大会があります。\n#${APP_NAME}`}
+                className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-[var(--ink)] bg-[var(--ink)] px-3 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90"
               />
             </div>
           </div>
@@ -256,13 +279,11 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
         {live ? (
           <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
             <DateLine date={live} timeTone="ink" />
+            {/* 2026-09-03:「次回のライブの詳細を見るボタンは消して」の要望で撤去
+                （まだ詳細画面自体が無く、押せない体裁のダミー表示だったため）。 */}
             <div className="mt-2 flex items-center gap-2">
               <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
                 開催予定
-              </span>
-              {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
-              <span className="cursor-not-allowed border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
-                詳細を見る ›
               </span>
             </div>
           </div>

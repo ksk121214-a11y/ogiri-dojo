@@ -34,12 +34,18 @@ export default function AccountSummary() {
   const profileLoading = useProfileStore((s) => s.loading);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // 2026-09-03: 「名前とポイントが見れるところを丸角ではなく四角にして、左上に
+  // リング通しのような丸い穴を（背景が透けて見える形で）付ける」要望対応。
+  // .ringHole自体はページ本体の背景と同じ質感を描いて「穴」に見せているだけ
+  // （本当に透過しているわけではない、既存の.scallopCap系と同じ手法）。
+  // ホームにしか出さないコンポーネントなので.scallopDarkで固定してよい。
   if (authLoading) {
     return (
       <section
-        className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]/40`}
+        className={`${styles.grainPaper} relative flex items-center gap-3 px-4 py-3.5 text-[var(--ink)]/40`}
         aria-hidden
       >
+        <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
         <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-[var(--ink)]/10" />
         <div className="h-4 flex-1 animate-pulse rounded bg-[var(--ink)]/10" />
       </section>
@@ -48,7 +54,8 @@ export default function AccountSummary() {
 
   if (!authUser) {
     return (
-      <section className={`${styles.grainPaper} flex items-center justify-between gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
+      <section className={`${styles.grainPaper} relative flex items-center justify-between gap-3 px-4 py-3.5 text-[var(--ink)]`}>
+        <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
         <p className="text-sm font-bold text-[var(--ink)]/70">
           ログインすると段位・ポイントが確認できます
         </p>
@@ -69,7 +76,8 @@ export default function AccountSummary() {
   const pointsBalance = profile?.pointsBalance ?? 0;
 
   return (
-    <section className={`${styles.grainPaper} flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[var(--ink)]`}>
+    <section className={`${styles.grainPaper} relative flex items-center gap-3 px-4 py-3.5 text-[var(--ink)]`}>
+      <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
       {/*
         「アイコンは丸で囲わずそのままの感じで」の要望のため、円形の縁取り・背景は付けず、
         bareモード（縁取りなし）のMyIconAvatarをそのまま置く
