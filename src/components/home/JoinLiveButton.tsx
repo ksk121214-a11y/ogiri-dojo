@@ -29,13 +29,13 @@ export default function JoinLiveButton({
   const busy = status === "checking" || status === "detaching";
   const disabled = busy || status === "preparing";
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col items-center gap-1.5">
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
         aria-busy={busy}
-        className={`${styles.pressable} ${styles.grainAccent} flex min-h-[56px] w-full items-center justify-center gap-2 px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-70`}
+        className={`${styles.pressable} ${styles.grainAccent} flex min-h-[56px] w-2/3 items-center justify-center gap-2 px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-70`}
       >
         <TicketGlyph />
         {LABEL[status]}
