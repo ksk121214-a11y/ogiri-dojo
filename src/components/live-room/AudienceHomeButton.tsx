@@ -22,10 +22,13 @@ export default function AudienceHomeButton() {
       ? myParticipant?.preferred_role === "player"
       : myParticipant?.role === "player";
   if (isPlayer) return null;
-  // 2026-09-03:「ライブ終了時にホームに戻るボタンが2個になる」不具合対策。
-  // ライブ終了(closed)画面自体に、既に中央寄せの大きな「ホームに戻る」ボタンが
-  // あるため、こちらの固定表示ボタンは終了画面では出さない。
-  if (live?.current_phase === "closed") return null;
+  // 2026-09-03:「ホームに戻るボタンが2個になる」不具合対策。ライブが無い(!live)・
+  // 準備中(scheduled)・終了(closed)の各画面は、live/page.tsx側で既にそれぞれ
+  // 中央寄せの大きな「ホームに戻る」ボタンを出しているため、こちらの固定表示
+  // ボタンは重複して出さない。
+  if (!live || live.current_phase === "scheduled" || live.current_phase === "closed") {
+    return null;
+  }
 
   return (
     <Link
