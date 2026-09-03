@@ -147,7 +147,11 @@ function cleanupChannels() {
   tsukkomiChannel = null;
 }
 
-async function fetchActiveLive(): Promise<LiveRow | null> {
+// 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
+// 従来は取得失敗時にnull/[]を返し、呼び出し側がそのまま「ライブが無い」
+// 「参加者0人」等としてstateに反映していた。エラーと「本当に0件」を区別できる
+// よう{ok, data}を返し、呼び出し側でok:falseの場合は既存stateを保持する。
+async function fetchActiveLive(): Promise<{ ok: boolean; data: LiveRow | null }> {
   const { data, error } = await supabase
     .from("lives")
     .select("*")
@@ -155,22 +159,42 @@ async function fetchActiveLive(): Promise<LiveRow | null> {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) return null;
-  return data as LiveRow | null;
+  if (error) {
+    console.error("[useLiveHostStore] fetchActiveLive failed", error);
+    return { ok: false, data: null };
+  }
+  return { ok: true, data: data as LiveRow | null };
 }
 
-async function fetchLiveChildren(liveId: string) {
+async function fetchLiveChildren(
+  liveId: string,
+): Promise<{ ok: boolean; data: { participants: ParticipantRow[]; groups: GroupRow[]; topics: TopicRow[]; turns: TurnRow[] } }> {
   const [participantsRes, groupsRes, topicsRes, turnsRes] = await Promise.all([
     supabase.from("participants").select("*").eq("live_id", liveId),
     supabase.from("groups").select("*").eq("live_id", liveId),
     supabase.from("topics").select("*").eq("live_id", liveId),
     supabase.from("turns").select("*").eq("live_id", liveId),
   ]);
+  const error =
+    participantsRes.error ?? groupsRes.error ?? topicsRes.error ?? turnsRes.error ?? null;
+  if (error) {
+    // 4つのうちどれか1つでも失敗したら、他が成功していても全体をng扱いにする
+    // （参加者・組・お題・ターンは互いに整合していて初めて意味を持つセットのため、
+    // 一部だけ新しく一部だけ古い、という中途半端な状態でstateへ反映しない）。
+    console.error("[useLiveHostStore] fetchLiveChildren failed", error);
+    return {
+      ok: false,
+      data: { participants: [], groups: [], topics: [], turns: [] },
+    };
+  }
   return {
-    participants: (participantsRes.data ?? []) as ParticipantRow[],
-    groups: (groupsRes.data ?? []) as GroupRow[],
-    topics: (topicsRes.data ?? []) as TopicRow[],
-    turns: (turnsRes.data ?? []) as TurnRow[],
+    ok: true,
+    data: {
+      participants: (participantsRes.data ?? []) as ParticipantRow[],
+      groups: (groupsRes.data ?? []) as GroupRow[],
+      topics: (topicsRes.data ?? []) as TopicRow[],
+      turns: (turnsRes.data ?? []) as TurnRow[],
+    },
   };
 }
 
@@ -181,42 +205,96 @@ async function fetchProfilesFor(participants: ParticipantRow[]): Promise<Profile
   return (data ?? []) as ProfileRow[];
 }
 
-async function fetchAnswersForTurn(turnId: string): Promise<AnswerRow[]> {
-  const { data } = await supabase
+async function fetchAnswersForTurn(turnId: string): Promise<{ ok: boolean; data: AnswerRow[] }> {
+  const { data, error } = await supabase
     .from("answers")
     .select("*")
     .eq("turn_id", turnId)
     .order("created_at", { ascending: true });
-  return (data ?? []) as AnswerRow[];
+  if (error) {
+    console.error("[useLiveHostStore] fetchAnswersForTurn failed", error);
+    return { ok: false, data: [] };
+  }
+  return { ok: true, data: (data ?? []) as AnswerRow[] };
 }
 
-async function fetchScoresForAnswer(answerId: string): Promise<ScoreRow[]> {
-  const { data } = await supabase
+async function fetchScoresForAnswer(answerId: string): Promise<{ ok: boolean; data: ScoreRow[] }> {
+  const { data, error } = await supabase
     .from("scores")
     .select("*")
     .eq("answer_id", answerId);
-  return (data ?? []) as ScoreRow[];
+  if (error) {
+    console.error("[useLiveHostStore] fetchScoresForAnswer failed", error);
+    return { ok: false, data: [] };
+  }
+  return { ok: true, data: (data ?? []) as ScoreRow[] };
 }
 
-async function fetchResolvedAnswersForLive(liveId: string): Promise<AnswerRow[]> {
-  const { data } = await supabase
+async function fetchResolvedAnswersForLive(liveId: string): Promise<{ ok: boolean; data: AnswerRow[] }> {
+  const { data, error } = await supabase
     .from("answers")
     .select("*")
     .eq("live_id", liveId)
     .eq("resolved", true)
     .order("created_at", { ascending: true });
-  return (data ?? []) as AnswerRow[];
+  if (error) {
+    console.error("[useLiveHostStore] fetchResolvedAnswersForLive failed", error);
+    return { ok: false, data: [] };
+  }
+  return { ok: true, data: (data ?? []) as AnswerRow[] };
 }
 
 // 確定済み回答ログの「誰が何点つけたか」内訳の再構築用（リロード復帰時のみ使う）。
-async function fetchScoresForAnswers(answerIds: string[]): Promise<Record<string, ScoreRow[]>> {
-  if (answerIds.length === 0) return {};
-  const { data } = await supabase.from("scores").select("*").in("answer_id", answerIds);
+async function fetchScoresForAnswers(
+  answerIds: string[],
+): Promise<{ ok: boolean; data: Record<string, ScoreRow[]> }> {
+  if (answerIds.length === 0) return { ok: true, data: {} };
+  const { data, error } = await supabase.from("scores").select("*").in("answer_id", answerIds);
+  if (error) {
+    console.error("[useLiveHostStore] fetchScoresForAnswers failed", error);
+    return { ok: false, data: {} };
+  }
   const map: Record<string, ScoreRow[]> = {};
   for (const row of (data ?? []) as ScoreRow[]) {
     (map[row.answer_id] ??= []).push(row);
   }
-  return map;
+  return { ok: true, data: map };
+}
+
+// 2026-09-03:「途中退場・退場解除とeligible_judge_countを完全に整合させる」対応。
+// 退場(kick)・退場解除(unkick)のどちらからも呼ぶ共通処理：まだ審査が確定して
+// いない現在ターン・これから始まるターン(status in pending/active)の
+// eligible_judge_count（0049で導入・全端末共通の分母）を、残っている
+// （kicked_atが無い）プレイヤー一覧から数え直す。既に終了済み(done)のターンは、
+// 審査ボードの表示・満点判定が既に確定しているため変更しない。
+// 更新自体が失敗した場合は呼び出し元に伝え、黙って握りつぶさない
+// （分母が古いまま残ると、クライアントごとに満点判定がズレる恐れがあるため）。
+async function recomputeEligibleJudgeCounts(
+  liveId: string,
+  remainingPlayers: ParticipantRow[],
+): Promise<{ ok: boolean; failedTurnIds: string[] }> {
+  const { data: targetTurns, error: fetchError } = await supabase
+    .from("turns")
+    .select("id, group_id")
+    .eq("live_id", liveId)
+    .in("status", ["pending", "active"]);
+  if (fetchError) {
+    console.error("[useLiveHostStore] recomputeEligibleJudgeCounts fetch failed", fetchError);
+    return { ok: false, failedTurnIds: [] };
+  }
+  const failedTurnIds: string[] = [];
+  for (const t of (targetTurns ?? []) as { id: string; group_id: string }[]) {
+    const eligibleJudgeCount = remainingPlayers.filter((p) => p.group_id !== t.group_id).length;
+    const { error } = await supabase
+      .from("turns")
+      .update({ eligible_judge_count: eligibleJudgeCount })
+      .eq("id", t.id);
+    if (error) {
+      console.error("[useLiveHostStore] eligible_judge_count更新に失敗", { turnId: t.id, error });
+      failedTurnIds.push(t.id);
+    }
+  }
+  return { ok: failedTurnIds.length === 0, failedTurnIds };
 }
 
 // round → group.group_order の順に並べたターン一覧。
@@ -232,9 +310,10 @@ async function subscribeLiveChannels(liveId: string) {
   cleanupChannels();
 
   const refetchChildren = async () => {
-    const children = await fetchLiveChildren(liveId);
-    const profiles = await fetchProfilesFor(children.participants);
-    useLiveHostStore.setState({ ...children, profiles });
+    const result = await fetchLiveChildren(liveId);
+    if (!result.ok) return; // 取得失敗時は既存stateを維持する（次のRealtimeイベント/再接続で再試行される）
+    const profiles = await fetchProfilesFor(result.data.participants);
+    useLiveHostStore.setState({ ...result.data, profiles });
   };
 
   const refetchAnswersAndScores = async () => {
@@ -245,8 +324,8 @@ async function subscribeLiveChannels(liveId: string) {
       .getState()
       .answers.find((a) => a.revealed_at && !a.resolved);
     if (active) {
-      const scores = await fetchScoresForAnswer(active.id);
-      useLiveHostStore.setState({ scores });
+      const result = await fetchScoresForAnswer(active.id);
+      if (result.ok) useLiveHostStore.setState({ scores: result.data });
     }
   };
 
@@ -299,8 +378,8 @@ async function subscribeLiveChannels(liveId: string) {
         .getState()
         .answers.find((a) => a.revealed_at && !a.resolved);
       if (!active) return;
-      const scores = await fetchScoresForAnswer(active.id);
-      useLiveHostStore.setState({ scores });
+      const result = await fetchScoresForAnswer(active.id);
+      if (result.ok) useLiveHostStore.setState({ scores: result.data });
     })
     .subscribe(onSubscribeStatus);
 
@@ -317,8 +396,16 @@ async function subscribeLiveChannels(liveId: string) {
 // そのターンぶんのanswers/scoresへ入れ替える（前のターンの古いデータが
 // 一時的にでも残っていると、stillBusy判定を誤らせるため）。
 async function refreshAnswersForTurn(turnId: string | null) {
-  const answers = turnId ? await fetchAnswersForTurn(turnId) : [];
-  useLiveHostStore.setState({ answers, scores: [] });
+  if (!turnId) {
+    useLiveHostStore.setState({ answers: [], scores: [] });
+    return;
+  }
+  const result = await fetchAnswersForTurn(turnId);
+  // 取得失敗時は前のターンの古いanswers/scoresを維持する（空配列で上書きすると
+  // 「未処理回答なし」と誤認してprocessRevealQueue/resolveIfDueが誤動作しうる）。
+  // 次のRealtimeイベントや次回tickでの再試行に委ねる。
+  if (!result.ok) return;
+  useLiveHostStore.setState({ answers: result.data, scores: [] });
 }
 
 async function updateLive(id: string, patch: Partial<LiveRow>) {
@@ -387,7 +474,8 @@ async function processRevealQueue() {
     const refreshed = await fetchAnswersForTurn(
       useLiveHostStore.getState().live!.current_turn_id!,
     );
-    useLiveHostStore.setState({ answers: refreshed, scores: [] });
+    // 取得失敗時は前の状態のまま（次のtick/Realtimeイベントでの再試行に委ねる）。
+    if (refreshed.ok) useLiveHostStore.setState({ answers: refreshed.data, scores: [] });
   }
 }
 
@@ -423,7 +511,23 @@ async function resolveIfDue() {
     // 経由で更新されるため、直前の判定に使ったstate.scoresがまだ最新でないことがある。
     // 実際に確定する直前でDBから直接最新の採点一覧を取得し直し、本当に確定条件
     // （全員投票済み、または審査時間切れ）を満たしているか再確認してから確定する。
-    const freshScores = await fetchScoresForAnswer(active.id);
+    const freshScoresResult = await fetchScoresForAnswer(active.id);
+    if (!freshScoresResult.ok) {
+      // 2026-09-03:「Supabase取得エラーを空配列として上書きしない」対応。
+      // 取得に失敗した回を「まだ誰も採点していない(0点)」として確定してしまうと
+      // 実際には投票済みの点数が消えてしまう。何もせず既存stateを維持し、
+      // 次のtickで再試行する（確定を急がない）。
+      return;
+    }
+    // 2026-09-03:「過去ライブのplayer participant IDによる不正採点混入」対策。
+    // DB側のRLS(scores_insert_own_as_player)に同一ライブ確認を追加したが、
+    // アプリ側でも多層防御として、集計前に必ず「現在のeligible judge ID集合」に
+    // 含まれるscoresだけを対象にする（想定外の参加者IDのscoreが混ざっていても
+    // 合計点・top_score_votes・満点判定には一切反映されないようにする）。
+    const eligibleJudgeIds = new Set(eligibleJudges.map((p) => p.id));
+    const freshScores = freshScoresResult.data.filter((s) =>
+      eligibleJudgeIds.has(s.judge_participant_id),
+    );
     const freshVotedJudgeIds = new Set(freshScores.map((s) => s.judge_participant_id));
     const freshAllVoted =
       eligibleJudges.length > 0 && eligibleJudges.every((p) => freshVotedJudgeIds.has(p.id));
@@ -462,7 +566,7 @@ async function resolveIfDue() {
     }
 
     if (!error && state.live?.current_turn_id) {
-      const answers = await fetchAnswersForTurn(state.live.current_turn_id);
+      const answersResult = await fetchAnswersForTurn(state.live.current_turn_id);
       const resolvedEntry: AnswerRow = {
         ...active,
         resolved: true,
@@ -472,7 +576,9 @@ async function resolveIfDue() {
         laugh_triggered: laughTriggered,
       };
       useLiveHostStore.setState((s) => ({
-        answers,
+        // 取得に失敗した場合は前のanswers一覧を維持する（[]で上書きしない）。
+        // 確定自体は既にDB更新済みなので、次の再取得で正しい一覧に追いつく。
+        answers: answersResult.ok ? answersResult.data : s.answers,
         scores: [],
         // 何らかの理由で既に同じIDが入っていたら追加しない(念のための二重防止)。
         resolvedAnswers: s.resolvedAnswers.some((a) => a.id === resolvedEntry.id)
@@ -656,9 +762,16 @@ async function advanceIfDue() {
     // 進める直前は必ずDBから直接最新の回答一覧を取得して確認し、state.answersの
     // キャッシュだけに頼らないようにする（ギリギリの回答も必ず表示・評価されてから
     // 次のフェーズに進むようにする）。
-    const dbAnswers = latest.current_turn_id
+    const dbAnswersResult = latest.current_turn_id
       ? await fetchAnswersForTurn(latest.current_turn_id)
-      : freshState.answers;
+      : { ok: true as const, data: freshState.answers };
+    if (!dbAnswersResult.ok) {
+      // 2026-09-03:「回答一覧取得失敗時に『未処理回答なし』と誤認して次フェーズへ
+      // 進まない」対応。取得に失敗した場合は「未確認」であって「無い」わけではない
+      // ため、busy扱いにして進行を止め、次のtickで再取得を試みる。
+      return;
+    }
+    const dbAnswers = dbAnswersResult.data;
     if (isAnsweringBusy(dbAnswers, latest)) {
       // 取得し直した最新の回答をstateにも反映しておき、次のtickでprocessRevealQueue等が
       // 追いついた状態からすぐ処理を続けられるようにする。
@@ -759,22 +872,53 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   init: async () => {
     set({ loading: true, error: null });
     void get().loadTopicBank();
-    const live = await fetchActiveLive();
+    const activeLiveResult = await fetchActiveLive();
+    if (!activeLiveResult.ok) {
+      // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
+      // 取得失敗を「ライブが無い」と誤認して準備画面に進めると、実際には進行中の
+      // ライブがあるのに気づかず二重に作成しようとする事故につながる。
+      set({
+        loading: false,
+        error: "ライブの状態を取得できませんでした。再読み込みしてください。",
+      });
+      if (tickTimer) clearInterval(tickTimer);
+      tickTimer = setInterval(() => advanceIfDue(), 500);
+      return;
+    }
+    const live = activeLiveResult.data;
     if (live) {
-      const children = await fetchLiveChildren(live.id);
+      const childrenResult = await fetchLiveChildren(live.id);
+      const children = childrenResult.ok
+        ? childrenResult.data
+        : { participants: [], groups: [], topics: [], turns: [] };
       const profiles = await fetchProfilesFor(children.participants);
-      const answers = live.current_turn_id ? await fetchAnswersForTurn(live.current_turn_id) : [];
-      const resolvedAnswers = await fetchResolvedAnswersForLive(live.id);
-      const resolvedScoresByAnswer = await fetchScoresForAnswers(resolvedAnswers.map((a) => a.id));
+      const answersResult = live.current_turn_id
+        ? await fetchAnswersForTurn(live.current_turn_id)
+        : { ok: true as const, data: [] as AnswerRow[] };
+      const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
+      const resolvedAnswers = resolvedAnswersResult.ok ? resolvedAnswersResult.data : [];
+      const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
+        resolvedAnswers.map((a) => a.id),
+      );
+      const anyFailed =
+        !childrenResult.ok ||
+        !answersResult.ok ||
+        !resolvedAnswersResult.ok ||
+        !resolvedScoresByAnswerResult.ok;
       set({
         live,
         ...children,
         profiles,
-        answers,
+        answers: answersResult.ok ? answersResult.data : [],
         resolvedAnswers,
-        resolvedScoresByAnswer,
+        resolvedScoresByAnswer: resolvedScoresByAnswerResult.ok
+          ? resolvedScoresByAnswerResult.data
+          : {},
         loading: false,
         lastRefreshedAt: new Date().toISOString(),
+        error: anyFailed
+          ? "一部の情報の取得に失敗しました。「最新状態を取得」で再試行してください。"
+          : null,
       });
       // 司会画面を開き直した時、answeringフェーズの途中であればanswerRemainingMsTrue
       // （ホスト内メモリのみ）を最善努力で復元する。これが無いと再読込のたびに
@@ -823,18 +967,43 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         return { ok: true };
       }
       const freshLive = freshLiveData as LiveRow;
-      const children = await fetchLiveChildren(live.id);
-      const profiles = await fetchProfilesFor(children.participants);
-      const answers = freshLive.current_turn_id
+      const prev = get();
+      // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
+      // 各取得が失敗した項目は、[]やnullで上書きせず直前のstateをそのまま維持する。
+      const childrenResult = await fetchLiveChildren(live.id);
+      const children = childrenResult.ok
+        ? childrenResult.data
+        : {
+            participants: prev.participants,
+            groups: prev.groups,
+            topics: prev.topics,
+            turns: prev.turns,
+          };
+      const profiles = childrenResult.ok ? await fetchProfilesFor(children.participants) : prev.profiles;
+      const answersResult = freshLive.current_turn_id
         ? await fetchAnswersForTurn(freshLive.current_turn_id)
-        : [];
-      const resolvedAnswers = await fetchResolvedAnswersForLive(live.id);
-      const resolvedScoresByAnswer = await fetchScoresForAnswers(resolvedAnswers.map((a) => a.id));
+        : { ok: true as const, data: [] as AnswerRow[] };
+      const answers = answersResult.ok ? answersResult.data : prev.answers;
+      const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
+      const resolvedAnswers = resolvedAnswersResult.ok ? resolvedAnswersResult.data : prev.resolvedAnswers;
+      const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
+        resolvedAnswers.map((a) => a.id),
+      );
+      const resolvedScoresByAnswer = resolvedScoresByAnswerResult.ok
+        ? resolvedScoresByAnswerResult.data
+        : prev.resolvedScoresByAnswer;
       const active = answers.find((a) => a.revealed_at && !a.resolved);
-      const scores = active ? await fetchScoresForAnswer(active.id) : [];
+      const scoresResult = active ? await fetchScoresForAnswer(active.id) : { ok: true as const, data: [] as ScoreRow[] };
+      const scores = scoresResult.ok ? scoresResult.data : prev.scores;
+      const anyFailed =
+        !childrenResult.ok || !answersResult.ok || !resolvedAnswersResult.ok ||
+        !resolvedScoresByAnswerResult.ok || !scoresResult.ok;
       set({
         live: freshLive,
-        ...children,
+        participants: children.participants,
+        groups: children.groups,
+        topics: children.topics,
+        turns: children.turns,
         profiles,
         answers,
         scores,
@@ -843,7 +1012,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         lastRefreshedAt: new Date().toISOString(),
         error: null,
       });
-      return { ok: true };
+      return anyFailed
+        ? { ok: false, reason: "一部の情報の取得に失敗しました（前回の表示を維持しています）" }
+        : { ok: true };
     } catch (e) {
       return { ok: false, reason: e instanceof Error ? e.message : "取得に失敗しました" };
     }
@@ -853,7 +1024,13 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 旧startLive()はここでinterludeとして直接insertしていたが、新設計では
   // 「準備中(scheduled)」として作成し、受付開始は別操作(openReception)に分離する。
   createLivePreparation: async (input) => {
-    const existing = await fetchActiveLive();
+    const existingResult = await fetchActiveLive();
+    if (!existingResult.ok) {
+      // 既存ライブの有無を確認できないまま作成へ進むと、実際には進行中のライブが
+      // あるのに気づかず二重に作成してしまう恐れがあるため、ここでは中断する。
+      return { ok: false, reason: "既存ライブの確認に失敗しました。もう一度お試しください。" };
+    }
+    const existing = existingResult.data;
     if (existing) {
       set({ live: existing });
       await subscribeLiveChannels(existing.id);
@@ -919,9 +1096,16 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       detail: { title: input.title, maxPlayers: input.maxPlayers, groupCount: input.groupCount },
     });
 
-    const children = await fetchLiveChildren(live.id);
-    const profiles = await fetchProfilesFor(children.participants);
-    set({ live, ...children, profiles, error: null });
+    const childrenResult = await fetchLiveChildren(live.id);
+    const profiles = await fetchProfilesFor(childrenResult.data.participants);
+    set({
+      live,
+      ...childrenResult.data,
+      profiles,
+      error: childrenResult.ok
+        ? null
+        : "作成後の情報取得に失敗しました。「最新状態を取得」で再試行してください。",
+    });
     await subscribeLiveChannels(live.id);
     return { ok: true };
   },
@@ -975,7 +1159,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     if (participantsError) return { ok: false, reason: participantsError.message };
     const participants = (participantsData ?? []) as ParticipantRow[];
 
-    const playerParticipants = participants.filter((p) => p.preferred_role === "player");
+    // 2026-09-03:「途中退場・退場解除とeligible_judge_countを完全に整合させる」対応。
+    // 既に退場済み(kicked_at)の参加者は、組分けの対象から除外する
+    // （組分け後にbegin_gameが数えるプレイヤー数・組内人数と食い違わないようにする）。
+    const playerParticipants = participants.filter(
+      (p) => p.preferred_role === "player" && !p.kicked_at,
+    );
     if (playerParticipants.length === 0) {
       return { ok: false, reason: "プレイヤー希望の参加者がいません" };
     }
@@ -1031,9 +1220,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       detail: { groupCount, playerCount: playerParticipants.length },
     });
 
-    const children = await fetchLiveChildren(live.id);
-    const profiles = await fetchProfilesFor(children.participants);
-    set({ ...children, profiles, error: null });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (!childrenResult.ok) {
+      return { ok: false, reason: "組分け後の情報取得に失敗しました。「最新状態を取得」で確認してください。" };
+    }
+    const profiles = await fetchProfilesFor(childrenResult.data.participants);
+    set({ ...childrenResult.data, profiles, error: null });
     return { ok: true };
   },
 
@@ -1055,9 +1247,11 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     });
     const { live } = get();
     if (live) {
-      const children = await fetchLiveChildren(live.id);
-      const profiles = await fetchProfilesFor(children.participants);
-      set({ ...children, profiles });
+      const childrenResult = await fetchLiveChildren(live.id);
+      if (childrenResult.ok) {
+        const profiles = await fetchProfilesFor(childrenResult.data.participants);
+        set({ ...childrenResult.data, profiles });
+      }
     }
     return { ok: true };
   },
@@ -1082,8 +1276,8 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     });
     const { live } = get();
     if (live) {
-      const children = await fetchLiveChildren(live.id);
-      set({ topics: children.topics });
+      const childrenResult = await fetchLiveChildren(live.id);
+      if (childrenResult.ok) set({ topics: childrenResult.data.topics });
     }
     return { ok: true };
   },
@@ -1135,8 +1329,8 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetId: participantId,
       detail: { message: trimmed },
     });
-    const children = await fetchLiveChildren(live.id);
-    set({ participants: children.participants });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (childrenResult.ok) set({ participants: childrenResult.data.participants });
     return { ok: true };
   },
 
@@ -1148,14 +1342,27 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .update({ host_message: null })
       .eq("id", participantId);
     if (error) return { ok: false, reason: error.message };
-    const children = await fetchLiveChildren(live.id);
-    set({ participants: children.participants });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (childrenResult.ok) set({ participants: childrenResult.data.participants });
     return { ok: true };
   },
 
   kickParticipant: async (participantId) => {
-    const { live, participants } = get();
+    const { live, participants, answers } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
+    // 2026-09-03:「審査途中での退場を許すなら分母を整合、難しければ審査中だけ
+    // 禁止する」対応。ある回答が表示され、まだ採点が確定していない
+    // （＝ScoringPhysicsBoardが玉を積んでいる最中）タイミングでeligible_judge_count
+    // を変えると、既に表示済みの玉数と新しい分母がクライアントによってズレる
+    // 恐れがあるため、このタイミングだけ退場操作を禁止する。回答と回答の間
+    // （表示中の回答が無い状態）であれば引き続き操作できる。
+    const activeJudging = answers.some((a) => a.revealed_at && !a.resolved);
+    if (live.current_phase === "answering" && activeJudging) {
+      return {
+        ok: false,
+        reason: "採点中は退場操作ができません。今の回答への採点が終わってから操作してください。",
+      };
+    }
     const target = participants.find((p) => p.id === participantId);
     const { error } = await supabase
       .from("participants")
@@ -1186,34 +1393,40 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         console.warn("[useLiveHostStore] 退場のuser_sanctions記録に失敗", sanctionError);
       }
     }
-    const children = await fetchLiveChildren(live.id);
-    set({ participants: children.participants });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (!childrenResult.ok) {
+      // 退場自体はDBに反映済みなのでok:trueのまま、取得失敗はerror状態で伝える
+      // （closeLiveのポイント付与失敗時と同じ「本処理は成功・付随処理だけ要再確認」の扱い）。
+      set({ error: "退場は完了しましたが、最新の参加者一覧の取得に失敗しました。「最新状態を取得」してください。" });
+      return { ok: true };
+    }
+    set({ participants: childrenResult.data.participants });
     // 2026-09-03:「途中退場した参加者を審査対象から除外する」対応。退場した人が
-    // プレイヤーだった場合、まだ始まっていない(pending)ターンの
-    // eligible_judge_count（審査資格者数、0049で導入・全端末共通の分母）を
-    // 退場後の参加者一覧から再計算し直す。既に進行中/終了済みのターンは、
-    // 審査ボードの表示・満点判定が既に確定しているため変更しない
-    // （「これから始まるターン」だけ全端末で同じ値になっていればよい）。
+    // プレイヤーだった場合、現在ターン・これから始まるターンのeligible_judge_count
+    // を退場後の参加者一覧から再計算し直す。
     if (target?.role === "player") {
-      const remainingPlayers = children.participants.filter(
+      const remainingPlayers = childrenResult.data.participants.filter(
         (p) => p.role === "player" && !p.kicked_at,
       );
-      const { data: pendingTurns } = await supabase
-        .from("turns")
-        .select("id, group_id")
-        .eq("live_id", live.id)
-        .eq("status", "pending");
-      for (const t of (pendingTurns ?? []) as { id: string; group_id: string }[]) {
-        const eligibleJudgeCount = remainingPlayers.filter((p) => p.group_id !== t.group_id).length;
-        await supabase.from("turns").update({ eligible_judge_count: eligibleJudgeCount }).eq("id", t.id);
+      const recomputeResult = await recomputeEligibleJudgeCounts(live.id, remainingPlayers);
+      if (!recomputeResult.ok) {
+        set({ error: "退場は完了しましたが、審査人数の分母更新に一部失敗しました。「最新状態を取得」で確認してください。" });
       }
     }
     return { ok: true };
   },
 
   unkickParticipant: async (participantId) => {
-    const { live } = get();
+    const { live, participants, answers } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
+    const activeJudging = answers.some((a) => a.revealed_at && !a.resolved);
+    if (live.current_phase === "answering" && activeJudging) {
+      return {
+        ok: false,
+        reason: "採点中は退場解除ができません。今の回答への採点が終わってから操作してください。",
+      };
+    }
+    const target = participants.find((p) => p.id === participantId);
     const { error } = await supabase
       .from("participants")
       .update({ kicked_at: null })
@@ -1224,8 +1437,24 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetType: "participants",
       targetId: participantId,
     });
-    const children = await fetchLiveChildren(live.id);
-    set({ participants: children.participants });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (!childrenResult.ok) {
+      set({ error: "退場解除は完了しましたが、最新の参加者一覧の取得に失敗しました。「最新状態を取得」してください。" });
+      return { ok: true };
+    }
+    set({ participants: childrenResult.data.participants });
+    // 2026-09-03:「退場・解除の両方で、current/pendingターンの分母を整合させる」
+    // 対応。解除でプレイヤーが審査資格者に復帰する場合、分母を元に戻す
+    // （kick時と対称の処理）。
+    if (target?.role === "player") {
+      const remainingPlayers = childrenResult.data.participants.filter(
+        (p) => p.role === "player" && !p.kicked_at,
+      );
+      const recomputeResult = await recomputeEligibleJudgeCounts(live.id, remainingPlayers);
+      if (!recomputeResult.ok) {
+        set({ error: "退場解除は完了しましたが、審査人数の分母更新に一部失敗しました。「最新状態を取得」で確認してください。" });
+      }
+    }
     return { ok: true };
   },
 
@@ -1320,9 +1549,16 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetId: live.id,
     });
 
-    const children = await fetchLiveChildren(live.id);
-    const profiles = await fetchProfilesFor(children.participants);
-    set({ ...children, profiles, error: null });
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (childrenResult.ok) {
+      const profiles = await fetchProfilesFor(childrenResult.data.participants);
+      set({ ...childrenResult.data, profiles, error: null });
+    } else {
+      // ゲーム開始自体（begin_game）は既に成功しているので、ここでは進行は止めず、
+      // 参加者一覧などの取得失敗だけをerrorとして伝える（次のRealtime更新や
+      // 「最新状態を取得」で追いつく）。
+      set({ error: "ゲームは開始しましたが、最新の参加者情報の取得に失敗しました。「最新状態を取得」してください。" });
+    }
     await refreshAnswersForTurn(result.first_turn_id);
     return { ok: true };
   },

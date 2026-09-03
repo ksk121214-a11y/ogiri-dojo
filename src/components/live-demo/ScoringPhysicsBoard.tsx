@@ -226,6 +226,15 @@ export default function ScoringPhysicsBoard({
   useEffect(() => {
     layoutRef.current = layout;
   }, [layout]);
+  // 2026-09-03:「別々に届くRealtimeイベント間でも玉の出現をずらす」対策。
+  // 以前はこのuseEffect呼び出し（＝1回の描画バッチ）ごとに{current:0}を新しく
+  // 作っていたため、scoreEventsが複数回に分けて（＝別々のRealtimeイベントの
+  // 到着として）届くたびに連番が0へ戻り、直前のバッチでまだ発火していない
+  // setTimeoutと同じタイミングで新しいバッチの玉が出現しうる状態だった。
+  // 「次に玉を出現させてよい時刻」をコンポーネント生存期間を通して1本の
+  // タイムライン(performance.now()基準)として持つことで、呼び出し元の
+  // レンダーがいつ起きたかに関わらず一定間隔で出現をずらせるようにする。
+  const nextSpawnAtRef = useRef(0);
   const [totalBalls, setTotalBalls] = useState(0);
   // "X / Y"表示のYも、ロジックと同じ固定値を見せる（propsのmaxBallsをそのまま
   // 表示すると、審査サイクル中に分母だけ動いて見える不整合になるため）。
@@ -528,6 +537,8 @@ export default function ScoringPhysicsBoard({
     spawnedEventIdsRef.current = new Set();
     totalSpawnedRef.current = 0;
     setTotalBalls(0);
+    // 次の回答のキュー・タイマーを前の回答から持ち越さない（安全なリセット）。
+    nextSpawnAtRef.current = 0;
     perfectTriggeredRef.current = false;
     perfectReachedAtRef.current = null;
     lineFlashedRef.current = false;
@@ -602,6 +613,77 @@ export default function ScoringPhysicsBoard({
     };
   }, [resolved, resolvedPopDelayMs, triggerPerfectEffect]);
 
+  // 自分自身をsetTimeoutの中から再帰的に呼ぶため、useCallbackの戻り値を直接
+  // 名指しで参照すると「宣言前にアクセスしている」エラーになる。refに常に
+  // 最新の関数を入れておき、再帰呼び出しはref経由で行う。
+  const trySpawnOneBallRef = useRef<(retriesLeft: number) => void>(() => {});
+
+  // 実際に1個の玉を追加する（重なり回避のリトライ込み）。空いている位置が
+  // 見つからない間は即座に諦めて重ねるのではなく、スポーン領域が空くまで
+  // 少し遅延して再試行する（安全なレーン方式の代わりの簡易版）。
+  const trySpawnOneBall = useCallback((retriesLeft: number) => {
+    const currentEngine = engineRef.current;
+    // 2026-09-03:「setTimeout内では古いlayoutではなく最新のlayoutRefを使う」対策。
+    // 玉ごとに数十〜数百ms遅延するため、呼び出し時点でクロージャに閉じ込めた
+    // layoutのままだと、その間にリサイズが起きた場合、古い壁の内側基準で
+    // 座標を計算してしまい新しい壁の外側に出現することがあった。
+    const currentLayout = layoutRef.current;
+    if (!currentEngine || !currentLayout) return;
+    const margin = currentLayout.ballRadius + 6;
+    const minX = margin;
+    const maxX = Math.max(margin, currentLayout.width - margin);
+
+    // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。既存の玉のx位置から
+    // 直径以上離れた候補が見つかるまで数回だけ試す。
+    const existingXs = currentEngine.world.bodies
+      .filter((b) => b.circleRadius)
+      .map((b) => b.position.x);
+    const minGap = currentLayout.ballRadius * 2; // 直径以上の距離
+    let x = minX + Math.random() * Math.max(0, maxX - minX);
+    let foundFreeSpot = existingXs.length === 0;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const tooClose = existingXs.some((ex) => Math.abs(ex - x) < minGap);
+      if (!tooClose) {
+        foundFreeSpot = true;
+        break;
+      }
+      x = minX + Math.random() * Math.max(0, maxX - minX);
+    }
+    if (!foundFreeSpot && retriesLeft > 0) {
+      // まだ空いていない：候補位置をそのまま採用せず、スポーン領域が空くまで
+      // 少し遅延して再試行する。
+      const retryId = setTimeout(
+        () => {
+          timeoutsRef.current.delete(retryId);
+          trySpawnOneBallRef.current(retriesLeft - 1);
+        },
+        120 + Math.random() * 80,
+      );
+      timeoutsRef.current.add(retryId);
+      return;
+    }
+    // 出現位置は現在の壁とballRadiusの内側へ必ずclampする（念のための二重の安全策。
+    // リトライを使い切って諦めた場合もここでclampされる）。
+    x = Math.min(maxX, Math.max(minX, x));
+    const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
+    const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
+      restitution: 0.45,
+      friction: 0.08,
+      frictionAir: 0.003,
+    });
+    Matter.Body.setVelocity(ball, { x: (Math.random() - 0.5) * 1.5, y: 0 });
+    ballColorsRef.current.set(
+      ball.id,
+      BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
+    );
+    Matter.Composite.add(currentEngine.world, ball);
+    totalSpawnedRef.current += 1;
+    setTotalBalls(totalSpawnedRef.current);
+  }, []);
+  useEffect(() => {
+    trySpawnOneBallRef.current = trySpawnOneBall;
+  }, [trySpawnOneBall]);
+
   // 戻り値は「このイベントを既読(=二度と処理しない)にしてよいか」。
   // engine/layoutがまだ準備できていないタイミング(マウント直後、layoutのstate
   // 更新前)でscoreEventsに複数件が既に入っていると、falseを返さずに既読にして
@@ -609,7 +691,7 @@ export default function ScoringPhysicsBoard({
   // 再試行されないため）。false時は呼び出し側で既読登録せず、layoutが整って
   // spawnBallsForPointsの参照が変わった時に自動的に再試行されるようにする。
   const spawnBallsForPoints = useCallback(
-    (points: 0 | 1 | 2 | 3, batchIndexRef: { current: number }): boolean => {
+    (points: 0 | 1 | 2 | 3): boolean => {
       const engine = engineRef.current;
       const l = layout;
       if (perfectTriggeredRef.current) return true;
@@ -623,73 +705,40 @@ export default function ScoringPhysicsBoard({
       const count = Math.min(points, Math.max(0, remaining));
       if (count === 0) return true;
 
+      const STAGGER_MS = 80;
+      const STAGGER_JITTER_MS = 90;
       for (let i = 0; i < count; i++) {
-        // 2026-09-03:「scoreEvents全体で共通のspawnキューを使い、同時出現を防ぐ」対策。
-        // 以前はイベントごとに独立してi=0から遅延を数えており、複数のscoreEventsが
-        // 同じ描画バッチで届くと、別イベントの玉同士がほぼ同じタイミングで出現し
-        // 重なりやすくなっていた。呼び出し元(useEffect)から共有されるbatchIndexRefで、
-        // このバッチ全体を通した連番にして遅延をずらす。
-        const spawnIndex = batchIndexRef.current;
-        batchIndexRef.current += 1;
-        const delay = spawnIndex * (80 + Math.random() * 90);
+        // 2026-09-03:「scoreEvents全体・かつ別々に届くRealtimeイベント間でも
+        // 共通のspawnキューを使い、同時出現を防ぐ」対策。以前はこのuseEffect
+        // 呼び出し（＝1回の描画バッチ）ごとにリセットされる連番を使っており、
+        // 別のバッチ（＝別のRealtimeイベントの到着）で届いた玉が、直前のバッチの
+        // 玉とほぼ同時に出現しうる状態だった。コンポーネント生存期間を通して
+        // 1本のタイムライン(nextSpawnAtRef、performance.now()基準)を進めることで、
+        // どのタイミングで呼ばれても一定間隔を保てるようにする。
+        const now = performance.now();
+        const spawnAt = Math.max(now, nextSpawnAtRef.current);
+        nextSpawnAtRef.current = spawnAt + STAGGER_MS + Math.random() * STAGGER_JITTER_MS;
+        const delay = spawnAt - now;
         const id = setTimeout(() => {
           timeoutsRef.current.delete(id);
-          const currentEngine = engineRef.current;
-          // 2026-09-03:「setTimeout内では古いlayoutではなく最新のlayoutRefを使う」対策。
-          // 玉ごとに数十〜数百ms遅延するため、呼び出し時点でクロージャに閉じ込めた
-          // layout(l)のままだと、その間にリサイズが起きた場合、古い壁の内側基準で
-          // 座標を計算してしまい新しい壁の外側に出現することがあった。
-          const currentLayout = layoutRef.current;
-          if (!currentEngine || !currentLayout) return;
-          const margin = currentLayout.ballRadius + 6;
-          const minX = margin;
-          const maxX = Math.max(margin, currentLayout.width - margin);
-
-          // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。既存の玉のx位置から
-          // 十分離れた候補が見つかるまで数回だけ試す（見つからなければ最後の候補を
-          // そのまま使う＝無限ループにはしない。物理演算側の衝突解決にも任せられるため）。
-          const existingXs = currentEngine.world.bodies
-            .filter((b) => b.circleRadius)
-            .map((b) => b.position.x);
-          const minGap = currentLayout.ballRadius * 1.3;
-          let x = minX + Math.random() * Math.max(0, maxX - minX);
-          for (let attempt = 0; attempt < 5; attempt++) {
-            const tooClose = existingXs.some((ex) => Math.abs(ex - x) < minGap);
-            if (!tooClose) break;
-            x = minX + Math.random() * Math.max(0, maxX - minX);
-          }
-          // 出現位置は現在の壁とballRadiusの内側へ必ずclampする（念のための二重の安全策）。
-          x = Math.min(maxX, Math.max(minX, x));
-          const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
-          const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
-            restitution: 0.45,
-            friction: 0.08,
-            frictionAir: 0.003,
-          });
-          Matter.Body.setVelocity(ball, { x: (Math.random() - 0.5) * 1.5, y: 0 });
-          ballColorsRef.current.set(
-            ball.id,
-            BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
-          );
-          Matter.Composite.add(currentEngine.world, ball);
-          totalSpawnedRef.current += 1;
-          setTotalBalls(totalSpawnedRef.current);
+          trySpawnOneBall(4);
         }, delay);
         timeoutsRef.current.add(id);
       }
       return true;
     },
-    [layout],
+    [layout, trySpawnOneBall],
   );
 
   // scoreEventsに新しく増えた分だけ玉を降らせる。誰の採点でも(自分の投票でも
   // 他人の採点がRealtime経由で増えた分でも)必ずここを通るので、全員の画面で同じ挙動になる。
   useEffect(() => {
-    // このuseEffect呼び出し（＝1回の描画バッチ）全体で共有する連番。
-    const batchIndexRef = { current: 0 };
+    // 出現タイミングの直列化はspawnBallsForPoints内部のnextSpawnAtRef
+    // （コンポーネント生存期間を通した1本のタイムライン）が担うため、
+    // ここでバッチごとの連番を用意する必要はない。
     for (const ev of scoreEvents) {
       if (spawnedEventIdsRef.current.has(ev.id)) continue;
-      if (spawnBallsForPoints(ev.points, batchIndexRef)) {
+      if (spawnBallsForPoints(ev.points)) {
         spawnedEventIdsRef.current.add(ev.id);
       }
     }
