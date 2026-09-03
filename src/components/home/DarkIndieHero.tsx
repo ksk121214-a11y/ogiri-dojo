@@ -40,13 +40,13 @@ export default function DarkIndieHero() {
           styles.titleTextureで文字の塗りをtitle-ivory-ink-texture-512.pngにしている
           （background-clip:textのため、ここでは通常のcolorユーティリティは付けない）。
         */}
-        <h1 className={`${styles.titleTexture} whitespace-nowrap font-sans text-[2.7rem] leading-[0.95] font-black tracking-tight`}>
+        {/* 2026-09-03:「— 大喜利ライブ —」は撤去し、タイトルを大きくする要望対応。 */}
+        <h1 className={`${styles.titleTexture} whitespace-nowrap font-sans text-[3.3rem] leading-[0.95] font-black tracking-tight`}>
           爆笑
           <br />
           スタジアム
         </h1>
         <div className="flex max-w-[62%] flex-col items-start gap-2">
-          <p className="whitespace-nowrap text-2xl font-bold text-[var(--accent)]">— 大喜利ライブ —</p>
           <p className="text-base leading-snug text-[var(--text-on-dark)]">
             決まった時間に、みんなで集まる大喜利ライブ。
           </p>
