@@ -52,7 +52,16 @@ export default function OpeningView() {
   const playerCount = participants.filter((p) => p.preferred_role === "player").length;
   const isPlayerFull = live.max_players != null && playerCount >= live.max_players;
 
+  // 2026-09-03:「間違って観客を押すと後からプレイヤーに変更できない（逆も同様）」
+  // ための事故防止。確定前に一度確認する（他の画面で使っているwindow.confirmと
+  // 同じパターン、既存の参加処理自体は変更しない）。
   const handleJoin = async (role: ParticipantRole) => {
+    const confirmed = window.confirm(
+      role === "player"
+        ? "プレイヤーとして参加しますか？あとから観客に変更することはできません。"
+        : "観客として参加しますか？あとからプレイヤーに変更することはできません。",
+    );
+    if (!confirmed) return;
     if (role === "player") playSfx("joinAsPlayer");
     setJoining(true);
     await joinLive(role, referralSource || null);
