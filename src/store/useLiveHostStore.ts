@@ -15,9 +15,8 @@ import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { LIVE_ROOM_TIMING, REVEAL_SEQUENCE_MS, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
-import { assignParticipantsToGroups, pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
+import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { supabase } from "@/lib/supabase";
-import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
 import type {
   AnswerRow,
@@ -96,6 +95,9 @@ interface LiveHostState {
   // 誤操作の事故防止のため解除もできるようにする。
   kickParticipant: (participantId: string) => Promise<{ ok: boolean; reason?: string }>;
   unkickParticipant: (participantId: string) => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-04: eligible_judge_countの分母をDBの現在値から実際に再計算し直す
+  // 修復用アクション（「最新状態を取得」とは異なり、値そのものを書き換える）。
+  resyncEligibleJudgeCounts: () => Promise<{ ok: boolean; reason?: string }>;
   // 受付中（interlude/opening）でも組数・最大参加人数を調整できるようにする。
   // 組数を変えた場合は、既存のgroupsとの整合を取るため「ランダムに振り分ける」を
   // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
@@ -259,42 +261,6 @@ async function fetchScoresForAnswers(
     (map[row.answer_id] ??= []).push(row);
   }
   return { ok: true, data: map };
-}
-
-// 2026-09-03:「途中退場・退場解除とeligible_judge_countを完全に整合させる」対応。
-// 退場(kick)・退場解除(unkick)のどちらからも呼ぶ共通処理：まだ審査が確定して
-// いない現在ターン・これから始まるターン(status in pending/active)の
-// eligible_judge_count（0049で導入・全端末共通の分母）を、残っている
-// （kicked_atが無い）プレイヤー一覧から数え直す。既に終了済み(done)のターンは、
-// 審査ボードの表示・満点判定が既に確定しているため変更しない。
-// 更新自体が失敗した場合は呼び出し元に伝え、黙って握りつぶさない
-// （分母が古いまま残ると、クライアントごとに満点判定がズレる恐れがあるため）。
-async function recomputeEligibleJudgeCounts(
-  liveId: string,
-  remainingPlayers: ParticipantRow[],
-): Promise<{ ok: boolean; failedTurnIds: string[] }> {
-  const { data: targetTurns, error: fetchError } = await supabase
-    .from("turns")
-    .select("id, group_id")
-    .eq("live_id", liveId)
-    .in("status", ["pending", "active"]);
-  if (fetchError) {
-    console.error("[useLiveHostStore] recomputeEligibleJudgeCounts fetch failed", fetchError);
-    return { ok: false, failedTurnIds: [] };
-  }
-  const failedTurnIds: string[] = [];
-  for (const t of (targetTurns ?? []) as { id: string; group_id: string }[]) {
-    const eligibleJudgeCount = remainingPlayers.filter((p) => p.group_id !== t.group_id).length;
-    const { error } = await supabase
-      .from("turns")
-      .update({ eligible_judge_count: eligibleJudgeCount })
-      .eq("id", t.id);
-    if (error) {
-      console.error("[useLiveHostStore] eligible_judge_count更新に失敗", { turnId: t.id, error });
-      failedTurnIds.push(t.id);
-    }
-  }
-  return { ok: failedTurnIds.length === 0, failedTurnIds };
 }
 
 // round → group.group_order の順に並べたターン一覧。
@@ -1056,46 +1022,47 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: false, reason: `お題が足りません（${neededTopics}件必要）` };
     }
 
-    const actorId = (await supabase.auth.getUser()).data.user?.id ?? null;
-    const { data: liveRow, error: liveError } = await supabase
-      .from("lives")
-      .insert({
-        scheduled_at: input.scheduledAt,
-        current_phase: "scheduled",
-        title: input.title || null,
-        description: null,
-        max_players: input.maxPlayers,
-        planned_group_count: input.groupCount,
-        reception_starts_at: null,
-        reception_ends_at: null,
-        created_by: actorId,
+    // 2026-09-04:「createLivePreparationのトランザクション化」対応。以前は
+    // 「lives作成→topics作成」の2回の別々のSupabase呼び出しに分かれており、
+    // 後者が失敗するとscheduledなライブだけが残ってしまっていた。
+    // create_live_preparation()に一括化し、Postgresの関数呼び出し自体が
+    // 1トランザクションになる性質を利用して、途中で失敗すれば何も作られない
+    // ようにする（お題本文はここでもう一度topic_bankから取り直すため、
+    // クライアントから任意の本文を注入することもできない）。
+    const { data, error } = await supabase
+      .rpc("create_live_preparation", {
+        p_scheduled_at: input.scheduledAt,
+        p_title: input.title || null,
+        p_max_players: input.maxPlayers,
+        p_planned_group_count: input.groupCount,
+        p_topic_bank_ids: entries.slice(0, neededTopics).map((entry) => entry.id),
       })
-      .select()
       .single();
-    if (liveError || !liveRow) {
-      return { ok: false, reason: liveError?.message ?? "ライブの作成に失敗しました" };
+    if (error) {
+      return { ok: false, reason: error.message };
     }
-    const live = liveRow as LiveRow;
-
-    const { error: topicError } = await supabase.from("topics").insert(
-      entries.slice(0, neededTopics).map((entry) => ({
-        live_id: live.id,
-        body: entry.body,
-        format: entry.format,
-        topic_bank_id: entry.id,
-      })),
-    );
-    if (topicError) {
-      return { ok: false, reason: topicError.message };
+    const result = data as { ok: boolean; reason: string | null; live_id: string | null };
+    if (!result.ok || !result.live_id) {
+      return { ok: false, reason: result.reason ?? "ライブの作成に失敗しました" };
     }
 
     await logAdminAction({
       action: "live_prepared",
       targetType: "lives",
-      targetId: live.id,
+      targetId: result.live_id,
       detail: { title: input.title, maxPlayers: input.maxPlayers, groupCount: input.groupCount },
     });
 
+    const { data: liveRow, error: liveFetchError } = await supabase
+      .from("lives")
+      .select("*")
+      .eq("id", result.live_id)
+      .single();
+    if (liveFetchError || !liveRow) {
+      set({ error: "ライブは作成できましたが、最新状態の取得に失敗しました。「最新状態を取得」で再試行してください。" });
+      return { ok: true };
+    }
+    const live = liveRow as LiveRow;
     const childrenResult = await fetchLiveChildren(live.id);
     const profiles = await fetchProfilesFor(childrenResult.data.participants);
     set({
@@ -1150,74 +1117,30 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   randomizeGroups: async () => {
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
-    const groupCount = live.planned_group_count ?? 1;
 
-    const { data: participantsData, error: participantsError } = await supabase
-      .from("participants")
-      .select("*")
-      .eq("live_id", live.id);
-    if (participantsError) return { ok: false, reason: participantsError.message };
-    const participants = (participantsData ?? []) as ParticipantRow[];
-
-    // 2026-09-03:「途中退場・退場解除とeligible_judge_countを完全に整合させる」対応。
-    // 既に退場済み(kicked_at)の参加者は、組分けの対象から除外する
-    // （組分け後にbegin_gameが数えるプレイヤー数・組内人数と食い違わないようにする）。
-    const playerParticipants = participants.filter(
-      (p) => p.preferred_role === "player" && !p.kicked_at,
-    );
-    if (playerParticipants.length === 0) {
-      return { ok: false, reason: "プレイヤー希望の参加者がいません" };
+    // 2026-09-04:「randomizeGroupsの原子化・エラー確認」対応。以前はクライアント
+    // 側で「（無ければ）groups作成→全員リセット→再割当」をPromise.allで並列
+    // 実行しており、Supabaseのupdateはネットワーク越しに失敗してもPromise.all
+    // 自体は例外を投げず(result.errorになるだけ)、その戻り値を検査していなかった
+    // ため、一部だけaudience/group_id=nullのまま成功扱いになりうる状態だった。
+    // randomize_groups()は1つのSECURITY DEFINER関数にまとめ、途中で失敗すれば
+    // 何も変更されないようにする。使用する組もlives.planned_group_count件
+    // （group_order昇順の先頭からその件数）に限定し、組数を減らした後の古い
+    // 組が紛れ込まないようにする。
+    const { data, error } = await supabase.rpc("randomize_groups", { p_live_id: live.id }).single();
+    if (error) {
+      return { ok: false, reason: error.message };
     }
-
-    const groupedIds = assignParticipantsToGroups(
-      playerParticipants.map((p) => p.id),
-      groupCount,
-    );
-
-    // 既存のgroups行があれば再利用する（「もう一度振り分ける」で毎回組を
-    // 作り直すとturns.group_idの参照が壊れるため、group_order昇順で既存行に対応させる）。
-    let groupRows = get().groups.filter((g) => g.live_id === live.id);
-    if (groupRows.length < groupCount) {
-      const { data: newGroups, error: groupError } = await supabase
-        .from("groups")
-        .insert(
-          Array.from({ length: groupCount - groupRows.length }, (_, i) => ({
-            live_id: live.id,
-            group_order: groupRows.length + i + 1,
-          })),
-        )
-        .select();
-      if (groupError || !newGroups) {
-        return { ok: false, reason: groupError?.message ?? "組の作成に失敗しました" };
-      }
-      groupRows = [...groupRows, ...(newGroups as GroupRow[])].sort(
-        (a, b) => a.group_order - b.group_order,
-      );
+    const result = data as { ok: boolean; reason: string | null };
+    if (!result.ok) {
+      return { ok: false, reason: result.reason ?? "組分けに失敗しました" };
     }
-
-    // まずプレイヤー希望者全員をaudience/group_id:nullへ一旦戻し、
-    // 新しい割り当てだけを反映する（前回の手動変更を確実に上書きするため）。
-    await Promise.all(
-      playerParticipants.map((p) =>
-        supabase.from("participants").update({ group_id: null, role: "audience" }).eq("id", p.id),
-      ),
-    );
-    await Promise.all(
-      groupedIds.flatMap((memberIds, i) =>
-        memberIds.map((participantId) =>
-          supabase
-            .from("participants")
-            .update({ group_id: groupRows[i].id, role: "player" })
-            .eq("id", participantId),
-        ),
-      ),
-    );
 
     await logAdminAction({
       action: "groups_randomized",
       targetType: "lives",
       targetId: live.id,
-      detail: { groupCount, playerCount: playerParticipants.length },
+      detail: { groupCount: live.planned_group_count ?? 1 },
     });
 
     const childrenResult = await fetchLiveChildren(live.id);
@@ -1348,51 +1271,26 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   kickParticipant: async (participantId) => {
-    const { live, participants, answers } = get();
+    const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
-    // 2026-09-03:「審査途中での退場を許すなら分母を整合、難しければ審査中だけ
-    // 禁止する」対応。ある回答が表示され、まだ採点が確定していない
-    // （＝ScoringPhysicsBoardが玉を積んでいる最中）タイミングでeligible_judge_count
-    // を変えると、既に表示済みの玉数と新しい分母がクライアントによってズレる
-    // 恐れがあるため、このタイミングだけ退場操作を禁止する。回答と回答の間
-    // （表示中の回答が無い状態）であれば引き続き操作できる。
-    const activeJudging = answers.some((a) => a.revealed_at && !a.resolved);
-    if (live.current_phase === "answering" && activeJudging) {
-      return {
-        ok: false,
-        reason: "採点中は退場操作ができません。今の回答への採点が終わってから操作してください。",
-      };
-    }
-    const target = participants.find((p) => p.id === participantId);
-    const { error } = await supabase
-      .from("participants")
-      .update({ kicked_at: new Date().toISOString() })
-      .eq("id", participantId);
+    // 2026-09-04:「kick/unkickとeligible_judge_count更新を原子的にする」対応。
+    // 以前はクライアント側で「participants更新→各turnsを1件ずつ個別に
+    // update」という複数回の呼び出しに分かれており、後半が一部だけ失敗する
+    // 部分状態がありえた。kick_participant()は1つのSECURITY DEFINER関数で
+    // participants更新とturns再計算（および採点中の禁止判定・
+    // user_sanctions記録）を全て行い、途中で失敗すれば何も変更しない。
+    const { data, error } = await supabase.rpc("kick_participant", {
+      p_participant_id: participantId,
+    }).single();
     if (error) return { ok: false, reason: error.message };
+    const result = data as { ok: boolean; reason: string | null };
+    if (!result.ok) return { ok: false, reason: result.reason ?? "処理に失敗しました" };
+
     await logAdminAction({
       action: "participant_kicked",
       targetType: "participants",
       targetId: participantId,
     });
-    // 2026-08-30:「退場させられたらユーザー管理に通知（記録）が行くようにして、
-    // 退場させられた件数をユーザー詳細に入れておいて」の要望対応。
-    // /admin/users/[id]の「警告・対応履歴」と同じuser_sanctionsに記録することで、
-    // 新規の通知経路を増やさずユーザー詳細ページにそのまま反映される。
-    if (target) {
-      const actorId = useAuthStore.getState().user?.id ?? null;
-      const { error: sanctionError } = await supabase.from("user_sanctions").insert({
-        user_id: target.user_id,
-        type: "kicked",
-        // reasonは種別ラベル「ライブからの退場」と表示上重複させないため、
-        // 直前の個別メッセージがあればそれだけを補足として入れる（無ければ空）。
-        reason: target.host_message ?? "",
-        target_ref: live.id,
-        created_by: actorId,
-      });
-      if (sanctionError) {
-        console.warn("[useLiveHostStore] 退場のuser_sanctions記録に失敗", sanctionError);
-      }
-    }
     const childrenResult = await fetchLiveChildren(live.id);
     if (!childrenResult.ok) {
       // 退場自体はDBに反映済みなのでok:trueのまま、取得失敗はerror状態で伝える
@@ -1401,37 +1299,19 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: true };
     }
     set({ participants: childrenResult.data.participants });
-    // 2026-09-03:「途中退場した参加者を審査対象から除外する」対応。退場した人が
-    // プレイヤーだった場合、現在ターン・これから始まるターンのeligible_judge_count
-    // を退場後の参加者一覧から再計算し直す。
-    if (target?.role === "player") {
-      const remainingPlayers = childrenResult.data.participants.filter(
-        (p) => p.role === "player" && !p.kicked_at,
-      );
-      const recomputeResult = await recomputeEligibleJudgeCounts(live.id, remainingPlayers);
-      if (!recomputeResult.ok) {
-        set({ error: "退場は完了しましたが、審査人数の分母更新に一部失敗しました。「最新状態を取得」で確認してください。" });
-      }
-    }
     return { ok: true };
   },
 
   unkickParticipant: async (participantId) => {
-    const { live, participants, answers } = get();
+    const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
-    const activeJudging = answers.some((a) => a.revealed_at && !a.resolved);
-    if (live.current_phase === "answering" && activeJudging) {
-      return {
-        ok: false,
-        reason: "採点中は退場解除ができません。今の回答への採点が終わってから操作してください。",
-      };
-    }
-    const target = participants.find((p) => p.id === participantId);
-    const { error } = await supabase
-      .from("participants")
-      .update({ kicked_at: null })
-      .eq("id", participantId);
+    const { data, error } = await supabase.rpc("unkick_participant", {
+      p_participant_id: participantId,
+    }).single();
     if (error) return { ok: false, reason: error.message };
+    const result = data as { ok: boolean; reason: string | null };
+    if (!result.ok) return { ok: false, reason: result.reason ?? "処理に失敗しました" };
+
     await logAdminAction({
       action: "participant_unkicked",
       targetType: "participants",
@@ -1443,19 +1323,25 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: true };
     }
     set({ participants: childrenResult.data.participants });
-    // 2026-09-03:「退場・解除の両方で、current/pendingターンの分母を整合させる」
-    // 対応。解除でプレイヤーが審査資格者に復帰する場合、分母を元に戻す
-    // （kick時と対称の処理）。
-    if (target?.role === "player") {
-      const remainingPlayers = childrenResult.data.participants.filter(
-        (p) => p.role === "player" && !p.kicked_at,
-      );
-      const recomputeResult = await recomputeEligibleJudgeCounts(live.id, remainingPlayers);
-      if (!recomputeResult.ok) {
-        set({ error: "退場解除は完了しましたが、審査人数の分母更新に一部失敗しました。「最新状態を取得」で確認してください。" });
-      }
-    }
     return { ok: true };
+  },
+
+  // 2026-09-04:「失敗後に実際の再計算を行う再試行処理を用意する」対応。
+  // 「最新状態を取得」は今のDB値を読み直すだけで、間違ったeligible_judge_count
+  // そのものは直らない。このアクションはDB側の値そのものを、現在の参加者一覧
+  // から実際に再計算して書き換える（kick/unkickは原子化済みなので通常は不要だが、
+  // 過去の不整合が残っている場合の修復用）。
+  resyncEligibleJudgeCounts: async () => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { data, error } = await supabase
+      .rpc("resync_eligible_judge_counts", { p_live_id: live.id })
+      .single();
+    if (error) return { ok: false, reason: error.message };
+    const result = data as { ok: boolean; updated_turns: number };
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (childrenResult.ok) set({ turns: childrenResult.data.turns });
+    return { ok: result.ok, reason: `${result.updated_turns}件のターンを更新しました` };
   },
 
   // 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を

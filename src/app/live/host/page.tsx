@@ -631,12 +631,14 @@ function ParticipantsPanel({
   const clearPrivateMessage = useLiveHostStore((s) => s.clearPrivateMessage);
   const kickParticipant = useLiveHostStore((s) => s.kickParticipant);
   const unkickParticipant = useLiveHostStore((s) => s.unkickParticipant);
+  const resyncEligibleJudgeCounts = useLiveHostStore((s) => s.resyncEligibleJudgeCounts);
 
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [kicking, setKicking] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
 
   const nameOf = (p: ParticipantRow) =>
     hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
@@ -699,6 +701,22 @@ function ParticipantsPanel({
     }
   };
 
+  // 2026-09-04:「失敗後に実際の再計算を行う再試行処理を用意する」対応。
+  // kick/unkick自体は1トランザクションで原子化済みだが、万一過去の不整合
+  // （このマイグレーション以前の分母のズレ等）が残っている場合の修復用ボタン。
+  // 「最新状態を取得」（読み直すだけ）とは異なり、DBの値そのものを書き換える。
+  const handleResync = async () => {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      const result = await resyncEligibleJudgeCounts();
+      if (!result.ok) onNotify("error", result.reason ?? "再計算に失敗しました");
+      else onNotify("success", result.reason ?? "審査人数の分母を再計算しました。");
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   return (
     <>
       <AdminCard title={`参加者：${participants.length}人`}>
@@ -708,6 +726,9 @@ function ParticipantsPanel({
             {maxPlayers}人
           </p>
         )}
+        <AdminButton className="mt-2" disabled={resyncing} onClick={handleResync}>
+          {resyncing ? "再計算中…" : "審査人数の分母を再計算する"}
+        </AdminButton>
         <ul className="mt-2 max-h-56 overflow-y-auto text-xs text-gray-700">
           {participants.map((p) => {
             const name = nameOf(p);

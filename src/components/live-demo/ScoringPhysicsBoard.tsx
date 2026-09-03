@@ -195,6 +195,12 @@ export default function ScoringPhysicsBoard({
   const perfectReachedAtRef = useRef<number | null>(null);
   const totalSpawnedRef = useRef(0);
   const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // 2026-09-04:「予約済みボールを回答間で持ち越さない」対策。玉のスポーン
+  // (spawnBallsForPoints)・重なり回避の再試行(trySpawnOneBall)のsetTimeoutだけを
+  // 別のSetで管理し、roundKey切替時にここだけを狙ってキャンセルできるようにする
+  // （timeoutsRefは採点確定(resolved)の弾けタイマーと共用のため、そちらは
+  // 誤って巻き込まない）。
+  const spawnTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const rafRef = useRef<number | null>(null);
   const prevWidthRef = useRef<number | null>(null);
   const prevHeightRef = useRef<number | null>(null);
@@ -235,6 +241,18 @@ export default function ScoringPhysicsBoard({
   // タイムライン(performance.now()基準)として持つことで、呼び出し元の
   // レンダーがいつ起きたかに関わらず一定間隔で出現をずらせるようにする。
   const nextSpawnAtRef = useRef(0);
+  // 2026-09-04:「予約済みボールを回答間で持ち越さない」対策。roundKeyが切り替わっても、
+  // 前の回答ぶんで既にsetTimeoutでスケジュール済みだった玉が後から発火し、新しい回答の
+  // ボードに紛れ込んでいた（roundKey変更時のリセットは物理ワールドの玉やrefは戻すが、
+  // 既に発行済みのsetTimeoutハンドル自体はキャンセルしていなかったため）。roundKeyが
+  // 変わるたびに1増える世代IDを持たせ、スケジュール時点の世代を閉じ込めておいて、
+  // 実際に発火した時点で世代が variable ズレていれば何もせず終了する。
+  const generationRef = useRef(0);
+  // spawnBallsForPoints呼び出し時点でのtotalSpawnedRef（=実際に追加済みの玉数）だけを
+  // 見てremainingを計算すると、直前の呼び出しでスケジュール済み（まだ発火前）の玉を
+  // 二重に数えてしまい、maxBallsを超えてスケジュールしうる。スケジュールした時点で
+  // 即座に加算する「予約込みの個数」を別に持つ。
+  const scheduledCountRef = useRef(0);
   const [totalBalls, setTotalBalls] = useState(0);
   // "X / Y"表示のYも、ロジックと同じ固定値を見せる（propsのmaxBallsをそのまま
   // 表示すると、審査サイクル中に分母だけ動いて見える不整合になるため）。
@@ -468,6 +486,7 @@ export default function ScoringPhysicsBoard({
     rafRef.current = requestAnimationFrame(draw);
 
     const timeouts = timeoutsRef.current;
+    const spawnTimeouts = spawnTimeoutsRef.current;
     return () => {
       observer.disconnect();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -475,6 +494,8 @@ export default function ScoringPhysicsBoard({
       Matter.Engine.clear(engine);
       for (const id of timeouts) clearTimeout(id);
       timeouts.clear();
+      for (const id of spawnTimeouts) clearTimeout(id);
+      spawnTimeouts.clear();
     };
   }, []);
 
@@ -539,6 +560,15 @@ export default function ScoringPhysicsBoard({
     setTotalBalls(0);
     // 次の回答のキュー・タイマーを前の回答から持ち越さない（安全なリセット）。
     nextSpawnAtRef.current = 0;
+    scheduledCountRef.current = 0;
+    // 2026-09-04:「予約済みボールを回答間で持ち越さない」対策。世代IDを進めて
+    // おくことで、既に発行済み（キャンセルし損ねた場合も含む）のsetTimeout
+    // コールバックが後から発火しても、古い世代だと分かって何もせず終了する
+    // （二重の安全策）。加えて、まだ発火していないスポーン/リトライの
+    // setTimeout自体もここで積極的にキャンセルする。
+    generationRef.current += 1;
+    for (const id of spawnTimeoutsRef.current) clearTimeout(id);
+    spawnTimeoutsRef.current.clear();
     perfectTriggeredRef.current = false;
     perfectReachedAtRef.current = null;
     lineFlashedRef.current = false;
@@ -616,12 +646,21 @@ export default function ScoringPhysicsBoard({
   // 自分自身をsetTimeoutの中から再帰的に呼ぶため、useCallbackの戻り値を直接
   // 名指しで参照すると「宣言前にアクセスしている」エラーになる。refに常に
   // 最新の関数を入れておき、再帰呼び出しはref経由で行う。
-  const trySpawnOneBallRef = useRef<(retriesLeft: number) => void>(() => {});
+  const trySpawnOneBallRef = useRef<(retriesLeft: number, generation: number) => void>(() => {});
 
   // 実際に1個の玉を追加する（重なり回避のリトライ込み）。空いている位置が
   // 見つからない間は即座に諦めて重ねるのではなく、スポーン領域が空くまで
   // 少し遅延して再試行する（安全なレーン方式の代わりの簡易版）。
-  const trySpawnOneBall = useCallback((retriesLeft: number) => {
+  // generationは呼び出し（＝スケジュール）時点の世代を閉じ込めておき、実際に
+  // 発火した時点で世代がズレていれば（＝roundKeyが切り替わっていれば）何もしない。
+  const trySpawnOneBall = useCallback((retriesLeft: number, generation: number) => {
+    // 2026-09-04:「roundKey切替時に持ち越さない」対策その1。世代が変わっていれば
+    // このコールバックはもう無効（古い回答のぶん）なので、何もせず終了する。
+    if (generation !== generationRef.current) return;
+    // 2026-09-04:「resolved後・perfectTriggered後に予約済みcallbackが新しいボールを
+    // 追加しない」対策。弾け演出が既に発生した後にスケジュール済みの玉が発火しても、
+    // 弾けた後のボードに紛れ込ませない。
+    if (perfectTriggeredRef.current) return;
     const currentEngine = engineRef.current;
     // 2026-09-03:「setTimeout内では古いlayoutではなく最新のlayoutRefを使う」対策。
     // 玉ごとに数十〜数百ms遅延するため、呼び出し時点でクロージャに閉じ込めた
@@ -632,17 +671,26 @@ export default function ScoringPhysicsBoard({
     const margin = currentLayout.ballRadius + 6;
     const minX = margin;
     const maxX = Math.max(margin, currentLayout.width - margin);
+    // 玉は常にこの付近（壁の少し上）から降ってくるため、重なり判定はこの
+    // スポーン地点を基準にした2次元距離で行う（下で参照するためxより先に決める）。
+    const spawnY = -currentLayout.ballRadius * 2 - Math.random() * 40;
 
-    // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。既存の玉のx位置から
-    // 直径以上離れた候補が見つかるまで数回だけ試す。
-    const existingXs = currentEngine.world.bodies
+    // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。
+    // 2026-09-04: X座標だけの比較だと、既に画面下の方まで落ちて実際には
+    // スポーン地点と重ならないボールまで「近い」と誤判定してしまう（逆に、
+    // 画面幅が狭い時にX同士は少し離れていてもY方向にはまだ重なっている、
+    // という見落としも起きうる）。スポーン地点(x, spawnY)から実際の
+    // 距離（2次元）が直径未満の玉が無いかで判定する。
+    const existingBalls = currentEngine.world.bodies
       .filter((b) => b.circleRadius)
-      .map((b) => b.position.x);
+      .map((b) => ({ x: b.position.x, y: b.position.y }));
     const minGap = currentLayout.ballRadius * 2; // 直径以上の距離
     let x = minX + Math.random() * Math.max(0, maxX - minX);
-    let foundFreeSpot = existingXs.length === 0;
+    let foundFreeSpot = existingBalls.length === 0;
     for (let attempt = 0; attempt < 5; attempt++) {
-      const tooClose = existingXs.some((ex) => Math.abs(ex - x) < minGap);
+      const tooClose = existingBalls.some(
+        (b) => Math.hypot(b.x - x, b.y - spawnY) < minGap,
+      );
       if (!tooClose) {
         foundFreeSpot = true;
         break;
@@ -654,19 +702,18 @@ export default function ScoringPhysicsBoard({
       // 少し遅延して再試行する。
       const retryId = setTimeout(
         () => {
-          timeoutsRef.current.delete(retryId);
-          trySpawnOneBallRef.current(retriesLeft - 1);
+          spawnTimeoutsRef.current.delete(retryId);
+          trySpawnOneBallRef.current(retriesLeft - 1, generation);
         },
         120 + Math.random() * 80,
       );
-      timeoutsRef.current.add(retryId);
+      spawnTimeoutsRef.current.add(retryId);
       return;
     }
     // 出現位置は現在の壁とballRadiusの内側へ必ずclampする（念のための二重の安全策。
     // リトライを使い切って諦めた場合もここでclampされる）。
     x = Math.min(maxX, Math.max(minX, x));
-    const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
-    const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
+    const ball = Matter.Bodies.circle(x, spawnY, currentLayout.ballRadius, {
       restitution: 0.45,
       friction: 0.08,
       frictionAir: 0.003,
@@ -701,13 +748,22 @@ export default function ScoringPhysicsBoard({
       // propsのmaxBalls（審査員数の増減で動く）を直接使うと、審査中に上限が下がった
       // 瞬間、既に降らせた玉数との差分(remaining)が負になり、点数分の玉が出なくなる
       // 不整合が起きるため。
-      const remaining = maxBallsRef.current - totalSpawnedRef.current;
+      // 2026-09-04:「現在のremaining計算では予約済み個数を考慮していない」対策。
+      // totalSpawnedRef（実際にMatter.jsへ追加済みの数）だけを見ると、直前の
+      // 呼び出しでスケジュール済み（まだ発火前でtotalSpawnedRefに未反映）の玉を
+      // 二重に数えてしまい、maxBallsを超えてスケジュールしうる。「予約込みの
+      // 個数」であるscheduledCountRefを基準にする。
+      const remaining = maxBallsRef.current - scheduledCountRef.current;
       const count = Math.min(points, Math.max(0, remaining));
       if (count === 0) return true;
 
+      const generation = generationRef.current;
       const STAGGER_MS = 80;
       const STAGGER_JITTER_MS = 90;
       for (let i = 0; i < count; i++) {
+        // スケジュールした時点で即座に加算する（実際にMatter.jsへ追加されるのは
+        // 後述のsetTimeout発火後だが、それまでの間も「予約済み」として数える）。
+        scheduledCountRef.current += 1;
         // 2026-09-03:「scoreEvents全体・かつ別々に届くRealtimeイベント間でも
         // 共通のspawnキューを使い、同時出現を防ぐ」対策。以前はこのuseEffect
         // 呼び出し（＝1回の描画バッチ）ごとにリセットされる連番を使っており、
@@ -720,10 +776,10 @@ export default function ScoringPhysicsBoard({
         nextSpawnAtRef.current = spawnAt + STAGGER_MS + Math.random() * STAGGER_JITTER_MS;
         const delay = spawnAt - now;
         const id = setTimeout(() => {
-          timeoutsRef.current.delete(id);
-          trySpawnOneBall(4);
+          spawnTimeoutsRef.current.delete(id);
+          trySpawnOneBall(4, generation);
         }, delay);
-        timeoutsRef.current.add(id);
+        spawnTimeoutsRef.current.add(id);
       }
       return true;
     },
