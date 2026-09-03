@@ -109,7 +109,7 @@ export default function LiveSchedulePage() {
         </>
       )}
 
-      <div className="rounded-2xl bg-[var(--paper)]/70 p-4">
+      <div className="bg-[var(--paper)]/70 p-4">
         <LiveCalendar marks={calendarMarks} />
       </div>
 
@@ -121,7 +121,7 @@ export default function LiveSchedulePage() {
         type="button"
         onClick={handleAddToCalendar}
         disabled={!current}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-1.5 border border-[var(--ink)]/30 px-3 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <CalendarAddGlyph />
         カレンダーに追加

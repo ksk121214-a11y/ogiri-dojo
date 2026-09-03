@@ -42,7 +42,7 @@ export default function SnsFollowButton({
         type="button"
         disabled={pending}
         onClick={handleClick}
-        className={`shrink-0 rounded-full font-sans font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`shrink-0 font-sans font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
           size === "compact" ? "px-3 py-1 text-[11px]" : "px-5 py-2 text-xs"
         } ${
           following

@@ -75,7 +75,7 @@ export default function SnsNewTopicPage() {
 
       <form
         onSubmit={handleSubmit}
-        className={`${stadiumStyles.grainPaper} flex flex-col gap-4 rounded-2xl p-5 shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}
+        className={`${stadiumStyles.grainPaper} flex flex-col gap-4 p-5 shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}
       >
         <textarea
           value={body}
@@ -105,7 +105,7 @@ export default function SnsNewTopicPage() {
         <button
           type="submit"
           disabled={!body.trim() || overLimit || noTicket || submitting}
-          className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} w-full rounded-xl px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+          className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} w-full px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
         >
           {submitting ? "投稿中…" : "投稿する（寄合券を1枚使う）"}
         </button>

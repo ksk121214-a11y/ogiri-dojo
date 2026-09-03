@@ -82,7 +82,7 @@ export default function SnsLiveResultBody({
           <h2 className="font-sans text-sm font-bold text-[var(--ink)]">運営ベスト</h2>
           <LiveResultCard card={detail.managerBest} readOnly={readOnly} />
           {detail.managerComment && (
-            <p className={`${stadiumStyles.grainPaper} rounded-xl p-3 font-sans text-xs text-[var(--ink)]/80`}>
+            <p className={`${stadiumStyles.grainPaper} p-3 font-sans text-xs text-[var(--ink)]/80`}>
               運営コメント：{detail.managerComment}
             </p>
           )}
@@ -147,7 +147,7 @@ function LiveResultCard({
 
   return (
     <div
-      className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] sm:p-5 ${
+      className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] sm:p-5 ${
         rank ? RANK_BORDER[rank] : ""
       }`}
     >
@@ -212,7 +212,7 @@ function LiveResultCard({
               {cardComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="relative flex flex-col gap-1 rounded-lg bg-[var(--ink)]/5 py-2 pl-3 pr-9"
+                  className="relative flex flex-col gap-1 bg-[var(--ink)]/5 py-2 pl-3 pr-9"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <SnsAuthorBadge authorId={comment.authorId} size={22} hideReportButton />

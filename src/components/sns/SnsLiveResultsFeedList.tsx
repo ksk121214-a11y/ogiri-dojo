@@ -29,7 +29,7 @@ export default function SnsLiveResultsFeedList() {
 
   if (summaries.length === 0) {
     return (
-      <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 rounded-2xl px-6 py-16 text-center text-[var(--ink)]`}>
+      <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 px-6 py-16 text-center text-[var(--ink)]`}>
         <p className="font-sans text-sm font-bold text-[var(--ink)]">まだ公開されたライブ結果はありません</p>
         <p className="font-sans text-xs text-[var(--ink)]/70">
           ライブが終了し、運営が結果を公開するとここに表示されます
@@ -44,7 +44,7 @@ export default function SnsLiveResultsFeedList() {
         <Link
           key={summary.id}
           href={`/sns/results/${summary.id}`}
-          className={`${stadiumStyles.grainPaper} flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
+          className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
         >
           <div className="flex items-center justify-between gap-2">
             <span className={`${stadiumStyles.grainAccent} rounded-full px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>

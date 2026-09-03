@@ -111,7 +111,7 @@ export default function SnsFeedSection() {
         </Link>
       </div>
 
-      <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 rounded-2xl p-3 text-[var(--ink)] sm:p-4`}>
+      <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 p-3 text-[var(--ink)] sm:p-4`}>
         {/* 3タブを均等幅にし、ラベルの文字数差（「ライブ結果」が長い等）に関わらず
             中央のタブ（回答）が常に画面中央に来るようにする。 */}
         <div className="flex w-full border-b border-[var(--ink)]/15 pb-2.5">
@@ -173,7 +173,7 @@ export default function SnsFeedSection() {
       {feed === "results" ? (
         <SnsLiveResultsFeedList />
       ) : showFollowingEmpty ? (
-        <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 rounded-2xl px-6 py-16 text-center text-[var(--ink)]`}>
+        <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 px-6 py-16 text-center text-[var(--ink)]`}>
           <p className="font-sans text-sm font-bold text-[var(--ink)]">
             フォロー中の演者の投稿はまだありません
           </p>
@@ -253,7 +253,7 @@ function TopicFeedList({
         return (
           <div
             key={topic.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={topic.authorId} hideReportButton />
@@ -316,7 +316,7 @@ function AnswerFeedList({
         return (
           <div
             key={answer.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={answer.authorId} hideReportButton />

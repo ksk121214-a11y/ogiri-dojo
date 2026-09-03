@@ -11,7 +11,7 @@ import SnsFollowButton from "@/components/sns/SnsFollowButton";
 // （SnsAuthorBadge自身がダミー/実データ/未解決を判定して出し分けている）。
 export default function SnsFollowListRow({ authorId }: { authorId: string }) {
   return (
-    <div className={`${stadiumStyles.grainPaper} flex items-center justify-between gap-3 rounded-xl p-3 text-[var(--ink)]`}>
+    <div className={`${stadiumStyles.grainPaper} flex items-center justify-between gap-3 p-3 text-[var(--ink)]`}>
       <SnsAuthorBadge authorId={authorId} />
       <SnsFollowButton authorId={authorId} size="compact" />
     </div>

@@ -219,7 +219,7 @@ export function CurrentLiveCard({
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Link
                 href="/"
-                className={`${styles.pressable} ${styles.grainAccent} w-fit rounded-lg px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+                className={`${styles.pressable} ${styles.grainAccent} w-fit px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
               >
                 参加する
               </Link>
@@ -261,7 +261,7 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
                 開催予定
               </span>
               {/* こちらもまだ詳細画面が無いため、押せる体裁のリンクにはせず控えめな表示のみに留める。 */}
-              <span className="cursor-not-allowed rounded-md border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
+              <span className="cursor-not-allowed border border-[var(--ink)]/25 px-2.5 py-1 font-sans text-xs font-bold text-[var(--ink)]/35">
                 詳細を見る ›
               </span>
             </div>

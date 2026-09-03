@@ -121,7 +121,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         </Link>
       )}
 
-      <div className={`${stadiumStyles.grainPaper} relative flex flex-col gap-3 rounded-2xl p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
+      <div className={`${stadiumStyles.grainPaper} relative flex flex-col gap-3 p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
@@ -163,7 +163,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
 
       <form
         onSubmit={handleSubmit}
-        className={`${stadiumStyles.grainPaper} flex flex-col gap-2 rounded-2xl p-4 text-[var(--ink)]`}
+        className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)]`}
       >
         <textarea
           value={body}
@@ -200,14 +200,14 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           ツッコミ {answerComments.length}件
         </h2>
         {answerComments.length === 0 && (
-          <p className={`${stadiumStyles.grainPaper} rounded-xl p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
+          <p className={`${stadiumStyles.grainPaper} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
             まだツッコミがありません。最初のツッコミを入れてみましょう。
           </p>
         )}
         {answerComments.map((comment) => (
           <div
             key={comment.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-1.5 rounded-xl py-3 pl-4 pr-9 text-[var(--ink)]`}
+            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-1.5 py-3 pl-4 pr-9 text-[var(--ink)]`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={comment.authorId} size={24} hideReportButton />

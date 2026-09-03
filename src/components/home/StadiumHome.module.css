@@ -206,7 +206,9 @@
   /* background-color/imageは.grainPaper側で指定するため、ここではshorthandの
      backgroundは使わない（shorthandはbackground-imageも一緒にリセットしてしまうため）。 */
   color: var(--ink);
-  border-radius: 20px;
+  /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で、外枠の角丸をやめた
+     （切り欠き・ミシン目等のチケット装飾自体はそのまま）。 */
+  border-radius: 0;
 }
 
 /*
@@ -223,10 +225,9 @@
 .tornTicketMain {
   position: relative;
   overflow: hidden;
-  /* 2026-08-28: 「点線で切ったような感じで右側の角だけ尖ってる感じ」の要望のため、
-     左側（元々のチケット本来の角）だけ丸め、右側（半券を切り取った断面）は
-     角丸にせずシャープな直角にして「そこで切った」感を出す。 */
-  border-radius: 20px 0 0 20px;
+  /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で、左側（元々丸めていた
+     本来の角）も含めて角丸をやめた（右側の直角＝「切り取った断面」の表現はそのまま）。 */
+  border-radius: 0;
   color: var(--ink);
 }
 
@@ -480,7 +481,8 @@
 .profileCardMain {
   position: relative;
   overflow: hidden;
-  border-radius: 20px 0 0 20px;
+  /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で角丸をやめた。 */
+  border-radius: 0;
   color: var(--ink);
 }
 /*
@@ -499,7 +501,8 @@
   bottom: 0;
   width: 92px;
   overflow: hidden;
-  border-radius: 0 20px 20px 0;
+  /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で角丸をやめた。 */
+  border-radius: 0;
   /*
    * 2026-09-03: 5分割セルをflexboxのflex-1で等分していたところ、高さが5で
    * 割り切れない時にブラウザの端数配分（フレックス分配アルゴリズム）が
@@ -555,13 +558,14 @@
 .nextLiveTicketMain {
   position: relative;
   overflow: hidden;
-  border-radius: 20px 0 0 20px;
+  /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で角丸をやめた。 */
+  border-radius: 0;
   color: var(--ink);
 }
 .nextLiveTicketStub {
   position: relative;
   overflow: hidden;
-  border-radius: 0 20px 20px 0;
+  border-radius: 0;
   color: var(--ink);
 }
 

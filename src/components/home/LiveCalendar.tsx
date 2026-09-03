@@ -69,7 +69,7 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
           type="button"
           onClick={goPrev}
           aria-label="前の月"
-          className="rounded-md border border-[var(--ink)]/25 px-3 py-1 font-sans text-lg font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
+          className="border border-[var(--ink)]/25 px-3 py-1 font-sans text-lg font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
         >
           ‹
         </button>
@@ -80,14 +80,14 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
           type="button"
           onClick={goNext}
           aria-label="次の月"
-          className="rounded-md border border-[var(--ink)]/25 px-3 py-1 font-sans text-lg font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
+          className="border border-[var(--ink)]/25 px-3 py-1 font-sans text-lg font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
         >
           ›
         </button>
         <button
           type="button"
           onClick={goToday}
-          className="rounded-md border border-[var(--ink)]/25 px-3 py-1 font-sans text-xs font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
+          className="border border-[var(--ink)]/25 px-3 py-1 font-sans text-xs font-bold text-[var(--ink)]/70 hover:bg-[var(--ink)]/5"
         >
           今日
         </button>
@@ -114,7 +114,7 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
           return (
             <div key={i} className="flex flex-col items-center gap-0.5 py-0">
               <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full font-sans text-sm ${
+                className={`flex h-7 w-7 items-center justify-center font-sans text-sm ${
                   day == null ? "" : mark ? MARK_STYLE[mark.kind] : `${baseColor} font-bold`
                 }`}
               >
