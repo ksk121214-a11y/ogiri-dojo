@@ -21,6 +21,7 @@ import StageAnsweringView from "@/components/live-room/StageAnsweringView";
 import TopicRevealView from "@/components/live-room/TopicRevealView";
 import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
+import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -103,6 +104,17 @@ export default function LivePage() {
       playBgm("waiting", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.groupResultMs) });
     } else if (currentPhase === "final_result") {
       playBgm("waiting");
+    } else if (currentPhase === "interlude" || currentPhase === "opening") {
+      // 2026-09-03:「観客としてホームに戻り、ホームからライブに戻ると、ホームのBGMが
+      // そのまま流れ続ける」不具合対策。interlude/openingのBGMは元々CurtainOverlay
+      // （幕が開く音と同時に鳴らす、初回だけの演出）が担っており、ここでは意図的に
+      // 何もしていなかった。しかしhasSeenCurtain()はブラウザタブ内で一度でも見たら
+      // trueのまま（リロードでのみリセットされる）ため、ホーム⇄ライブを行き来する
+      // （リロードを伴わない）2回目以降の訪問ではCurtainOverlay自体が再表示されず、
+      // BGMを差し替える機会が無いまま、直前にいたページ（ホーム）のBGMが鳴り続けて
+      // いた。初回（まだ幕を見ていない）はCurtainOverlay側の演出タイミングに
+      // 任せて何もしないが、2回目以降（既に見ている）はここで明示的に切り替える。
+      if (hasSeenCurtain()) playBgm("waiting");
     } else if (currentPhase === "closed" || currentPhase === null) {
       // closedはもちろん、購読が切れてliveそのものが取得できなくなった場合も
       // 「絶対に音が止まる」ことを優先し、念のため止めておく。

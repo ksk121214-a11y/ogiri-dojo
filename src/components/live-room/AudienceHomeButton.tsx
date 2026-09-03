@@ -22,6 +22,10 @@ export default function AudienceHomeButton() {
       ? myParticipant?.preferred_role === "player"
       : myParticipant?.role === "player";
   if (isPlayer) return null;
+  // 2026-09-03:「ライブ終了時にホームに戻るボタンが2個になる」不具合対策。
+  // ライブ終了(closed)画面自体に、既に中央寄せの大きな「ホームに戻る」ボタンが
+  // あるため、こちらの固定表示ボタンは終了画面では出さない。
+  if (live?.current_phase === "closed") return null;
 
   return (
     <Link
