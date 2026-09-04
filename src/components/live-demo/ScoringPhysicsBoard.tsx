@@ -253,6 +253,13 @@ export default function ScoringPhysicsBoard({
   // 二重に数えてしまい、maxBallsを超えてスケジュールしうる。スケジュールした時点で
   // 即座に加算する「予約込みの個数」を別に持つ。
   const scheduledCountRef = useRef(0);
+  // 2026-09-04:「空き位置探索を諦めて重ねて生成する」対策。ランダム位置＋
+  // 既存ボールとの距離チェック＋リトライ、という方式は「何回失敗したら
+  // 諦めるか」の閾値が必ず必要になり、閾値を超えると重ねて生成するしかなく
+  // なる。決定的なスポーンレーン方式（幅を「直径以上」離れたレーンに分割し、
+  // 生成するたびに次のレーンへ順送りする）に変更し、そもそも重なりうる
+  // 候補を選ばないようにする（リトライ自体が不要になる）。
+  const laneCursorRef = useRef(0);
   const [totalBalls, setTotalBalls] = useState(0);
   // "X / Y"表示のYも、ロジックと同じ固定値を見せる（propsのmaxBallsをそのまま
   // 表示すると、審査サイクル中に分母だけ動いて見える不整合になるため）。
@@ -561,6 +568,7 @@ export default function ScoringPhysicsBoard({
     // 次の回答のキュー・タイマーを前の回答から持ち越さない（安全なリセット）。
     nextSpawnAtRef.current = 0;
     scheduledCountRef.current = 0;
+    laneCursorRef.current = 0;
     // 2026-09-04:「予約済みボールを回答間で持ち越さない」対策。世代IDを進めて
     // おくことで、既に発行済み（キャンセルし損ねた場合も含む）のsetTimeout
     // コールバックが後から発火しても、古い世代だと分かって何もせず終了する
@@ -643,17 +651,10 @@ export default function ScoringPhysicsBoard({
     };
   }, [resolved, resolvedPopDelayMs, triggerPerfectEffect]);
 
-  // 自分自身をsetTimeoutの中から再帰的に呼ぶため、useCallbackの戻り値を直接
-  // 名指しで参照すると「宣言前にアクセスしている」エラーになる。refに常に
-  // 最新の関数を入れておき、再帰呼び出しはref経由で行う。
-  const trySpawnOneBallRef = useRef<(retriesLeft: number, generation: number) => void>(() => {});
-
-  // 実際に1個の玉を追加する（重なり回避のリトライ込み）。空いている位置が
-  // 見つからない間は即座に諦めて重ねるのではなく、スポーン領域が空くまで
-  // 少し遅延して再試行する（安全なレーン方式の代わりの簡易版）。
-  // generationは呼び出し（＝スケジュール）時点の世代を閉じ込めておき、実際に
-  // 発火した時点で世代がズレていれば（＝roundKeyが切り替わっていれば）何もしない。
-  const trySpawnOneBall = useCallback((retriesLeft: number, generation: number) => {
+  // 実際に1個の玉を追加する。generationは呼び出し（＝スケジュール）時点の
+  // 世代を閉じ込めておき、実際に発火した時点で世代がズレていれば
+  // （＝roundKeyが切り替わっていれば）何もしない。
+  const trySpawnOneBall = useCallback((generation: number) => {
     // 2026-09-04:「roundKey切替時に持ち越さない」対策その1。世代が変わっていれば
     // このコールバックはもう無効（古い回答のぶん）なので、何もせず終了する。
     if (generation !== generationRef.current) return;
@@ -671,49 +672,28 @@ export default function ScoringPhysicsBoard({
     const margin = currentLayout.ballRadius + 6;
     const minX = margin;
     const maxX = Math.max(margin, currentLayout.width - margin);
-    // 玉は常にこの付近（壁の少し上）から降ってくるため、重なり判定はこの
-    // スポーン地点を基準にした2次元距離で行う（下で参照するためxより先に決める）。
-    const spawnY = -currentLayout.ballRadius * 2 - Math.random() * 40;
-
-    // 2026-09-03:「既存ボールと重ならない候補位置を選ぶ」対策。
-    // 2026-09-04: X座標だけの比較だと、既に画面下の方まで落ちて実際には
-    // スポーン地点と重ならないボールまで「近い」と誤判定してしまう（逆に、
-    // 画面幅が狭い時にX同士は少し離れていてもY方向にはまだ重なっている、
-    // という見落としも起きうる）。スポーン地点(x, spawnY)から実際の
-    // 距離（2次元）が直径未満の玉が無いかで判定する。
-    const existingBalls = currentEngine.world.bodies
-      .filter((b) => b.circleRadius)
-      .map((b) => ({ x: b.position.x, y: b.position.y }));
     const minGap = currentLayout.ballRadius * 2; // 直径以上の距離
-    let x = minX + Math.random() * Math.max(0, maxX - minX);
-    let foundFreeSpot = existingBalls.length === 0;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const tooClose = existingBalls.some(
-        (b) => Math.hypot(b.x - x, b.y - spawnY) < minGap,
-      );
-      if (!tooClose) {
-        foundFreeSpot = true;
-        break;
-      }
-      x = minX + Math.random() * Math.max(0, maxX - minX);
-    }
-    if (!foundFreeSpot && retriesLeft > 0) {
-      // まだ空いていない：候補位置をそのまま採用せず、スポーン領域が空くまで
-      // 少し遅延して再試行する。
-      const retryId = setTimeout(
-        () => {
-          spawnTimeoutsRef.current.delete(retryId);
-          trySpawnOneBallRef.current(retriesLeft - 1, generation);
-        },
-        120 + Math.random() * 80,
-      );
-      spawnTimeoutsRef.current.add(retryId);
-      return;
-    }
-    // 出現位置は現在の壁とballRadiusの内側へ必ずclampする（念のための二重の安全策。
-    // リトライを使い切って諦めた場合もここでclampされる）。
-    x = Math.min(maxX, Math.max(minX, x));
-    const ball = Matter.Bodies.circle(x, spawnY, currentLayout.ballRadius, {
+
+    // 2026-09-04:「空き位置探索を諦めて重ねて生成する」対策。ランダム位置＋
+    // 既存ボールとの距離チェック＋リトライ方式は、リトライ回数の上限を
+    // 超えた瞬間に重ねて生成するしかなくなる欠陥があった。決定的なスポーン
+    // レーン方式に変更する：スポーン帯の幅を「直径以上」離れたレーンに
+    // 分割し、生成するたびに次のレーンへ順送りする。連続して生成される
+    // 玉は必ず別レーンになるため、重なり判定・リトライ待ちが一切不要になる
+    // （laneCursorRefはroundKeyが変わるたびに0へリセットされる）。
+    const usableWidth = Math.max(0, maxX - minX);
+    const laneCount = Math.max(1, Math.floor(usableWidth / minGap) + 1);
+    const laneIndex = laneCursorRef.current % laneCount;
+    laneCursorRef.current += 1;
+    const laneStep = laneCount > 1 ? usableWidth / (laneCount - 1) : 0;
+    const baseX = laneCount > 1 ? minX + laneIndex * laneStep : (minX + maxX) / 2;
+    // レーン中心ぴったりだと不自然なので、隣のレーンまでは届かない範囲
+    // （直径の1/4以内）で軽く揺らす。
+    const jitter = laneCount > 1 ? (Math.random() - 0.5) * minGap * 0.25 : 0;
+    const x = Math.min(maxX, Math.max(minX, baseX + jitter));
+    const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
+
+    const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
       restitution: 0.45,
       friction: 0.08,
       frictionAir: 0.003,
@@ -727,9 +707,6 @@ export default function ScoringPhysicsBoard({
     totalSpawnedRef.current += 1;
     setTotalBalls(totalSpawnedRef.current);
   }, []);
-  useEffect(() => {
-    trySpawnOneBallRef.current = trySpawnOneBall;
-  }, [trySpawnOneBall]);
 
   // 戻り値は「このイベントを既読(=二度と処理しない)にしてよいか」。
   // engine/layoutがまだ準備できていないタイミング(マウント直後、layoutのstate
@@ -777,7 +754,7 @@ export default function ScoringPhysicsBoard({
         const delay = spawnAt - now;
         const id = setTimeout(() => {
           spawnTimeoutsRef.current.delete(id);
-          trySpawnOneBall(4, generation);
+          trySpawnOneBall(generation);
         }, delay);
         spawnTimeoutsRef.current.add(id);
       }

@@ -561,7 +561,7 @@ function CapacityPanel({ live, onNotify }: { live: LiveRow; onNotify: Notify }) 
       onNotify(
         "success",
         groupCountChanged
-          ? "保存しました。組数を変更したので、必要であれば「（もう一度）ランダムに振り分ける」を押してください。"
+          ? "保存しました。組数を変更したため、このままでは開始できません。必ず「（もう一度）ランダムに振り分ける」を実行してください。"
           : "保存しました。",
       );
     } finally {
@@ -632,6 +632,13 @@ function ParticipantsPanel({
   const kickParticipant = useLiveHostStore((s) => s.kickParticipant);
   const unkickParticipant = useLiveHostStore((s) => s.unkickParticipant);
   const resyncEligibleJudgeCounts = useLiveHostStore((s) => s.resyncEligibleJudgeCounts);
+  const live = useLiveHostStore((s) => s.live);
+  const answers = useLiveHostStore((s) => s.answers);
+  // 2026-09-04:「採点中は分母再計算を無効化する」対応。DB側(resync_eligible_judge_counts)
+  // でも同じ基準で拒否されるが、押した瞬間にエラーを見せるより先にボタン自体を
+  // 無効化しておく方が分かりやすい。
+  const judgingBusy =
+    live?.current_phase === "answering" && answers.some((a) => a.revealed_at && !a.resolved);
 
   const [targetId, setTargetId] = useState("");
   const [message, setMessage] = useState("");
@@ -706,7 +713,7 @@ function ParticipantsPanel({
   // （このマイグレーション以前の分母のズレ等）が残っている場合の修復用ボタン。
   // 「最新状態を取得」（読み直すだけ）とは異なり、DBの値そのものを書き換える。
   const handleResync = async () => {
-    if (resyncing) return;
+    if (resyncing || judgingBusy) return;
     setResyncing(true);
     try {
       const result = await resyncEligibleJudgeCounts();
@@ -726,8 +733,13 @@ function ParticipantsPanel({
             {maxPlayers}人
           </p>
         )}
-        <AdminButton className="mt-2" disabled={resyncing} onClick={handleResync}>
-          {resyncing ? "再計算中…" : "審査人数の分母を再計算する"}
+        <AdminButton
+          className="mt-2"
+          disabled={resyncing || judgingBusy}
+          title={judgingBusy ? "採点中は再計算できません。今の回答への採点が終わってから実行してください。" : undefined}
+          onClick={handleResync}
+        >
+          {resyncing ? "再計算中…" : judgingBusy ? "採点中は再計算できません" : "審査人数の分母を再計算する"}
         </AdminButton>
         <ul className="mt-2 max-h-56 overflow-y-auto text-xs text-gray-700">
           {participants.map((p) => {
@@ -816,6 +828,7 @@ function GroupingPanel({
 }) {
   const hostProfiles = useLiveHostStore((s) => s.profiles);
   const topicBank = useLiveHostStore((s) => s.topicBank);
+  const live = useLiveHostStore((s) => s.live);
   const randomizeGroups = useLiveHostStore((s) => s.randomizeGroups);
   const setParticipantGroup = useLiveHostStore((s) => s.setParticipantGroup);
   const changeTopicAssignment = useLiveHostStore((s) => s.changeTopicAssignment);
@@ -825,6 +838,22 @@ function GroupingPanel({
   const [applyingTopicId, setApplyingTopicId] = useState<string | null>(null);
 
   const hasManualGrouping = participants.some((p) => p.group_id);
+  // 2026-09-04:「管理画面の組選択肢にはplanned_group_count以内の組だけを
+  // 表示する」対応。組数を減らした後、UIから旧・余剰組へ再度手動で割り当て
+  // られてしまうと、begin_gameの検証（planned_group_count以内の組にだけ
+  // 所属しているか）に引っかかって開始できなくなる。
+  const visibleGroups = groups
+    .filter((g) => g.group_order <= (live?.planned_group_count ?? groups.length))
+    .sort((a, b) => a.group_order - b.group_order);
+  // 現在の組数と食い違ったまま（旧・余剰組に所属したまま）の人がいれば、
+  // 開始前に必ず気づけるよう警告を出す（begin_game側でもDB検証済みだが、
+  // ここで先に案内できた方が親切）。
+  const hasOrphanedPlayer = participants.some(
+    (p) =>
+      p.preferred_role === "player" &&
+      p.group_id &&
+      !visibleGroups.some((g) => g.id === p.group_id),
+  );
 
   const handleRandomize = async () => {
     if (busy) return;
@@ -883,6 +912,11 @@ function GroupingPanel({
       <AdminButton variant="primary" disabled={busy} onClick={handleRandomize}>
         {busy ? "処理中…" : hasManualGrouping ? "もう一度ランダムに振り分ける" : "ランダムに振り分ける"}
       </AdminButton>
+      {hasOrphanedPlayer && (
+        <p className="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700">
+          組数変更前の組に残ったままの人がいます。このままではゲームを開始できません。上のボタンで再振り分けしてください。
+        </p>
+      )}
 
       <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-gray-700">
         {participants
@@ -900,7 +934,7 @@ function GroupingPanel({
                   className="rounded border border-gray-300 px-1 py-0.5 text-xs disabled:opacity-50"
                 >
                   <option value="">未割当</option>
-                  {groups.map((g) => (
+                  {visibleGroups.map((g) => (
                     <option key={g.id} value={g.id}>
                       組{g.group_order}
                     </option>
