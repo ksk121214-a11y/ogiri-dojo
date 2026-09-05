@@ -651,6 +651,11 @@ export default function ScoringPhysicsBoard({
     };
   }, [resolved, resolvedPopDelayMs, triggerPerfectEffect]);
 
+  // 自分自身をsetTimeoutの中から再帰的に呼ぶため、useCallbackの戻り値を直接
+  // 名指しで参照すると「宣言前にアクセスしている」エラーになる。refに常に
+  // 最新の関数を入れておき、再帰呼び出しはref経由で行う。
+  const trySpawnOneBallRef = useRef<(generation: number) => void>(() => {});
+
   // 実際に1個の玉を追加する。generationは呼び出し（＝スケジュール）時点の
   // 世代を閉じ込めておき、実際に発火した時点で世代がズレていれば
   // （＝roundKeyが切り替わっていれば）何もしない。
@@ -673,27 +678,59 @@ export default function ScoringPhysicsBoard({
     const minX = margin;
     const maxX = Math.max(margin, currentLayout.width - margin);
     const minGap = currentLayout.ballRadius * 2; // 直径以上の距離
-
-    // 2026-09-04:「空き位置探索を諦めて重ねて生成する」対策。ランダム位置＋
-    // 既存ボールとの距離チェック＋リトライ方式は、リトライ回数の上限を
-    // 超えた瞬間に重ねて生成するしかなくなる欠陥があった。決定的なスポーン
-    // レーン方式に変更する：スポーン帯の幅を「直径以上」離れたレーンに
-    // 分割し、生成するたびに次のレーンへ順送りする。連続して生成される
-    // 玉は必ず別レーンになるため、重なり判定・リトライ待ちが一切不要になる
-    // （laneCursorRefはroundKeyが変わるたびに0へリセットされる）。
     const usableWidth = Math.max(0, maxX - minX);
     const laneCount = Math.max(1, Math.floor(usableWidth / minGap) + 1);
-    const laneIndex = laneCursorRef.current % laneCount;
-    laneCursorRef.current += 1;
     const laneStep = laneCount > 1 ? usableWidth / (laneCount - 1) : 0;
-    const baseX = laneCount > 1 ? minX + laneIndex * laneStep : (minX + maxX) / 2;
-    // レーン中心ぴったりだと不自然なので、隣のレーンまでは届かない範囲
-    // （直径の1/4以内）で軽く揺らす。
-    const jitter = laneCount > 1 ? (Math.random() - 0.5) * minGap * 0.25 : 0;
-    const x = Math.min(maxX, Math.max(minX, baseX + jitter));
-    const y = -currentLayout.ballRadius * 2 - Math.random() * 40;
+    const laneCenterX = (i: number) => (laneCount > 1 ? minX + i * laneStep : (minX + maxX) / 2);
+    const spawnY = -currentLayout.ballRadius * 2 - Math.random() * 40;
 
-    const ball = Matter.Bodies.circle(x, y, currentLayout.ballRadius, {
+    // 2026-09-05:「レーン数を超えると同じレーンを再利用し、そのレーンの
+    // 既存ボールがまだ直径分落下していない場合に重なる」不具合対策。
+    // 決定的なレーン割り当てを第一候補にしつつも、そのレーン（＋念のため
+    // 他の全レーン）に既存ボールが直径未満の距離まで来ていないかを実際に
+    // 確認してから採用する。既存ボールは常にスポーン地点(spawnY)付近に
+    // いる時だけ危険なので、判定はスポーン地点からの2次元距離で行う。
+    const existingBalls = currentEngine.world.bodies
+      .filter((b) => b.circleRadius)
+      .map((b) => ({ x: b.position.x, y: b.position.y }));
+
+    let chosenX: number | null = null;
+    let chosenLane = laneCursorRef.current % laneCount;
+    for (let attempt = 0; attempt < laneCount; attempt++) {
+      const candidateLane = (laneCursorRef.current + attempt) % laneCount;
+      const jitter = laneCount > 1 ? (Math.random() - 0.5) * minGap * 0.25 : 0;
+      const candidateX = Math.min(maxX, Math.max(minX, laneCenterX(candidateLane) + jitter));
+      const tooClose = existingBalls.some(
+        (b) => Math.hypot(b.x - candidateX, b.y - spawnY) < minGap,
+      );
+      if (!tooClose) {
+        chosenX = candidateX;
+        chosenLane = candidateLane;
+        break;
+      }
+    }
+
+    if (chosenX === null) {
+      // 2026-09-05: 全レーンがまだ埋まっている（＝生成が短時間に集中し、
+      // 前の玉がまだ落下しきっていない）。重ねて生成せず、世代・
+      // perfectTriggeredのガードを保ったまま少し待って再試行する
+      // （スポーン領域が空くまで延期する方式。無限に残り続けることはない：
+      // roundKey切替でgenerationがズレる、または弾け演出でperfectTriggered
+      // になった時点で次の発火は即座に何もせず終了する）。
+      const retryId = setTimeout(
+        () => {
+          spawnTimeoutsRef.current.delete(retryId);
+          trySpawnOneBallRef.current(generation);
+        },
+        50 + Math.random() * 40,
+      );
+      spawnTimeoutsRef.current.add(retryId);
+      return;
+    }
+
+    laneCursorRef.current = chosenLane + 1;
+
+    const ball = Matter.Bodies.circle(chosenX, spawnY, currentLayout.ballRadius, {
       restitution: 0.45,
       friction: 0.08,
       frictionAir: 0.003,
@@ -707,6 +744,9 @@ export default function ScoringPhysicsBoard({
     totalSpawnedRef.current += 1;
     setTotalBalls(totalSpawnedRef.current);
   }, []);
+  useEffect(() => {
+    trySpawnOneBallRef.current = trySpawnOneBall;
+  }, [trySpawnOneBall]);
 
   // 戻り値は「このイベントを既読(=二度と処理しない)にしてよいか」。
   // engine/layoutがまだ準備できていないタイミング(マウント直後、layoutのstate

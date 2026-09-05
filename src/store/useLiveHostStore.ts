@@ -1154,13 +1154,23 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
 
   // 参加者一覧の組選択プルダウンから呼ぶ、個別の手動組変更。即時保存。
   setParticipantGroup: async (participantId, groupId) => {
-    const { error } = await supabase
-      .from("participants")
-      .update({ group_id: groupId, role: groupId ? "player" : "audience" })
-      .eq("id", participantId);
+    // 2026-09-05:「参加者とグループを更新するRPC側にも
+    // participant.live_idとgroup.live_idが同じという不変条件を追加する」対応。
+    // 従来はここで直接participantsをupdateしており、DB側には別ライブの
+    // group_idを弾く手段が無かった（UIは現在のライブのgroupsしか選択肢に
+    // 出さないため実害は無いが、多層防御として専用RPCに切り出す）。
+    const { data, error } = await supabase
+      .rpc("set_participant_group", { p_participant_id: participantId, p_group_id: groupId })
+      .single();
     if (error) {
       set({ error: error.message });
       return { ok: false, reason: error.message };
+    }
+    const result = data as { ok: boolean; reason: string | null };
+    if (!result.ok) {
+      const message = result.reason ?? "組の変更に失敗しました";
+      set({ error: message });
+      return { ok: false, reason: message };
     }
     await logAdminAction({
       action: "participant_group_changed",
@@ -1338,10 +1348,19 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .rpc("resync_eligible_judge_counts", { p_live_id: live.id })
       .single();
     if (error) return { ok: false, reason: error.message };
-    const result = data as { ok: boolean; updated_turns: number };
+    // 2026-09-05:「resync_eligible_judge_countsのreasonをフロントが処理して
+    // いない」対応。DB関数は(ok, reason, updated_turns)を返す（0055で
+    // reasonが追加された）のに、ここでは受け取っておらず、拒否時にも
+    // 「N件のターンを更新しました」という成功寄りの文言を返してしまって
+    // いた。ok=falseの場合はDBのreasonをそのまま返し、参加者一覧の
+    // 再取得（refresh）も成功時だけ行う。
+    const result = data as { ok: boolean; reason: string | null; updated_turns: number };
+    if (!result.ok) {
+      return { ok: false, reason: result.reason ?? "再計算に失敗しました" };
+    }
     const childrenResult = await fetchLiveChildren(live.id);
     if (childrenResult.ok) set({ turns: childrenResult.data.turns });
-    return { ok: result.ok, reason: `${result.updated_turns}件のターンを更新しました` };
+    return { ok: true, reason: `${result.updated_turns}件のターンを更新しました` };
   },
 
   // 受付中（interlude/opening）に、集まり具合を見ながら組数・最大参加人数を
