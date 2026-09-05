@@ -1,5 +1,8 @@
 -- 0055適用後の再レビューで見つかった残存問題の修正。
--- 0055は既に本番へ適用済みのため書き換えず、ここで作り直す。
+-- 0055は既に本番へ適用済みの可能性があるため書き換えず、ここで作り直す。
+-- 0056自体はまだ未適用のため、このファイルは直接改訂している
+-- （0055→0056の順で適用する前提。0055が未適用の環境では、先に0055を
+-- 適用してからこの0056を適用すること。詳細は末尾の説明を参照）。
 
 -- ============================================================
 -- 1) 退場者の除外を「今後の採点対象・eligible_judge_count」だけに戻す
@@ -97,19 +100,60 @@ grant execute on function public.apply_live_rank_rewards(uuid) to authenticated;
 revoke execute on function public.apply_live_rank_rewards(uuid) from public;
 revoke execute on function public.apply_live_rank_rewards(uuid) from anon;
 
--- _compute_rank_reward_mismatches()も同じ対象者集合（role='player'全員）に
--- 揃える。加えて、0055時点で実際に運用されていた場合に備え、「recordedに
--- 行が無い（＝0055の実行中、退場者として丸ごと付与対象から除外されて
--- point_historyに一行も無い）」ケースも検出できるよう、内部結合ではなく
--- 完全外部結合にする（内部結合のままだと、付与自体が丸ごと漏れていた人を
--- 検出できない＝監査が不完全になるため）。
+-- ============================================================
+-- 1b) 監査・補正の「バージョン管理」
+-- ============================================================
+-- 背景：0055時点のロジック（kicked_at除外あり・INNER JOIN）で一度
+-- fix_rank_reward_mismatches()を実行済みのライブは、rank_reward_corrections
+-- に行ができ、audit_rank_reward_mismatches()から丸ごと除外されていた。
+-- 0056で検出できるようになった問題（退場者の付与漏れ等）がそのライブに
+-- 残っていても、そのままでは二度と監査されない。
+-- 既存の補正記録は削除・上書きせず（監査証跡として残す）、
+-- correction_versionを追加して複合主キーにする。「このライブは
+-- このバージョンのロジックで補正済み」という記録を積み増せるようにし、
+-- audit側は「現在のバージョン以上で補正済み」の場合だけ除外する
+-- （＝新しいバージョンが出るたびに、まだそのバージョンで補正していない
+-- ライブは自動的に再監査の対象に戻る）。
+alter table public.rank_reward_corrections
+  add column if not exists correction_version int not null default 1;
+
+alter table public.rank_reward_corrections drop constraint if exists rank_reward_corrections_pkey;
+alter table public.rank_reward_corrections add primary key (live_id, correction_version);
+
+create or replace function public._rank_reward_correction_version()
+returns int
+language sql
+immutable
+as $$ select 2 $$;
+
+revoke execute on function public._rank_reward_correction_version() from public;
+revoke execute on function public._rank_reward_correction_version() from anon;
+revoke execute on function public._rank_reward_correction_version() from authenticated;
+
+-- ------------------------------------------------------------
+-- 1c) _compute_rank_reward_mismatches：対象者集合の統一・完全外部結合・
+--     recorded_exists/correct_existsの明示化
+-- ------------------------------------------------------------
+-- apply_live_rank_rewardsと同じ対象者集合（role='player'全員）に揃える。
+-- 結合をINNER JOINからFULL OUTER JOINに変更し、0055期間中に丸ごと付与が
+-- 漏れていた退場者も監査で検出できるようにする。加えて「recorded_gain=0」
+-- という値からの推測ではなく、recorded_exists/correct_existsを明示的な
+-- boolean列として返す（付与漏れ判定・live_count補正の判断に使う）。
+-- 戻り値の列構成が0055から変わるため、create or replaceの前に一度dropする
+-- （PostgreSQLはRETURNS TABLEの列構成が変わるcreate or replaceを許さない）。
+drop function if exists public.fix_rank_reward_mismatches(uuid);
+drop function if exists public.audit_rank_reward_mismatches();
+drop function if exists public._compute_rank_reward_mismatches();
+
 create or replace function public._compute_rank_reward_mismatches()
 returns table (
   out_live_id uuid,
   out_sequence_number int,
   out_user_id uuid,
+  out_recorded_exists boolean,
   out_recorded_gain int,
   out_recorded_rank int,
+  out_correct_exists boolean,
   out_correct_gain int,
   out_correct_rank int,
   out_gain_delta int
@@ -156,6 +200,8 @@ begin
     from ranked rk
   ),
   recorded as (
+    -- 「訂正」の履歴行自体は元の付与記録ではないので比較対象から除く
+    -- （ラベルは0056でcause非依存の文言に変えたため「訂正」で判定する）。
     select
       ph.live_id as rd_live_id,
       ph.user_id as rd_user_id,
@@ -174,8 +220,10 @@ begin
     coalesce(r.rd_live_id, c.cr_live_id),
     tl3.t_sequence_number,
     coalesce(r.rd_user_id, c.cr_user_id),
+    (r.rd_user_id is not null),
     coalesce(r.rd_gain, 0),
     r.rd_rank,
+    (c.cr_user_id is not null),
     coalesce(c.cr_gain, 0),
     c.cr_rank,
     coalesce(c.cr_gain, 0) - coalesce(r.rd_gain, 0)
@@ -190,6 +238,130 @@ $$;
 revoke execute on function public._compute_rank_reward_mismatches() from public;
 revoke execute on function public._compute_rank_reward_mismatches() from anon;
 revoke execute on function public._compute_rank_reward_mismatches() from authenticated;
+
+-- 人が確認するための一覧。「現在の補正バージョン以上」で既に補正済みの
+-- ライブだけ除外する（古いバージョンでしか補正していないライブは、新しい
+-- バージョンのロジックで再監査できるよう、ここには残る＝再監査される）。
+create or replace function public.audit_rank_reward_mismatches()
+returns table (
+  out_live_id uuid,
+  out_sequence_number int,
+  out_user_id uuid,
+  out_recorded_exists boolean,
+  out_recorded_gain int,
+  out_recorded_rank int,
+  out_correct_exists boolean,
+  out_correct_gain int,
+  out_correct_rank int,
+  out_gain_delta int
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not is_host() then
+    raise exception 'not authorized';
+  end if;
+
+  return query
+  select m.*
+  from public._compute_rank_reward_mismatches() m
+  where not exists (
+    select 1 from public.rank_reward_corrections rc
+    where rc.live_id = m.out_live_id
+      and rc.correction_version >= public._rank_reward_correction_version()
+  );
+end;
+$$;
+
+grant execute on function public.audit_rank_reward_mismatches() to authenticated;
+revoke execute on function public.audit_rank_reward_mismatches() from public;
+revoke execute on function public.audit_rank_reward_mismatches() from anon;
+
+-- 監査で見つかった差分だけをprofilesへ反映し、point_historyに訂正の行を残す。
+-- 呼び方：
+--   select * from public.audit_rank_reward_mismatches(); -- まず一覧を確認
+--   select * from public.fix_rank_reward_mismatches('対象のlive_id');
+create or replace function public.fix_rank_reward_mismatches(p_live_id uuid)
+returns table (out_user_id uuid, out_delta int, out_live_count_delta int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+  v_version int := public._rank_reward_correction_version();
+  v_live_count_delta int;
+begin
+  if not is_host() then
+    raise exception 'not authorized';
+  end if;
+
+  -- 2026-09-05:「同じ訂正を二重実行できない」対応は維持しつつ、
+  -- 「0055で既に訂正済みのライブを0056の新しい条件で再監査できない」を
+  -- 解消する。(live_id, correction_version)の複合主キーにより、
+  -- 同じライブ・同じバージョンでの2回目以降は主キー違反で即座に失敗する
+  -- （この呼び出し全体がロールバックされる）が、まだこのバージョンで
+  -- 補正していないライブ（古いバージョンの行だけがある場合を含む）は
+  -- 新しい行として挿入でき、既存の古い版の記録は削除・上書きしない。
+  insert into public.rank_reward_corrections (live_id, corrected_by, correction_version)
+  values (p_live_id, auth.uid(), v_version);
+
+  for rec in
+    select * from public._compute_rank_reward_mismatches() where out_live_id = p_live_id
+  loop
+    if rec.out_gain_delta = 0 then
+      continue;
+    end if;
+
+    -- 2026-09-05:「付与漏れ訂正時にlive_countが直らない」対応。
+    -- gain=0からの推測ではなく、recorded_exists/correct_existsを明示的に
+    -- 見て判定する：
+    --   元の報酬行が無く正しい報酬がある(付与漏れ) → live_count +1
+    --   元の報酬行はあるが正しくは対象外(余分な付与) → live_count -1
+    --   両方に行がある通常の順位・金額の訂正         → live_countは変えない
+    v_live_count_delta := 0;
+    if not rec.out_recorded_exists and rec.out_correct_exists then
+      v_live_count_delta := 1;
+    elsif rec.out_recorded_exists and not rec.out_correct_exists then
+      v_live_count_delta := -1;
+    end if;
+
+    update public.profiles set
+      mastery_meter = mastery_meter + rec.out_gain_delta,
+      total_points = total_points + rec.out_gain_delta,
+      points_balance = points_balance + rec.out_gain_delta,
+      live_count = greatest(0, live_count + v_live_count_delta),
+      award_count_first = award_count_first
+        - (case when rec.out_recorded_rank = 1 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 1 then 1 else 0 end),
+      award_count_second = award_count_second
+        - (case when rec.out_recorded_rank = 2 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 2 then 1 else 0 end),
+      award_count_third = award_count_third
+        - (case when rec.out_recorded_rank = 3 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 3 then 1 else 0 end)
+    where id = rec.out_user_id;
+
+    -- 2026-09-05:「訂正履歴のラベルが常に『同点処理の誤り』固定になっている」
+    -- 対応。付与漏れの訂正にも使うため、原因を限定しない文言にする。
+    insert into public.point_history (user_id, live_id, points, mastery, label)
+    select rec.out_user_id, p_live_id, rec.out_gain_delta, rec.out_gain_delta,
+      '第' || l.sequence_number || '回ライブ ライブ報酬訂正'
+    from public.lives l where l.id = p_live_id;
+
+    out_user_id := rec.out_user_id;
+    out_delta := rec.out_gain_delta;
+    out_live_count_delta := v_live_count_delta;
+    return next;
+  end loop;
+end;
+$$;
+
+grant execute on function public.fix_rank_reward_mismatches(uuid) to authenticated;
+revoke execute on function public.fix_rank_reward_mismatches(uuid) from public;
+revoke execute on function public.fix_rank_reward_mismatches(uuid) from anon;
 
 -- ============================================================
 -- 2) begin_gameのグループ整合性チェックにlive_id一致を追加する
@@ -334,10 +506,8 @@ revoke execute on function public.begin_game(uuid) from anon;
 -- ============================================================
 -- 3) 参加者の組変更にも「participant.live_idとgroup.live_idが同じ」不変条件を追加する
 -- ============================================================
--- 従来は管理画面から直接participantsをupdateしており（UIは常に現在のライブの
--- groupsしか選択肢に出さないため実害は無いが）、DB側では別ライブのgroup_idを
--- 弾く手段が無かった。専用のSECURITY DEFINER関数に切り出し、group_idが
--- 指定されたライブと同じライブのgroupsに属するかを必ず検証する。
+-- 専用のSECURITY DEFINER関数に切り出し、group_idが指定されたライブと
+-- 同じライブのgroupsに属するかを必ず検証する。
 create or replace function public.set_participant_group(p_participant_id uuid, p_group_id uuid)
 returns table (ok boolean, reason text)
 language plpgsql
@@ -382,3 +552,40 @@ $$;
 grant execute on function public.set_participant_group(uuid, uuid) to authenticated;
 revoke execute on function public.set_participant_group(uuid, uuid) from public;
 revoke execute on function public.set_participant_group(uuid, uuid) from anon;
+
+-- ============================================================
+-- 4) DBレベルでparticipants.live_id = groups.live_idを保証するトリガー
+-- ============================================================
+-- set_participant_group RPCは同一ライブを検証しているが、管理者ロールの
+-- participants直接UPDATE権限自体は残っている（0006由来）。古いクライアント・
+-- 直接API経由の更新であっても別ライブのgroup_idを保存できないよう、
+-- テーブル自体にBEFORE INSERT/UPDATEトリガーで不変条件を強制する。
+-- これによりRPCを経由しないどんな書き込み経路でも、この不変条件だけは
+-- 常に守られる（最後の砦）。
+create or replace function public.enforce_participant_group_live_match()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_group_live_id uuid;
+begin
+  if new.group_id is not null then
+    select live_id into v_group_live_id from public.groups where id = new.group_id;
+    if v_group_live_id is null then
+      raise exception 'GROUP_NOT_FOUND';
+    end if;
+    if v_group_live_id <> new.live_id then
+      raise exception 'GROUP_LIVE_MISMATCH';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists participants_group_live_match on public.participants;
+create trigger participants_group_live_match
+  before insert or update of live_id, group_id on public.participants
+  for each row
+  execute function public.enforce_participant_group_live_match();
