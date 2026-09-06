@@ -4,6 +4,15 @@
 -- （0055→0056の順で適用する前提。0055が未適用の環境では、先に0055を
 -- 適用してからこの0056を適用すること）。
 
+-- 2026-09-06：本ファイルは複数の安全確認(do $$ ... raise exception $$)を
+-- 含む。個々のSQL文はデフォルトで自動コミットされるため、これらの確認を
+-- 単体で置いただけでは「確認より前の変更（関数の作り直し等）は既に確定した
+-- のに、確認で例外が飛んで残りが適用されない」という中途半端な状態になり
+-- うることを実際に確認した。begin/commitで全体を1つのトランザクションに
+-- まとめ、途中のどの安全確認で止まっても、それより前の変更も含めて
+-- 何も反映されない（全部成功するか、全く反映されないかのどちらか）ようにする。
+begin;
+
 -- ============================================================
 -- 0) 安全確認：rank_reward_correctionsに既存データが無いことを機械的に確認する
 -- ============================================================
@@ -227,7 +236,6 @@ begin
     select
       rk.rk_live_id as cr_live_id,
       rk.rk_user_id as cr_user_id,
-      rk.rk_total_score as cr_total_score,
       10 + rk.rk_total_score
         + (case rk.rk_rnk when 1 then 100 when 2 then 60 when 3 then 30 else 0 end) as cr_gain,
       case when rk.rk_rnk <= 3 then rk.rk_rnk else null end as cr_rank_tier
@@ -245,23 +253,39 @@ begin
     where ph.live_id in (select tl2.t_live_id from target_lives tl2)
     group by ph.live_id, ph.user_id
   ),
-  -- 現在反映されている順位を、金額の合計から逆算する
-  -- （bonus = 合計 - 参加10pt - 得点。total_scoreは0055/0056以前から
-  -- 変わらないcorrectの値を使う。何度訂正が重なっていても、金額の差分と
-  -- 受賞回数の差分は必ず連動させているため、この逆算は常に正しい）。
+  -- 2026-09-06:「correct側に存在しないユーザーの元順位を復元できない」対応。
+  -- 以前は「合計金額 - 参加10pt - 得点」から順位を逆算していたが、correctに
+  -- 存在しないユーザー（もう採点対象外＝total_scoreの基準が無い）は必ず
+  -- NULLになり、award_countを取り消せなかった。
+  -- 代わりに「そのlive_id・user_idについて最後に書き込まれたpoint_history
+  -- 行のラベル」から直接、現在反映されている順位を読み取る方式にする。
+  -- apply_live_rank_rewards（元の付与）・fix_rank_reward_mismatches（本関数の
+  -- 訂正、下で修正）のどちらも、その時点で確定した順位を必ずラベルに
+  -- 書き込むようにするため、最新の1行のラベルは常に「今実際にaward_countへ
+  -- 反映されている順位」と一致する。correctの有無・金額の逆算に依存しない
+  -- ため、どちらのケースでも取りこぼさない。
+  recorded_latest_label as (
+    select distinct on (ph.live_id, ph.user_id)
+      ph.live_id as rl_live_id,
+      ph.user_id as rl_user_id,
+      case
+        when ph.label like '%（1位）%' then 1
+        when ph.label like '%（2位）%' then 2
+        when ph.label like '%（3位）%' then 3
+        else null
+      end as rl_rank
+    from public.point_history ph
+    where ph.live_id in (select tl4.t_live_id from target_lives tl4)
+    order by ph.live_id, ph.user_id, ph.created_at desc, ph.id desc
+  ),
   recorded_with_rank as (
     select
       r.rd_live_id,
       r.rd_user_id,
       r.rd_total,
-      case
-        when r.rd_total - 10 - c.cr_total_score = 100 then 1
-        when r.rd_total - 10 - c.cr_total_score = 60 then 2
-        when r.rd_total - 10 - c.cr_total_score = 30 then 3
-        else null
-      end as rd_rank
+      rl.rl_rank as rd_rank
     from recorded r
-    left join correct c on c.cr_live_id = r.rd_live_id and c.cr_user_id = r.rd_user_id
+    left join recorded_latest_label rl on rl.rl_live_id = r.rd_live_id and rl.rl_user_id = r.rd_user_id
   )
   select
     coalesce(rr.rd_live_id, c.cr_live_id),
@@ -390,9 +414,17 @@ begin
 
     -- 2026-09-06:「訂正履歴のラベルが原因を限定した文言になっている」対応。
     -- 付与漏れ・順位訂正のどちらにも使うため、原因を限定しない文言にする。
+    -- 加えて「correct側に存在しないユーザーの元順位を復元できない」対応の
+    -- 一環として、この訂正の結果どの順位になったか(out_correct_rank)を
+    -- 必ずラベルに書き込む（1〜3位以外・対象外ならラベルに順位を付けない）。
+    -- これにより、次にこの関数が呼ばれた時、_compute_rank_reward_mismatches
+    -- は「そのlive_id・user_idの最新のラベル」を見るだけで、correctに
+    -- このユーザーが存在するかどうかに関わらず、現在反映されている順位を
+    -- 正しく読み取れる。
     insert into public.point_history (user_id, live_id, points, mastery, label)
     select rec.out_user_id, p_live_id, rec.out_gain_delta, rec.out_gain_delta,
       '第' || l.sequence_number || '回ライブ ライブ報酬訂正'
+        || (case rec.out_correct_rank when 1 then '（1位）' when 2 then '（2位）' when 3 then '（3位）' else '' end)
     from public.lives l where l.id = p_live_id;
 
     insert into public.rank_reward_corrections (live_id, user_id, corrected_by, points_delta, live_count_delta)
@@ -601,38 +633,45 @@ revoke execute on function public.set_participant_group(uuid, uuid) from public;
 revoke execute on function public.set_participant_group(uuid, uuid) from anon;
 
 -- ============================================================
--- 4) DBレベルでparticipants.live_id = groups.live_idを保証するトリガー
+-- 4) DBレベルでparticipants.live_id = groups.live_idを複合外部キーで保証する
 -- ============================================================
--- set_participant_group RPCは同一ライブを検証しているが、管理者ロールの
--- participants直接UPDATE権限自体は残っている（0006由来）。古いクライアント・
--- 直接API経由の更新であっても別ライブのgroup_idを保存できないよう、
--- テーブル自体にBEFORE INSERT/UPDATEトリガーで不変条件を強制する。
--- これによりRPCを経由しないどんな書き込み経路でも、この不変条件だけは
--- 常に守られる（最後の砦）。
-create or replace function public.enforce_participant_group_live_match()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+-- 背景：カスタムトリガー(BEFORE INSERT/UPDATE ON participants)は
+-- participants側の変更しか検査できず、groups.live_idを後から変更する
+-- 経路（万一そのような更新が起きた場合）は防げない。また、
+-- 既存の不整合行があるかどうかも検査していなかった。
+-- 複合外部キーpublic.participants(group_id, live_id)
+--   references public.groups(id, live_id)
+-- にすれば、参照側(participants)・被参照側(groups)どちらの変更でも
+-- PostgreSQL自身が不変条件を強制する（groups側のid/live_idを更新して
+-- 既存の参照と矛盾する状態になる操作は、既定のNO ACTIONにより自動的に
+-- 拒否される）。group_idがnullの行（観客・未割当）は複合外部キーの
+-- 対象外になる（片方でもnullなら制約は評価されないのがSQL標準の挙動）。
+--
+-- 複合外部キーを追加するには、参照先groups(id, live_id)がUNIQUEである
+-- 必要がある（idだけは既にprimary keyだが、複合キーとしての一意性は
+-- 別途必要）。追加する前に、既存データに不整合（別ライブのgroup_idを
+-- 参照している行）が無いことを機械的に確認し、あれば自動修復せず
+-- ここで例外を投げて安全に停止する。
+do $$
 declare
-  v_group_live_id uuid;
+  v_bad_count int;
 begin
-  if new.group_id is not null then
-    select live_id into v_group_live_id from public.groups where id = new.group_id;
-    if v_group_live_id is null then
-      raise exception 'GROUP_NOT_FOUND';
-    end if;
-    if v_group_live_id <> new.live_id then
-      raise exception 'GROUP_LIVE_MISMATCH';
-    end if;
+  select count(*) into v_bad_count
+  from public.participants p
+  where p.group_id is not null
+    and not exists (
+      select 1 from public.groups g where g.id = p.group_id and g.live_id = p.live_id
+    );
+  if v_bad_count > 0 then
+    raise exception 'Found % participants row(s) whose group_id belongs to a different live_id. Fix this data manually before adding the composite foreign key.', v_bad_count;
   end if;
-  return new;
-end;
-$$;
+end $$;
 
-drop trigger if exists participants_group_live_match on public.participants;
-create trigger participants_group_live_match
-  before insert or update of live_id, group_id on public.participants
-  for each row
-  execute function public.enforce_participant_group_live_match();
+alter table public.groups
+  add constraint groups_id_live_id_key unique (id, live_id);
+
+alter table public.participants
+  add constraint participants_group_live_fkey
+  foreign key (group_id, live_id) references public.groups (id, live_id);
+
+commit;
