@@ -65,6 +65,11 @@ export default function AudienceAnsweringView() {
   const [seatScores, setSeatScores] = useState<Record<string, number>>({});
   const prevActiveIdRef = useRef<string | null>(null);
   const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // 2026-09-06:「採点を連打・同時押しするとDBの生エラーが赤字表示される」対応。
+  // ストア側のmyScoreによるガードはReactの再描画（ボタンのdisabled反映）を待つため、
+  // 同じ回答に対する追加クリックを「最初の1回を押した瞬間」からもう一段階早く止める
+  // ためのガードをここに持つ（回答ID単位。次の回答に切り替わればリセットされる）。
+  const submittingAnswerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const prevId = prevActiveIdRef.current;
@@ -181,12 +186,27 @@ export default function AudienceAnsweringView() {
   const handleScore = async (points: 0 | 1 | 2 | 3) => {
     if (!displayedAnswer) return;
     const answerId = displayedAnswer.id;
-    const result = await submitMyScore(points);
-    setScoreError(
-      result.ok
-        ? null
-        : { answerId, message: result.reason ?? "採点できませんでした（時間切れの可能性があります）" },
-    );
+    // 2026-09-06:「採点を連打・同時押しするとDBの生エラーが赤字表示される」対応。
+    // ScoreButtons側のdisabled(myScore/resolvedベース)はReactの再描画を待って
+    // 反映されるため、その反映が間に合わない一瞬の間に追加クリックが素通りしうる。
+    // 最初の1回を押した瞬間に同期的にガードを立て、同じ回答への追加クリックは
+    // ストアへの問い合わせより前にここで止める。
+    if (submittingAnswerIdRef.current === answerId) return;
+    submittingAnswerIdRef.current = answerId;
+    try {
+      const result = await submitMyScore(points);
+      // silent:trueの想定内の失敗（二重押し・採点済み・締切直後・確定直後・
+      // 一意制約違反やRLS拒否）は何も表示しない。表示するのは、ストア側が
+      // 本当に予期しない失敗と判断した場合の一般的な日本語文言だけ
+      // （生のSupabase/PostgreSQLのerror.messageはここには来ない）。
+      if (result.ok) {
+        setScoreError(null);
+      } else if (!result.silent) {
+        setScoreError({ answerId, message: result.reason ?? "採点を送信できませんでした" });
+      }
+    } finally {
+      if (submittingAnswerIdRef.current === answerId) submittingAnswerIdRef.current = null;
+    }
   };
 
   return (

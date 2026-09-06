@@ -493,7 +493,11 @@ export async function preloadBgmOne(name: BgmName): Promise<{ ok: boolean }> {
   return { ok: playback.buffer !== null };
 }
 
-function playSfxFallback(name: SfxName) {
+// 2026-09-06:「お題発表の拍手が、遅れて画面を開くと先頭から再生されて終了時刻がずれる」
+// 不具合対応。offsetSec（秒）を指定すると、音源の途中（経過分）から再生を始められる。
+// 呼び出し側(TopicRevealView.tsx)がphase_deadline基準で「本来ならもう何秒経過しているべきか」
+// を計算し、その分をoffsetSecとして渡すことで、再生開始が遅れても本来の終了時刻に揃う。
+function playSfxFallback(name: SfxName, offsetSec = 0) {
   if (typeof window === "undefined") return;
   let base = sfxFallbackCache.get(name);
   if (!base) {
@@ -503,6 +507,12 @@ function playSfxFallback(name: SfxName) {
   }
   const node = base.cloneNode(true) as HTMLAudioElement;
   node.volume = SE_VOLUME;
+  if (offsetSec > 0) {
+    // durationが未取得（メタデータ読み込み前）の場合はそのまま先頭から。
+    // 致命的ではないため、取得できた場合だけ安全な範囲にクランプして反映する。
+    const duration = node.duration;
+    node.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(offsetSec, duration) : offsetSec;
+  }
   node.play().catch(() => {
     // 音源ファイル未配置・自動再生制限などで失敗しても無視する（致命的ではない）。
   });
@@ -510,8 +520,12 @@ function playSfxFallback(name: SfxName) {
 
 // ボタンを押した直後に呼ぶ想定。Supabase送信やawaitより前に呼ぶこと
 // （呼び出し側のルールは各コンポーネントのonClick実装を参照）。
-export function playSfx(name: SfxName): void {
+// opts.offsetSecを指定すると、音源の途中（経過分）から再生を始める
+// （playSfxFallbackのコメント参照。省略時は0＝常に先頭からで、既存の呼び出し箇所
+// 20箇所以上には一切影響しない）。
+export function playSfx(name: SfxName, opts?: { offsetSec?: number }): void {
   if (typeof window === "undefined" || !state.seEnabled) return;
+  const offsetSec = Math.max(0, opts?.offsetSec ?? 0);
 
   // SEはユーザー操作（クリック）の文脈で呼ばれるため、この呼び出し自体をアンロックの
   // 契機として使う。ここでresumeを試みても間に合わない場合はフォールバック再生に回る。
@@ -523,7 +537,7 @@ export function playSfx(name: SfxName): void {
   const buffer = sfxBuffers.get(name);
   if (!buffer || !ctx || ctx.state !== "running") {
     // まだデコード完了していない、またはAudioContextが使えない/アンロック前 → フォールバック。
-    playSfxFallback(name);
+    playSfxFallback(name, offsetSec);
     loadSfx(name); // 次回以降のためにバックグラウンドで読み込みを進めておく
     return;
   }
@@ -534,10 +548,13 @@ export function playSfx(name: SfxName): void {
     const gain = ctx.createGain();
     gain.gain.value = SE_VOLUME;
     source.connect(gain).connect(ctx.destination);
-    source.start(0);
+    // AudioBufferSourceNode.start(when, offset)のoffset（バッファ内の再生開始位置、秒）。
+    // buffer.durationを超える値を渡すと例外になるため安全にクランプする。
+    const safeOffset = buffer.duration > 0 ? Math.min(offsetSec, buffer.duration) : 0;
+    source.start(0, safeOffset);
   } catch (err) {
     console.warn(`[audio] SE再生に失敗（フォールバックへ切替）: ${name}`, err);
-    playSfxFallback(name);
+    playSfxFallback(name, offsetSec);
   }
 }
 

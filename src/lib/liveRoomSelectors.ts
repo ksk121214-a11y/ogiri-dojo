@@ -30,6 +30,29 @@ function withRanks(
   });
 }
 
+// 2026-09-06:「回答すると回答者と回答席の位置が入れ替わる」不具合対応。
+// participantsの取得にORDER BYが無く、Supabaseから返る行順が問い合わせのたびに
+// 変わりうる（回答送信でlives.answering_paused等が更新されrefetchAllが走るたびに
+// 別順序で返ることがある）。StageAnsweringView/AudienceAnsweringView/TopicRevealViewは
+// この配列順をそのまま回答席の並びに使っているため、順序が変わるとメンバーが
+// 別の回答席へ移動して見える（光る演出はparticipant_idに紐づくが、本人の位置自体が
+// ずれるので別の席が光ったように見えてしまう）。
+// joined_at昇順（同時刻はid昇順でタイブレーク）という、DBの値だけで決まる
+// 決定的な順序に統一し、参加者取得の1箇所（useLiveFollowerStore.tsのrefetchAll）で
+// 正規化する。TopicRevealView/StageAnsweringView/AudienceAnsweringViewは全て
+// useLiveFollowerStore.participantsを参照しているため、ここ1箇所の正規化で
+// 3画面とも同じ席順になる。
+export function sortParticipantsBySeat<T extends Pick<ParticipantRow, "id" | "joined_at">>(
+  participants: T[],
+): T[] {
+  return [...participants].sort((a, b) => {
+    const at = new Date(a.joined_at).getTime();
+    const bt = new Date(b.joined_at).getTime();
+    if (at !== bt) return at - bt;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
 // ライブ画面（舞台・客席・結果発表）で表示する参加者名の共通の丸め込み。
 // 5文字までは表示し、6文字目以降は省略する（狭いスペースに詰め込むための割り切り）。
 export const LIVE_DISPLAY_NAME_MAX_LENGTH = 5;

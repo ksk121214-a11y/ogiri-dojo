@@ -8,6 +8,7 @@ import {
   getBestAnswer,
   getGroupTurnRanking,
   getOverallRanking,
+  sortParticipantsBySeat,
   type RoomRankingEntry,
 } from "@/lib/liveRoomSelectors";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -92,7 +93,14 @@ interface LiveFollowerState {
   retrySync: () => void;
   joinLive: (preferredRole: ParticipantRole, referralSource?: string | null) => Promise<void>;
   submitMyAnswer: (body: string) => Promise<{ ok: boolean; reason?: string }>;
-  submitMyScore: (points: 0 | 1 | 2 | 3) => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-06:「採点を連打・同時押しするとDBの生エラーが赤字表示される」不具合対応。
+  // 二重投票（一意制約違反）・RLS拒否（表示前/確定後/締切後の採点等、想定内の
+  // サーバー側拒否）は、silent:trueを返して呼び出し元に何も表示させない。
+  // reasonはsilent:falseの場合のみ意味を持ち、常に日本語の一般的な文言（生のPostgres/
+  // Supabaseのerror.messageではない）。
+  submitMyScore: (
+    points: 0 | 1 | 2 | 3,
+  ) => Promise<{ ok: true } | { ok: false; silent: boolean; reason?: string }>;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
 }
 
@@ -548,16 +556,23 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // 同様にget()から初期値を引き継ぐようにした。
       let { participantNames, participantAvatars, groups } = get();
       if (live) {
+        // 2026-09-06:「回答すると回答者と回答席の位置が入れ替わる」不具合対応。
+        // ORDER BYが無いとSupabase/PostgreSQLが返す行順は問い合わせのたびに
+        // 変わりうる。joined_at昇順・同時刻はid昇順で全端末が同じ順序を得られる
+        // ようにし、さらにsortParticipantsBySeatでクライアント側でも同じ規則で
+        // 正規化する（DB側のソートだけに依存しない二重の保険）。
         const { data: participantsData, error: participantsError } = await supabase
           .from("participants")
           .select("*")
-          .eq("live_id", live.id);
+          .eq("live_id", live.id)
+          .order("joined_at", { ascending: true })
+          .order("id", { ascending: true });
         if (cancelled || requestId !== refetchRequestId) return;
         if (participantsError) {
           failStage("参加者情報の取得に失敗しました");
           return;
         }
-        participants = (participantsData ?? []) as ParticipantRow[];
+        participants = sortParticipantsBySeat((participantsData ?? []) as ParticipantRow[]);
         myParticipant = userId ? (participants.find((p) => p.user_id === userId) ?? null) : null;
 
         // グループ一覧・表示名/アイコンは舞台/観客の判定そのものには使わない
@@ -745,11 +760,15 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
 
   submitMyScore: async (points) => {
     const { activeAnswer, myParticipant, myScore } = get();
-    if (!activeAnswer || !myParticipant) return { ok: false, reason: "採点対象がありません" };
+    // 2026-09-06:「採点を連打・同時押しするとDBの生エラーが赤字表示される」不具合対応。
+    // activeAnswerが既に無い（確定直後・次の回答に切り替わった直後）は、押した本人が
+    // 何か間違えたわけではない想定内の状態なので、何も表示させない(silent:true)。
+    if (!activeAnswer || !myParticipant) return { ok: false, silent: true };
     // 採点は一発勝負：一度投票したら本人でも変更できない（玉が落ちてくる演出と対応）。
     // DB側もscores_update_own_as_playerを廃止し、primary key(answer_id, judge_participant_id)で
     // 二重投票そのものを弾くようにしてある。ここではUIを素早く止めるためのガード。
-    if (myScore !== null) return { ok: false, reason: "採点済みです" };
+    // 「採点済みです」は連打時に頻発する想定内の状態のため、画面には出さない。
+    if (myScore !== null) return { ok: false, silent: true };
 
     // サーバーの往復を待たずに押した瞬間、自分の玉も落ち始めるように楽観的更新する。
     // 失敗した場合は元に戻す。
@@ -777,7 +796,22 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
             !(row.answer_id === activeAnswer.id && row.judge_participant_id === myParticipant.id),
         ),
       }));
-      return { ok: false, reason: error.message };
+      // 2026-09-06:「Supabase/PostgreSQLのerror.messageを画面へ直接表示しない」対応。
+      // 想定内のサーバー側拒否（二重投票=一意制約違反23505、表示前・確定後・締切後
+      // などのRLS拒否=42501）は画面には静かに無視させる（silent:true）。ただし
+      // 「画面に出さない」＝「記録もしない」ではない。特に42501（RLS拒否）は本来
+      // 想定内のタイミング競合だけでなく、権限設定のミス等の実バグでも同じコードで
+      // 返りうるため、原因調査ができるよう常にconsole.warnへ記録する
+      // （DB側の一意制約・RLS自体は削除・緩和しない。ここは表示側の対応のみ）。
+      const isExpectedRejection = error.code === "23505" || error.code === "42501";
+      if (isExpectedRejection) {
+        console.warn("[live] 採点が想定内の理由でサーバーに拒否されました（画面には表示しません）", error);
+      } else {
+        console.error("[live] 採点の送信に失敗", error);
+      }
+      return isExpectedRejection
+        ? { ok: false, silent: true }
+        : { ok: false, silent: false, reason: "採点を送信できませんでした" };
     }
     await refreshTurnDerived();
     return { ok: true };

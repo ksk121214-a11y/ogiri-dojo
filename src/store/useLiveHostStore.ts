@@ -168,6 +168,23 @@ async function fetchActiveLive(): Promise<{ ok: boolean; data: LiveRow | null }>
   return { ok: true, data: data as LiveRow | null };
 }
 
+// 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
+// begin_game RPCはDB側でlives.current_phase/phase_deadlineをtopic_revealへ
+// 更新するが、呼び出し元(beginGame)はparticipants/groups/topics/turnsしか
+// 再取得しておらず、司会ストアのstate.liveが古い(opening)ままになっていた。
+// advanceIfDueはstate.liveしか見ないため、最初のお題発表だけ「最新状態を取得」
+// （＝liveの再取得）を手動で押すまで自動遷移できなかった。1件のlives行だけを
+// 取得するこのヘルパーで、begin_game成功直後とlivesテーブルのRealtime購読の
+// 両方から同じ経路でstate.liveへ反映する。
+async function fetchLiveRow(liveId: string): Promise<{ ok: boolean; data: LiveRow | null }> {
+  const { data, error } = await supabase.from("lives").select("*").eq("id", liveId).maybeSingle();
+  if (error) {
+    console.error("[useLiveHostStore] fetchLiveRow failed", error);
+    return { ok: false, data: null };
+  }
+  return { ok: true, data: data as LiveRow | null };
+}
+
 async function fetchLiveChildren(
   liveId: string,
 ): Promise<{ ok: boolean; data: { participants: ParticipantRow[]; groups: GroupRow[]; topics: TopicRow[]; turns: TurnRow[] } }> {
@@ -295,14 +312,34 @@ async function subscribeLiveChannels(liveId: string) {
     }
   };
 
+  // 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
+  // RPC（begin_game等）や別タブからのlives行の更新は、この購読が無いとRealtimeに
+  // 気づけず、司会ブラウザが手動の「最新状態を取得」を押されるまでstate.liveが
+  // 古いまま(advanceIfDueがそれを見て自動進行を判断する)になってしまう。
+  const refetchLive = async () => {
+    const result = await fetchLiveRow(liveId);
+    if (!result.ok || !result.data) return; // 取得失敗時は既存stateを維持する
+    useLiveHostStore.setState({ live: result.data });
+  };
+
   // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す
   // （Realtimeは切断中に起きた変更を後から届けてくれないため）。
   const onSubscribeStatus = (status: string) => {
     if (status === "SUBSCRIBED") {
+      refetchLive();
       refetchChildren();
       refetchAnswersAndScores();
     }
   };
+
+  const livesCh = supabase
+    .channel(`host-lives-${liveId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
+      refetchLive,
+    )
+    .subscribe(onSubscribeStatus);
 
   const participantsCh = supabase
     .channel(`host-participants-${liveId}`)
@@ -355,7 +392,7 @@ async function subscribeLiveChannels(liveId: string) {
     .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
     .subscribe();
 
-  channels = [participantsCh, turnsCh, answersCh, scoresCh, tsukkomiChannel];
+  channels = [livesCh, participantsCh, turnsCh, answersCh, scoresCh, tsukkomiChannel];
 }
 
 // current_turn_idが切り替わった直後は、Realtimeイベントを待たずに即座に
@@ -1454,11 +1491,28 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       targetId: live.id,
     });
 
-    const childrenResult = await fetchLiveChildren(live.id);
+    // 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
+    // begin_gameはDB側でlives.current_phaseをtopic_revealへ、phase_deadlineを
+    // DBのnow()基準で更新するが、以前はここでparticipants/groups/topics/turnsしか
+    // 再取得しておらず、司会ストアのstate.liveがopeningのまま古くなっていた。
+    // advanceIfDueはstate.liveしか見ないため、以降このタブが「最新状態を取得」を
+    // 手動で押すまで自動遷移が一切効かなかった。lives行も同時に取得し直し、
+    // phase_deadlineはDBが設定した値をそのまま使う（クライアントで作り直さない）。
+    const [liveResult, childrenResult] = await Promise.all([
+      fetchLiveRow(live.id),
+      fetchLiveChildren(live.id),
+    ]);
+    if (liveResult.ok && liveResult.data) {
+      set({ live: liveResult.data });
+    } else {
+      // lives行の再取得に失敗した場合、state.liveをopeningのまま放置すると
+      // 自動進行が止まったままになるため、エラーとして明示し「最新状態を取得」を促す。
+      set({ error: "ゲームは開始しましたが、最新のライブ状態の取得に失敗しました。「最新状態を取得」してください。" });
+    }
     if (childrenResult.ok) {
       const profiles = await fetchProfilesFor(childrenResult.data.participants);
-      set({ ...childrenResult.data, profiles, error: null });
-    } else {
+      set({ ...childrenResult.data, profiles, error: liveResult.ok ? null : get().error });
+    } else if (liveResult.ok) {
       // ゲーム開始自体（begin_game）は既に成功しているので、ここでは進行は止めず、
       // 参加者一覧などの取得失敗だけをerrorとして伝える（次のRealtime更新や
       // 「最新状態を取得」で追いつく）。
