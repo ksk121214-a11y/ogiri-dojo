@@ -31,6 +31,7 @@ export default function Home() {
   const { status, error, handleJoinClick, handleAnimationEnd } = useLiveJoinFlow();
   const stubVisible = status !== "joined";
   const isDetaching = status === "detaching";
+  const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
   const { homeUpcoming } = useLiveSchedulePlan();
 
@@ -59,6 +60,17 @@ export default function Home() {
       <JoinLiveButton status={status} error={error} onClick={handleJoinClick} />
 
       <AccountSummary />
+
+      {/* 2026-09-06:「X連携は本人確認にのみ使う」旨の補足文言。未ログイン時（authLoadingが
+          終わっていて、かつ未ログインと確定した場合）だけ、名前カードのすぐ下に控えめに表示する。
+          ログイン中はAccountSummary側で名前・段位が出るため、この案内自体が不要になる。 */}
+      {!authLoading && !authUser && (
+        <p className="text-center font-sans text-[11px] leading-relaxed text-[var(--ink)]/55">
+          X連携はログイン確認にのみ使用します。
+          <br />
+          Xへの投稿・DM、タイムラインの取得・保存は行いません。
+        </p>
+      )}
     </StadiumAppShell>
   );
 }
