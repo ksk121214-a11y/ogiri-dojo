@@ -2,7 +2,29 @@
 -- 0055は既に本番へ適用済みの可能性があるため書き換えず、ここで作り直す。
 -- 0056自体はまだ未適用のため、このファイルは直接改訂している
 -- （0055→0056の順で適用する前提。0055が未適用の環境では、先に0055を
--- 適用してからこの0056を適用すること。詳細は末尾の説明を参照）。
+-- 適用してからこの0056を適用すること）。
+
+-- ============================================================
+-- 0) 安全確認：rank_reward_correctionsに既存データが無いことを機械的に確認する
+-- ============================================================
+-- 本マイグレーションはrank_reward_correctionsのテーブル構造を作り直す
+-- （後述の理由でcorrection_versionによるバージョン管理をやめ、よりシンプルで
+-- 頑丈な設計に変える）。これは「まだfix_rank_reward_mismatches()が実際に
+-- 実行されたことが無い（＝補正データが1件も無い）」ことが前提になる。
+-- 推測で空と判断せず、既存データが1件でもあれば、このマイグレーション自体を
+-- ここで止める（例外を投げて中断する）。もし止まった場合は、既存データを
+-- 見ながら手動で移行方法を検討する必要がある（自動では何もしない）。
+do $$
+declare
+  v_existing_rows int;
+begin
+  if to_regclass('public.rank_reward_corrections') is not null then
+    execute 'select count(*) from public.rank_reward_corrections' into v_existing_rows;
+    if v_existing_rows > 0 then
+      raise exception 'rank_reward_corrections already has % row(s). This migration assumes it is empty (fix_rank_reward_mismatches has never been run for real). Stop and review manually before proceeding.', v_existing_rows;
+    end if;
+  end if;
+end $$;
 
 -- ============================================================
 -- 1) 退場者の除外を「今後の採点対象・eligible_judge_count」だけに戻す
@@ -101,50 +123,62 @@ revoke execute on function public.apply_live_rank_rewards(uuid) from public;
 revoke execute on function public.apply_live_rank_rewards(uuid) from anon;
 
 -- ============================================================
--- 1b) 監査・補正の「バージョン管理」
+-- 1b) 補正の再設計：バージョン管理をやめ、「現在の合計」を正とする設計にする
 -- ============================================================
--- 背景：0055時点のロジック（kicked_at除外あり・INNER JOIN）で一度
--- fix_rank_reward_mismatches()を実行済みのライブは、rank_reward_corrections
--- に行ができ、audit_rank_reward_mismatches()から丸ごと除外されていた。
--- 0056で検出できるようになった問題（退場者の付与漏れ等）がそのライブに
--- 残っていても、そのままでは二度と監査されない。
--- 既存の補正記録は削除・上書きせず（監査証跡として残す）、
--- correction_versionを追加して複合主キーにする。「このライブは
--- このバージョンのロジックで補正済み」という記録を積み増せるようにし、
--- audit側は「現在のバージョン以上で補正済み」の場合だけ除外する
--- （＝新しいバージョンが出るたびに、まだそのバージョンで補正していない
--- ライブは自動的に再監査の対象に戻る）。
-alter table public.rank_reward_corrections
-  add column if not exists correction_version int not null default 1;
+-- 背景（今回の再レビューで発覚した重大バグ）：
+-- 旧設計は「元の付与行（訂正を除く）」だけをrecorded_gainとして使っていた
+-- ため、既に一度訂正済みのライブを再監査すると、訂正で足した/引いた分を
+-- 二重に足す/引く事故が起きる（例：元170pt→v1で+40pt訂正→実際は210pt
+-- なのに、v2の監査が「170pt」のまま比較してしまい、正解210ptとの差分
+-- +40ptを再び加算し、最終的に250ptになってしまう）。
+--
+-- 対策：recorded_gainを「元の付与行だけ」ではなく「そのlive_id・user_idに
+-- 記録されている全point_history.pointsの合計（訂正行も含む）」にする。
+-- これは常に「現在profilesへ実際に反映されている金額」と一致するため、
+-- 正解値との差分を取れば、訂正が何回積み重なっていても正しい差分（＝
+-- 二重加算・二重減算されない差分）になる。この合計値を正とする設計に
+-- することで、「このライブは既に補正済みだから除外する」というバージョン
+-- 管理そのものが不要になる（一度正しく直ったライブは、以後の監査で
+-- 自然に「差分なし」として出てこなくなるため）。
+--
+-- 受賞順位(award_count_first/second/third)についても同様に、「今
+-- profilesに実際に反映されている順位」を「元のラベルだけ」から判断せず、
+-- 現在の合計金額から逆算する：合計 = 参加10pt + 得点(total_score、
+-- ライブが閉幕済みなので不変) + 順位ボーナス(100/60/30/0)。total_scoreは
+-- 既知なので、合計からそれを引けば、これまで何回訂正が重なっていても
+-- 現在award_count_*へ反映されているはずの順位が一意に復元できる
+-- （どの訂正でも、金額の差分と受賞回数の差分を必ず同じrnk基準で連動させて
+-- 適用しているため、この2つが食い違うことはない）。
+--
+-- rank_reward_correctionsは「補正済みかどうかを判定する」役割から、
+-- 「誰がいつ何を直したかのログ」という役割だけに変える（判定には使わない）。
+-- 既存データが無いことを冒頭のdoブロックで確認済みなので、作り直す。
+drop table if exists public.rank_reward_corrections;
 
-alter table public.rank_reward_corrections drop constraint if exists rank_reward_corrections_pkey;
-alter table public.rank_reward_corrections add primary key (live_id, correction_version);
+create table public.rank_reward_corrections (
+  id uuid primary key default gen_random_uuid(),
+  live_id uuid not null references public.lives (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  points_delta int not null,
+  live_count_delta int not null,
+  corrected_by uuid references public.profiles (id) on delete set null,
+  corrected_at timestamptz not null default now()
+);
 
-create or replace function public._rank_reward_correction_version()
-returns int
-language sql
-immutable
-as $$ select 2 $$;
+alter table public.rank_reward_corrections enable row level security;
 
-revoke execute on function public._rank_reward_correction_version() from public;
-revoke execute on function public._rank_reward_correction_version() from anon;
-revoke execute on function public._rank_reward_correction_version() from authenticated;
+create policy "rank_reward_corrections_select_host"
+  on public.rank_reward_corrections for select
+  using (is_host());
+-- insertは専用のSECURITY DEFINER関数からのみ（authenticatedへの直接grantはしない）。
 
--- ------------------------------------------------------------
--- 1c) _compute_rank_reward_mismatches：対象者集合の統一・完全外部結合・
---     recorded_exists/correct_existsの明示化
--- ------------------------------------------------------------
--- apply_live_rank_rewardsと同じ対象者集合（role='player'全員）に揃える。
--- 結合をINNER JOINからFULL OUTER JOINに変更し、0055期間中に丸ごと付与が
--- 漏れていた退場者も監査で検出できるようにする。加えて「recorded_gain=0」
--- という値からの推測ではなく、recorded_exists/correct_existsを明示的な
--- boolean列として返す（付与漏れ判定・live_count補正の判断に使う）。
--- 戻り値の列構成が0055から変わるため、create or replaceの前に一度dropする
--- （PostgreSQLはRETURNS TABLEの列構成が変わるcreate or replaceを許さない）。
 drop function if exists public.fix_rank_reward_mismatches(uuid);
 drop function if exists public.audit_rank_reward_mismatches();
 drop function if exists public._compute_rank_reward_mismatches();
+drop function if exists public._rank_reward_correction_version();
 
+-- 各ライブ・各ユーザーについて「現在profilesに反映されている金額・順位」と
+-- 「今のルールで計算し直した正しい金額・順位」を比較する内部関数。
 create or replace function public._compute_rank_reward_mismatches()
 returns table (
   out_live_id uuid,
@@ -193,45 +227,65 @@ begin
     select
       rk.rk_live_id as cr_live_id,
       rk.rk_user_id as cr_user_id,
+      rk.rk_total_score as cr_total_score,
       10 + rk.rk_total_score
         + (case rk.rk_rnk when 1 then 100 when 2 then 60 when 3 then 30 else 0 end) as cr_gain,
-      rk.rk_rnk as cr_rank,
       case when rk.rk_rnk <= 3 then rk.rk_rnk else null end as cr_rank_tier
     from ranked rk
   ),
+  -- 2026-09-06:「付与漏れ訂正時の二重加算・二重減算」対応。「訂正」行を
+  -- 除外せず、同じlive_id・user_idのpoint_history.pointsを全て合算する。
+  -- これが「今実際にprofilesへ反映されている合計」そのものになる。
   recorded as (
-    -- 「訂正」の履歴行自体は元の付与記録ではないので比較対象から除く
-    -- （ラベルは0056でcause非依存の文言に変えたため「訂正」で判定する）。
     select
       ph.live_id as rd_live_id,
       ph.user_id as rd_user_id,
-      ph.points as rd_gain,
-      case
-        when ph.label like '%（1位）%' then 1
-        when ph.label like '%（2位）%' then 2
-        when ph.label like '%（3位）%' then 3
-        else null
-      end as rd_rank
+      sum(ph.points)::int as rd_total
     from public.point_history ph
     where ph.live_id in (select tl2.t_live_id from target_lives tl2)
-      and ph.label not like '%訂正%'
+    group by ph.live_id, ph.user_id
+  ),
+  -- 現在反映されている順位を、金額の合計から逆算する
+  -- （bonus = 合計 - 参加10pt - 得点。total_scoreは0055/0056以前から
+  -- 変わらないcorrectの値を使う。何度訂正が重なっていても、金額の差分と
+  -- 受賞回数の差分は必ず連動させているため、この逆算は常に正しい）。
+  recorded_with_rank as (
+    select
+      r.rd_live_id,
+      r.rd_user_id,
+      r.rd_total,
+      case
+        when r.rd_total - 10 - c.cr_total_score = 100 then 1
+        when r.rd_total - 10 - c.cr_total_score = 60 then 2
+        when r.rd_total - 10 - c.cr_total_score = 30 then 3
+        else null
+      end as rd_rank
+    from recorded r
+    left join correct c on c.cr_live_id = r.rd_live_id and c.cr_user_id = r.rd_user_id
   )
   select
-    coalesce(r.rd_live_id, c.cr_live_id),
+    coalesce(rr.rd_live_id, c.cr_live_id),
     tl3.t_sequence_number,
-    coalesce(r.rd_user_id, c.cr_user_id),
-    (r.rd_user_id is not null),
-    coalesce(r.rd_gain, 0),
-    r.rd_rank,
+    coalesce(rr.rd_user_id, c.cr_user_id),
+    -- 2026-09-06: recorded_existsは「point_historyに何らかの行が
+    -- （元の付与行・訂正行を問わず）既に存在するか」を表す。live_countは
+    -- 「このlive_id・user_idの組み合わせに一度でも報酬が記録されたか」で
+    -- 判断すべきで、「元の付与行だけがあるか」に絞ると、訂正で初めて
+    -- 追加された人が将来また別の訂正の対象になった時に、live_countを
+    -- 再び+1してしまう（二重加算）。point_historyに行が有る=既に
+    -- カウント済み、という判定にすることでこれを避ける。
+    (rr.rd_user_id is not null),
+    coalesce(rr.rd_total, 0),
+    rr.rd_rank,
     (c.cr_user_id is not null),
     coalesce(c.cr_gain, 0),
-    c.cr_rank,
-    coalesce(c.cr_gain, 0) - coalesce(r.rd_gain, 0)
-  from recorded r
-  full outer join correct c on c.cr_live_id = r.rd_live_id and c.cr_user_id = r.rd_user_id
-  join target_lives tl3 on tl3.t_live_id = coalesce(r.rd_live_id, c.cr_live_id)
-  where coalesce(r.rd_gain, 0) <> coalesce(c.cr_gain, 0)
-     or coalesce(r.rd_rank, 0) <> coalesce(c.cr_rank_tier, 0);
+    c.cr_rank_tier,
+    coalesce(c.cr_gain, 0) - coalesce(rr.rd_total, 0)
+  from recorded_with_rank rr
+  full outer join correct c on c.cr_live_id = rr.rd_live_id and c.cr_user_id = rr.rd_user_id
+  join target_lives tl3 on tl3.t_live_id = coalesce(rr.rd_live_id, c.cr_live_id)
+  where coalesce(rr.rd_total, 0) <> coalesce(c.cr_gain, 0)
+     or coalesce(rr.rd_rank, 0) <> coalesce(c.cr_rank_tier, 0);
 end;
 $$;
 
@@ -239,9 +293,9 @@ revoke execute on function public._compute_rank_reward_mismatches() from public;
 revoke execute on function public._compute_rank_reward_mismatches() from anon;
 revoke execute on function public._compute_rank_reward_mismatches() from authenticated;
 
--- 人が確認するための一覧。「現在の補正バージョン以上」で既に補正済みの
--- ライブだけ除外する（古いバージョンでしか補正していないライブは、新しい
--- バージョンのロジックで再監査できるよう、ここには残る＝再監査される）。
+-- 人が確認するための一覧。recorded_gainが既に「現在の合計」になっている
+-- ため、一度正しく直ったライブ・ユーザーは自然に差分0になり、ここには
+-- 出てこなくなる（＝バージョン管理をしなくても「補正済みは除外される」）。
 create or replace function public.audit_rank_reward_mismatches()
 returns table (
   out_live_id uuid,
@@ -264,14 +318,7 @@ begin
     raise exception 'not authorized';
   end if;
 
-  return query
-  select m.*
-  from public._compute_rank_reward_mismatches() m
-  where not exists (
-    select 1 from public.rank_reward_corrections rc
-    where rc.live_id = m.out_live_id
-      and rc.correction_version >= public._rank_reward_correction_version()
-  );
+  return query select * from public._compute_rank_reward_mismatches();
 end;
 $$;
 
@@ -291,22 +338,20 @@ set search_path = public
 as $$
 declare
   rec record;
-  v_version int := public._rank_reward_correction_version();
   v_live_count_delta int;
 begin
   if not is_host() then
     raise exception 'not authorized';
   end if;
 
-  -- 2026-09-05:「同じ訂正を二重実行できない」対応は維持しつつ、
-  -- 「0055で既に訂正済みのライブを0056の新しい条件で再監査できない」を
-  -- 解消する。(live_id, correction_version)の複合主キーにより、
-  -- 同じライブ・同じバージョンでの2回目以降は主キー違反で即座に失敗する
-  -- （この呼び出し全体がロールバックされる）が、まだこのバージョンで
-  -- 補正していないライブ（古いバージョンの行だけがある場合を含む）は
-  -- 新しい行として挿入でき、既存の古い版の記録は削除・上書きしない。
-  insert into public.rank_reward_corrections (live_id, corrected_by, correction_version)
-  values (p_live_id, auth.uid(), v_version);
+  -- 2026-09-06:「同じ訂正を二重実行できない」対応。対象ライブの行を
+  -- ロックしてから処理する（トランザクション終了までロックが保持される
+  -- ため、2件目は1件目がコミットするまで待たされる。1件目が既に
+  -- profilesを直しているため、2件目が読み直す時点ではrecorded_gainが
+  -- 既に正解値と一致しており、_compute_rank_reward_mismatches()は
+  -- その差分を0件として返す＝2件目は何もしない、という形で自然に
+  -- 冪等になる。バージョン番号を管理する必要が無い）。
+  perform 1 from public.lives where id = p_live_id for update;
 
   for rec in
     select * from public._compute_rank_reward_mismatches() where out_live_id = p_live_id
@@ -315,12 +360,11 @@ begin
       continue;
     end if;
 
-    -- 2026-09-05:「付与漏れ訂正時にlive_countが直らない」対応。
-    -- gain=0からの推測ではなく、recorded_exists/correct_existsを明示的に
-    -- 見て判定する：
-    --   元の報酬行が無く正しい報酬がある(付与漏れ) → live_count +1
-    --   元の報酬行はあるが正しくは対象外(余分な付与) → live_count -1
-    --   両方に行がある通常の順位・金額の訂正         → live_countは変えない
+    -- 2026-09-06:「付与漏れ訂正時にlive_countが直らない」対応。
+    -- recorded_exists/correct_existsを明示的に見て判定する：
+    --   元の記録が無く正しい報酬がある(付与漏れ) → live_count +1
+    --   元の記録はあるが正しくは対象外(余分な付与) → live_count -1
+    --   両方に記録がある通常の順位・金額の訂正       → live_countは変えない
     v_live_count_delta := 0;
     if not rec.out_recorded_exists and rec.out_correct_exists then
       v_live_count_delta := 1;
@@ -344,12 +388,15 @@ begin
         + (case when rec.out_correct_rank = 3 then 1 else 0 end)
     where id = rec.out_user_id;
 
-    -- 2026-09-05:「訂正履歴のラベルが常に『同点処理の誤り』固定になっている」
-    -- 対応。付与漏れの訂正にも使うため、原因を限定しない文言にする。
+    -- 2026-09-06:「訂正履歴のラベルが原因を限定した文言になっている」対応。
+    -- 付与漏れ・順位訂正のどちらにも使うため、原因を限定しない文言にする。
     insert into public.point_history (user_id, live_id, points, mastery, label)
     select rec.out_user_id, p_live_id, rec.out_gain_delta, rec.out_gain_delta,
       '第' || l.sequence_number || '回ライブ ライブ報酬訂正'
     from public.lives l where l.id = p_live_id;
+
+    insert into public.rank_reward_corrections (live_id, user_id, corrected_by, points_delta, live_count_delta)
+    values (p_live_id, rec.out_user_id, auth.uid(), rec.out_gain_delta, v_live_count_delta);
 
     out_user_id := rec.out_user_id;
     out_delta := rec.out_gain_delta;
