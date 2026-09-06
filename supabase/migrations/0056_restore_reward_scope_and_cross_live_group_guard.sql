@@ -317,6 +317,65 @@ revoke execute on function public._compute_rank_reward_mismatches() from public;
 revoke execute on function public._compute_rank_reward_mismatches() from anon;
 revoke execute on function public._compute_rank_reward_mismatches() from authenticated;
 
+-- ============================================================
+-- 1c) 0054/0055由来の古い訂正履歴を安全に移行する
+-- ============================================================
+-- 背景：0054・0055のfix_rank_reward_mismatches()は、常に固定文言
+-- 「第X回ライブ 順位ボーナス訂正（同点処理の誤り）」をラベルに書き込んで
+-- おり、その訂正の結果どの順位になったかをラベルに含めていなかった。
+-- 0054は本番へ適用済みのため、この文言の訂正行が実際に存在する可能性が
+-- ある（0055・0056はまだ未適用のため、この文言を書けるのは0054だけ）。
+-- 0056のrecorded_latest_labelは「最後に書き込まれたラベル」から現在の
+-- 順位を読み取る設計のため、この文言の行が最新のユーザーは順位が
+-- NULLとして読めてしまい、監査に「順位だけ不一致（差分0pt）」として
+-- 永久に残り続ける（fixはgain_delta=0の行をcontinueでスキップするため）。
+--
+-- 対応：該当ユーザーごとに、現在の合計ポイント(_compute_rank_reward_
+-- mismatchesのout_recorded_gain)が、今のルールで計算し直した正しい報酬額
+-- (out_correct_gain)と既に一致している場合だけ「安全」と判断し、その
+-- 最新の該当ラベルへ今の正しい順位表記をその場で補完する
+-- （ポイント・受賞回数は一切変更しない。ラベルの文言だけを直す）。
+-- 一致しない場合は「単純に順位NULL→現在の正解順位をもう一度加算すると
+-- 受賞回数を二重加算してしまう」ため自動では判断せず、対象を報告して
+-- マイグレーション全体を安全に停止する（begin/commitで包んでいるため、
+-- ここで停止すれば0056の変更は何も反映されない）。
+do $$
+declare
+  v_unsafe_count int;
+begin
+  select count(*) into v_unsafe_count
+  from (
+    select distinct on (ph.live_id, ph.user_id) ph.live_id, ph.user_id
+    from public.point_history ph
+    where ph.label like '%同点処理の誤り%'
+    order by ph.live_id, ph.user_id, ph.created_at desc, ph.id desc
+  ) legacy_latest
+  join public._compute_rank_reward_mismatches() m
+    on m.out_live_id = legacy_latest.live_id and m.out_user_id = legacy_latest.user_id
+  where m.out_gain_delta <> 0;
+
+  if v_unsafe_count > 0 then
+    raise exception '% legacy (0054/0055-era) correction row(s) exist whose current point total does NOT yet match the freshly recomputed correct amount. Run: select * from public.audit_rank_reward_mismatches(); to see them, resolve manually, then re-run this migration. (This migration made no changes.)', v_unsafe_count;
+  end if;
+end $$;
+
+-- 上のチェックを通過した（＝古い訂正行はあっても全て安全に判定できる）
+-- 場合だけ、その最新の該当ラベルへ正しい順位表記を補完する。
+with legacy_latest as (
+  select distinct on (ph.live_id, ph.user_id)
+    ph.id as row_id, ph.live_id, ph.user_id, ph.label
+  from public.point_history ph
+  where ph.label like '%同点処理の誤り%'
+  order by ph.live_id, ph.user_id, ph.created_at desc, ph.id desc
+)
+update public.point_history ph
+set label = ll.label
+  || (case m.out_correct_rank when 1 then '（1位）' when 2 then '（2位）' when 3 then '（3位）' else '' end)
+from legacy_latest ll
+join public._compute_rank_reward_mismatches() m
+  on m.out_live_id = ll.live_id and m.out_user_id = ll.user_id
+where ph.id = ll.row_id;
+
 -- 人が確認するための一覧。recorded_gainが既に「現在の合計」になっている
 -- ため、一度正しく直ったライブ・ユーザーは自然に差分0になり、ここには
 -- 出てこなくなる（＝バージョン管理をしなくても「補正済みは除外される」）。
