@@ -189,7 +189,9 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             disabled={!body.trim() || overLimit || noTicket || submitting}
             className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            {submitting ? "送信中…" : "回答する"}
+            {/* 2026-09-07:「押すと寄合券を使うことがボタンを見ただけで分かるように」の
+                要望で、お題投稿（sns/new/page.tsx）と同じ言い回しに揃えた。 */}
+            {submitting ? "送信中…" : "回答する（寄合券を1枚使う）"}
           </button>
         </div>
       </form>

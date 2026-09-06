@@ -11,6 +11,9 @@ import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
+import { computeDisplayedTickets } from "@/lib/ticketRecovery";
+import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
 const MAX_LENGTH = 60;
@@ -19,6 +22,9 @@ const MAX_LENGTH = 60;
 // static export対応のため、useParamsではなくpage.tsx（generateStaticParams）からanswerIdを受け取る。
 // 2026-08-28: マイページの寄合帳から来ることがほとんどのため、見た目もマイページと同じ
 // 地下ライブハウス風（StadiumPageShell）に統一した。
+// 2026-09-06: ツッコミ（コメント）もお題・回答と同じく寄合券を1枚消費するようにした（0058）。
+// 2026-09-07: 押すと寄合券を使うことがボタンを見ただけで分かるよう、お題投稿・回答投稿と
+// 同じ表示パターン（残り0枚なら送信不可＋案内文、ボタンに「（寄合券を1枚使う）」を明記）を追加。
 export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
@@ -27,12 +33,24 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const toggleLike = useSnsStore((s) => s.toggleLike);
   const addComment = useSnsStore((s) => s.addComment);
   const fetchAnswerById = useSnsStore((s) => s.fetchAnswerById);
+  const profile = useProfileStore((s) => s.profile);
 
   const [body, setBody] = useState("");
   const [likePending, setLikePending] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // 2026-09-07:「ツッコむボタンでも寄合券を使うことがボタンを見ただけで分かるように」
+  // の要望対応。お題投稿(sns/new/page.tsx)・回答投稿(SnsTopicDetail.tsx)と同じ
+  // 表示パターン（残り枚数0なら送信不可＋案内文、ボタンに「（寄合券を1枚使う）」を明記）
+  // に揃える。ツッコミが実際に寄合券を消費するようになったのは0058から。
+  const displayedTickets = profile
+    ? computeDisplayedTickets(profile.ticketsCount, profile.ticketsNextRecoveryAt)
+    : { count: 0, nextRecoveryAt: null };
+  const ticketCount = displayedTickets.count;
+  const nextTicketRecoveryAt = displayedTickets.nextRecoveryAt;
+  const noTicket = ticketCount <= 0;
   // 取得を試みて完了したか（true になるまでは「読み込み中」、完了してもanswerが
   // 無ければ「見つかりませんでした」を出す）。
   const [loadAttempted, setLoadAttempted] = useState(false);
@@ -176,6 +194,12 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
           }`}
         />
+        {noTicket && (
+          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+            寄合券が0枚のためツッコめません。
+            {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
+          </p>
+        )}
         {submitError && (
           <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
         )}
@@ -187,10 +211,10 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           </span>
           <button
             type="submit"
-            disabled={!body.trim() || overLimit || submitting}
+            disabled={!body.trim() || overLimit || noTicket || submitting}
             className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
           >
-            {submitting ? "送信中…" : "ツッコむ"}
+            {submitting ? "送信中…" : "ツッコむ（寄合券を1枚使う）"}
           </button>
         </div>
       </form>
