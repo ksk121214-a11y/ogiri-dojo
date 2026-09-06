@@ -190,6 +190,10 @@ create table if not exists public.rank_reward_corrections (
 
 alter table public.rank_reward_corrections enable row level security;
 
+-- 2026-09-06: create policyは非冪等（既にあると42710エラーで失敗する）ため、
+-- 途中で止まった状態からの再実行に備えてdrop policy if existsを付ける
+-- （動作は変えない、安全な再実行のための修正）。
+drop policy if exists "rank_reward_corrections_select_host" on public.rank_reward_corrections;
 create policy "rank_reward_corrections_select_host"
   on public.rank_reward_corrections for select
   using (is_host());
