@@ -249,10 +249,13 @@ export function CurrentLiveCard({
               >
                 参加する
               </Link>
+              {/* 2026-09-07:「XでシェアのURLは全てホームのURLで固定」の要望で、
+                  urlを省略して現在地(/live-schedule)になっていたのを"/"固定にした。 */}
               <XShareButton
                 context="live_schedule"
                 label="Xで告知する"
                 text={`${live.month}月${live.day}日（${live.weekday}）${live.time}〜、${APP_NAME}のオンライン大喜利ライブ大会があります。\n#${APP_NAME}`}
+                url="/"
                 className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border border-[var(--ink)] bg-[var(--ink)] px-3 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90"
               />
             </div>

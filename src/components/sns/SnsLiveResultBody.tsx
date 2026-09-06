@@ -55,10 +55,13 @@ export default function SnsLiveResultBody({
         <p className="mt-1 font-sans text-xs text-[var(--ink)]/60">{detail.endedAtLabel}</p>
         {!readOnly && (
           <div className="mt-3 flex justify-center">
+            {/* 2026-09-07:「XでシェアのURLは全てホームのURLで固定」の要望で、
+                urlを省略して現在地(このライブ結果ページ自身)になっていたのを"/"固定にした。 */}
             <XShareButton
               context="live_result"
               label="結果をXでシェア"
               text={`${formatLiveTicketNo(detail.sequenceNumber)}${detail.title ? `　${detail.title}` : ""}の結果発表！\n#${APP_NAME}`}
+              url="/"
             />
           </div>
         )}

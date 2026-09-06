@@ -222,11 +222,13 @@ export default function FinalResultView({
                 })}
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {/* 2026-09-07:「XでシェアのURLは全てホームのURLで固定」の要望で、
+                    /live-schedule固定だったのを"/"固定にした。 */}
                 <XShareButton
                   context="final_result"
                   label="結果をXでシェア"
                   text={shareText}
-                  url="/live-schedule"
+                  url="/"
                   className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[#1a1a3a] bg-[#1a1a3a] px-5 py-2.5 font-sans text-sm font-bold text-white transition hover:opacity-90"
                 />
                 <Link
