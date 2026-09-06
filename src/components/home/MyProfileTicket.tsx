@@ -16,8 +16,9 @@ import { ClockGlyph, EditGlyph } from "./icons";
 import styles from "./StadiumHome.module.css";
 
 // マイページの演者名カード。NextLiveTicket（次回ライブ）と同じ「本券／半券＋丸い切り欠き」の
-// チケット言語を流用し、半券側には寄合券（寄合帳に投稿・回答するためのスタミナ的リソース、
-// profiles.tickets_countで管理、§ticketRecovery）の残り枚数を5分割のスタンプ欄として表示する。
+// チケット言語を流用し、半券側には寄合券（寄合帳にお題・回答・ツッコミを投稿するための
+// スタミナ的リソース、profiles.tickets_countで管理、§ticketRecovery）の残り枚数を
+// 5分割のスタンプ欄として表示する。
 // 2026-08-29: 「寄合券を使うとスタンプが消えるのではなく、そのチケットの部分ごと消えるように」
 // の要望で、本体と半券を（ライブ予定ページの.tornTicketRow／.tornTicketMainと同じ考え方で）
 // 別々の独立したカードに分離した。詳しくはTicketStubColumnのコメント参照。

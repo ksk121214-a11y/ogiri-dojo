@@ -26,9 +26,9 @@
 // これだとリロードで投稿が消える・寄合券だけ減る等の「見せかけ成功」が起きるため廃止した。
 // 未ログイン、または保存に失敗した場合は必ず{ok:false, reason}を返し、呼び出し元
 // （画面側）が入力内容を保持したままエラーを表示する。いいね・フォローと同じ方針に揃えた形。
-// お題・回答は寄合券を1枚消費するsecurity definer RPC（submit_sns_topic/submit_sns_answer、
-// 0043）経由で保存するため、保存と券消費が同一トランザクションで原子的に行われる
-// （保存に失敗すれば券は減らない）。コメントは寄合券を消費しない仕様のまま変更していない。
+// お題・回答・コメントは寄合券を1枚消費するsecurity definer RPC
+// （submit_sns_topic/submit_sns_answer/submit_sns_comment、0043・0058）経由で保存するため、
+// 保存と券消費が同一トランザクションで原子的に行われる（保存に失敗すれば券は減らない）。
 import { create } from "zustand";
 
 import {
@@ -57,6 +57,7 @@ function mapSnsSubmitError(message: string | undefined): string {
   if (message.includes("BODY_TOO_LONG")) return "文字数が上限を超えています";
   if (message.includes("ACCOUNT_SUSPENDED")) return "現在アカウントが利用停止中のため投稿できません";
   if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
+  if (message.includes("ANSWER_NOT_FOUND")) return "回答が見つかりませんでした";
   return message;
 }
 
@@ -597,13 +598,14 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { ok: false, reason: "コメントにはログインが必要です" };
 
-    const { data, error } = await supabase
-      .from("sns_comments")
-      .insert({ answer_id: answerId, author_id: userId, body })
-      .select()
-      .single();
+    // 2026-09-06: ツッコミ（コメント）もお題・回答と同じく寄合券を1枚消費する仕様に変更。
+    // submit_sns_comment（0058）が券消費と投稿保存を同一トランザクションで行う。
+    const { data, error } = await supabase.rpc("submit_sns_comment", {
+      p_answer_id: answerId,
+      p_body: body,
+    });
     if (error || !data) {
-      return { ok: false, reason: error?.message ?? "コメントの投稿に失敗しました" };
+      return { ok: false, reason: mapSnsSubmitError(error?.message) };
     }
     const comment: SnsComment = {
       id: data.id,
@@ -613,6 +615,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       createdAtLabel: "たった今",
     };
     set((s) => ({ comments: [...s.comments, comment] }));
+    useProfileStore.getState().refreshProfile();
     return { ok: true, comment };
   },
 

@@ -149,7 +149,11 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
           </span>
           {date ? (
             <>
-              <p className="mt-1 whitespace-nowrap font-sans text-xl font-black text-[var(--ink)]">
+              {/* 2026-09-06: 「前回のライブ」本券（.tornTicketMain）はoverflow:hiddenのため、
+                  年月日＋曜日を1行固定(whitespace-nowrap)にしていると、幅の狭いスマホ画面で
+                  文字がカードの外にはみ出す前に途中で切れて見える不具合があった。折り返しを
+                  許可し、文字サイズも少し詰めて狭い画面でも収まりやすくした。 */}
+              <p className="mt-1 font-sans text-lg font-black leading-snug text-[var(--ink)] sm:text-xl">
                 {date.year}年{date.month}月{date.day}日（{date.weekday}）
               </p>
               <p className="font-sans text-base font-black text-[var(--ink)]/70">{date.time}</p>

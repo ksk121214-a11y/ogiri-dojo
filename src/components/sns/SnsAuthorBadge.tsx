@@ -47,19 +47,18 @@ export default function SnsAuthorBadge({
   // お題・回答一覧等のカード内バッジからは外した（他ユーザーの段位を解決していない
   // 場面で「全員見習い」に見えてしまっていたため。カード単位で全員ぶんの段位を
   // 解決するのは負荷も見合わないという判断）。
+  // 2026-09-06: 自分のアイコン・名前を"/sns"へのLinkにしていたが、/mypage内の寄合帳で
+  // 自分の投稿の自分のアイコンを押すと/sns（見出しが「SNS」「寄合帳」になる別デザイン）へ
+  // 飛んでしまい「デザインが変わる」と報告があった。自分の演者情報は既にページ上部の
+  // MyProfileTicketで見えている（そこから編集・実績モーダルも開ける）ため、ここでは
+  // どこへも遷移させず、見た目だけのバッジにする（クリックしても何も起きない）。
   if (isMe) {
     return (
       <span className="flex min-w-0 items-center gap-2">
-        <Link
-          href="/sns"
-          onClick={(e) => e.stopPropagation()}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <MyIconAvatar size={size} bare />
-          <span className="truncate font-sans text-xs font-bold text-[var(--ink)] hover:underline">
-            {user.displayName}
-          </span>
-        </Link>
+        <MyIconAvatar size={size} bare />
+        <span className="truncate font-sans text-xs font-bold text-[var(--ink)]">
+          {user.displayName}
+        </span>
       </span>
     );
   }
