@@ -1283,22 +1283,21 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     return { ok: true };
   },
 
+  // 2026-09-07（セキュリティレビュー対応 P1-5）：authenticatedがparticipants.
+  // host_message/host_message_sent_atを直接UPDATEできる列GRANTを剥奪した（0060）。
+  // is_host()をDB内で検証するSECURITY DEFINER RPC（admin_set_participant_message）
+  // 経由にし、送信時のadmin_action_logs記録もRPC内（同一トランザクション）で
+  // 行うようにしたため、ここでのlogAdminAction呼び出しは不要になった。
   sendPrivateMessage: async (participantId, message) => {
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const trimmed = message.trim();
     if (!trimmed) return { ok: false, reason: "メッセージを入力してください" };
-    const { error } = await supabase
-      .from("participants")
-      .update({ host_message: trimmed, host_message_sent_at: new Date().toISOString() })
-      .eq("id", participantId);
-    if (error) return { ok: false, reason: error.message };
-    await logAdminAction({
-      action: "participant_private_message_sent",
-      targetType: "participants",
-      targetId: participantId,
-      detail: { message: trimmed },
+    const { error } = await supabase.rpc("admin_set_participant_message", {
+      p_participant_id: participantId,
+      p_message: trimmed,
     });
+    if (error) return { ok: false, reason: error.message };
     const childrenResult = await fetchLiveChildren(live.id);
     if (childrenResult.ok) set({ participants: childrenResult.data.participants });
     return { ok: true };
@@ -1307,10 +1306,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   clearPrivateMessage: async (participantId) => {
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
-    const { error } = await supabase
-      .from("participants")
-      .update({ host_message: null })
-      .eq("id", participantId);
+    const { error } = await supabase.rpc("admin_set_participant_message", {
+      p_participant_id: participantId,
+      p_message: null,
+    });
     if (error) return { ok: false, reason: error.message };
     const childrenResult = await fetchLiveChildren(live.id);
     if (childrenResult.ok) set({ participants: childrenResult.data.participants });
