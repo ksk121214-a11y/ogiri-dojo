@@ -125,16 +125,31 @@ export default function StageAnsweringView() {
       playSfx("spotlightIn");
     }
   }, [boardRoundId]);
-  // 回答送信音は誰が送信しても鳴らしたいので、turnAnswersの件数増加を監視する
-  // （turnAnswersはターンが変わるたびに[]へリセットされるが、その場合は「減少」なので
-  // 何も鳴らさず基準だけ更新される＝次のターンでも正しく動く）。
-  const answerCountSeenRef = useRef<number | null>(null);
+  // 回答送信音は「answering_cues.busy」がfalse/null→trueになった瞬間に、全員の画面で
+  // 鳴らす（2026-09-08 P1-8/9再レビュー対応）。以前はturnAnswers.length（＝answers件数）
+  // の増加を監視していたが、未発表回答が本人以外に返らなくなった(0063のRLS変更)ことで、
+  // 本人以外の端末ではturnAnswersの件数が回答公開(reveal)まで増えず、送信音が遅れる・
+  // 鳴らない不具合が生じていた。busyは回答本文を含まないanswering_cuesの列で、
+  // 送信と同時にDBトリガーで即座にtrueへ更新されるため、これを基準にする。
+  // busyPrevRef.currentの初期値はnull（＝「前回値がまだ無い」）にし、
+  // 判定はnull→trueでは鳴らさずfalse→trueの時だけ鳴らす条件にすることで、
+  // 初回読み込み・リロードによるstate復元時（既にbusy=trueの状態からstart）には
+  // 鳴らないようにする。busyはreveal・採点が終わって次の回答が来るまでtrueのまま
+  // 変化しないため（recompute_answering_cue_for_turn参照）、同一回答の公開・確定時に
+  // 遅れて鳴ったり複数回鳴ったりすることもない。ターンが変わるとcueForCurrentTurnは
+  // 一旦null(busy=false相当)に戻ってから次の回答でtrueになるため、次ターンでも
+  // 正常に再生される。送信者本人も他の参加者と同じくこの合図経由で1回だけ鳴る
+  // （二重再生防止のため、以前あったturnAnswers.length基準の再生処理は削除した）。
+  const busyPrevRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (answerCountSeenRef.current !== null && turnAnswers.length > answerCountSeenRef.current) {
+    const turnId = currentTurn?.id ?? null;
+    const cue = pendingCue && turnId && pendingCue.turnId === turnId ? pendingCue : null;
+    const currentBusy = cue?.busy ?? false;
+    if (busyPrevRef.current === false && currentBusy) {
       playSfx("answerSubmit");
     }
-    answerCountSeenRef.current = turnAnswers.length;
-  }, [turnAnswers.length]);
+    busyPrevRef.current = currentBusy;
+  }, [pendingCue, currentTurn?.id]);
 
   // 確定した瞬間も回答カードを表示し続ける猶予ぶんだけ残す（activeAnswerは確定と同時にnullになるため）。
   // revealGraceMsを明示的に渡すことで、玉が弾け始めるタイミング(resolvedPopDelayMs)や

@@ -130,6 +130,13 @@ create policy "topics_select_revealed_or_host"
       -- （src/store/useSnsLiveResultsStore.tsのanswers→turns→topicsの
       -- 取得経路と同じ辿り方。参加者条件は課さない＝退場者・無関係な
       -- 第三者でも通常どおり閲覧できる）。
+      -- 【再レビュー指摘対応】t2.live_id = r.live_id / topics.live_id = r.live_id を
+      -- 明示的に要求する。これが無いと、topics.idとanswers.turn_idの一致だけを
+      -- 頼りに辿っており、万一別ライブのtopics行が同じidを再利用する経路や、
+      -- turnとお題の紐付けがライブをまたいで壊れた場合に、無関係な別ライブの
+      -- 公開結果を経由してお題が漏れる余地が理屈の上で残っていた。
+      -- answers→turns（t2）→ライブ結果（r）→topicsのすべてが同じlive_idで
+      -- 揃っていることを明示的に確認することで、その余地を閉じる。
       select 1
       from public.answers a
       join public.turns t2 on t2.id = a.turn_id
@@ -139,6 +146,8 @@ create policy "topics_select_revealed_or_host"
       where t2.topic_id = topics.id
         and sra.included
         and l2.results_published
+        and t2.live_id = r.live_id
+        and topics.live_id = r.live_id
     )
   );
 
@@ -190,6 +199,16 @@ create table public.answering_cues (
 
 alter table public.answering_cues enable row level security;
 
+-- 【再レビュー指摘対応】RLSだけに頼らず、テーブル権限自体も最小化する
+-- （supabaseはデフォルトで新規テーブルにanon/authenticatedへの
+-- select/insert/update/deleteを自動付与するため、それを前提にしない）。
+-- SELECTだけをauthenticatedへ許可し、その範囲内をRLSでさらに絞る。
+-- anonはSELECTすら不可。authenticatedもINSERT/UPDATE/DELETEは不可
+-- （書き込みはSECURITY DEFINERのトリガー関数のみが行う。テーブル所有者相当の
+-- 権限で動くため、この権限剥奪はトリガー経由の更新には影響しない）。
+revoke all on table public.answering_cues from public, anon, authenticated;
+grant select on table public.answering_cues to authenticated;
+
 create policy "answering_cues_select_participant_or_host"
   on public.answering_cues for select
   using (
@@ -204,6 +223,15 @@ create policy "answering_cues_select_participant_or_host"
 
 -- 指定turnの現在の状態からanswering_cuesを再計算して反映する共通ロジック。
 -- answers側のトリガー・lives側のトリガー両方から呼ぶ。
+--
+-- 【再レビュー指摘cへの対応】p_turn_idが「そのライブが今まさに表示している
+-- ターン(lives.current_turn_id)」と一致する場合だけ更新する。これが無いと、
+-- 司会が既に次のターンへ進めた後で、前のターンの回答へ何らかの理由で遅れて
+-- UPDATE（採点確定処理の再送・リトライ等）が入った場合に、そのanswersトリガーが
+-- 前のターンのp_turn_idでこの関数を呼び、既に新しいターンの情報で上書き済みの
+-- answering_cues（PK=live_id なので1ライブにつき1行しか持てない）を、古い
+-- （前のターンの）内容で再び上書きしてしまう。lives.current_turn_idとの一致を
+-- 確認することで、過去ターンの更新が現在のcueを巻き戻さないようにする。
 create function public.recompute_answering_cue_for_turn(p_turn_id uuid)
 returns void
 language plpgsql
@@ -211,11 +239,19 @@ security definer set search_path = public
 as $$
 declare
   v_live_id uuid;
+  v_current_turn_id uuid;
   v_pending uuid;
   v_busy boolean;
 begin
-  select live_id into v_live_id from public.turns where id = p_turn_id;
+  select t.live_id, l.current_turn_id into v_live_id, v_current_turn_id
+    from public.turns t
+    join public.lives l on l.id = t.live_id
+    where t.id = p_turn_id;
   if v_live_id is null then
+    return;
+  end if;
+  if v_current_turn_id is distinct from p_turn_id then
+    -- 過去（または未来）のターン：現在表示中のターンではないため何もしない。
     return;
   end if;
 
@@ -288,6 +324,23 @@ create trigger lives_sync_answering_cue_upd
 revoke execute on function public.recompute_answering_cue_for_turn(uuid) from public, anon, authenticated;
 revoke execute on function public._answers_sync_answering_cue() from public, anon, authenticated;
 revoke execute on function public._lives_sync_answering_cue() from public, anon, authenticated;
+
+-- ============================================================
+-- 5) バックフィル：本migration適用時点で既に進行中のライブ（current_turn_idが
+--    設定済み）がある場合、以後トリガーが発火するまでanswering_cuesが空の
+--    ままになってしまう。既存の各ライブについて、現在表示中のターンぶんの
+--    cueをこの場で1回だけ作っておく（過去ターンは対象にしない＝上の
+--    recompute_answering_cue_for_turn自体がlives.current_turn_idとの一致を
+--    要求するため、current_turn_id以外を渡しても無視されて安全）。
+-- ============================================================
+do $$
+declare
+  v_live record;
+begin
+  for v_live in select id, current_turn_id from public.lives where current_turn_id is not null loop
+    perform public.recompute_answering_cue_for_turn(v_live.current_turn_id);
+  end loop;
+end $$;
 
 -- Realtime配信対象に追加する（0007等と同様のパターン）。
 alter publication supabase_realtime add table public.answering_cues;

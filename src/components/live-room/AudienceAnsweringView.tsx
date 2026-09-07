@@ -127,15 +127,19 @@ export default function AudienceAnsweringView() {
       playSfx("spotlightIn");
     }
   }, [boardRoundId]);
-  // 回答送信音は誰が送信しても鳴らしたいので、turnAnswersの件数増加を監視する
-  // （StageAnsweringViewと同じ理由・同じ仕組み）。
-  const answerCountSeenRef = useRef<number | null>(null);
+  // 回答送信音は「answering_cues.busy」がfalse/null→trueになった瞬間に鳴らす
+  // （2026-09-08 P1-8/9再レビュー対応。StageAnsweringViewと同じ理由・同じ仕組み。
+  // 詳細なコメントはStageAnsweringView.tsx参照）。
+  const busyPrevRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (answerCountSeenRef.current !== null && turnAnswers.length > answerCountSeenRef.current) {
+    const turnId = currentTurn?.id ?? null;
+    const cue = pendingCue && turnId && pendingCue.turnId === turnId ? pendingCue : null;
+    const currentBusy = cue?.busy ?? false;
+    if (busyPrevRef.current === false && currentBusy) {
       playSfx("answerSubmit");
     }
-    answerCountSeenRef.current = turnAnswers.length;
-  }, [turnAnswers.length]);
+    busyPrevRef.current = currentBusy;
+  }, [pendingCue, currentTurn?.id]);
 
   const scoreEvents: ScoreEvent[] = useMemo(
     () =>

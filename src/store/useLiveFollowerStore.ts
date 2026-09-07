@@ -408,21 +408,29 @@ async function refreshTurnDerived(): Promise<boolean> {
     });
     return true; // 「現在進行中のターンが無い」という正常に確定した状態（interlude/opening等）
   }
-  const turnResult = await fetchTurnAndTopic(live.current_turn_id);
+  // 2026-09-08（P1-8/9再レビュー対応）：以前はturn/topic→answers/scores→cueの順に
+  // 1つずつawaitし、それぞれの直後にrequestIdを確認していた。しかし最後のcue取得の
+  // 直後だけはrequestIdが古くても「pendingCueの反映だけ諦めて処理を継続」する作りに
+  // なっており、その後に続くgroupResult計算・setState（currentTurn/currentTopic/
+  // turnAnswers/activeAnswerScores/myScore/myAnswerCount等）はrequestIdを再確認せず
+  // 無条件に実行されていた。つまりRealtimeイベントが短時間に連続すると、後発の
+  // 呼び出しが先に完了して正しい状態を反映した直後、追い越されたはずの先発の
+  // （今となっては古いターン・回答・点数を持つ）呼び出しがcue取得完了後に遅れて
+  // 追いつき、新しい状態を古い内容で上書きしてしまうことがあった。
+  // 3つの取得をPromise.allで並行実行し、すべて完了した後にrequestIdを1回だけ
+  // 確認してから、関連stateをまとめて1回のsetStateで反映する（部分的な新旧混在を防ぐ）。
+  const [turnResult, answersResult, cueResult] = await Promise.all([
+    fetchTurnAndTopic(live.current_turn_id),
+    fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id),
+    fetchAnsweringCue(live.id),
+  ]);
   if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
   if (!turnResult.ok) return false; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
-  const { turn, topic } = turnResult;
-  const answersResult = await fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id);
-  if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
   if (!answersResult.ok) return false; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
+  const { turn, topic } = turnResult;
   const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } = answersResult;
-
-  // pendingCueは演出の補助情報のため、取得に失敗してもここでは処理を止めない
-  // （既存の値をそのまま保つ。以降はRealtime購読が直接更新し続ける）。
-  const cueResult = await fetchAnsweringCue(live.id);
-  if (requestId === turnDerivedRequestId && cueResult.ok) {
-    useLiveFollowerStore.setState({ pendingCue: cueResult.cue });
-  }
+  // pendingCueだけは演出の補助情報のため、取得に失敗しても他の値の反映は止めない
+  // （cueResult.ok===falseの場合は、直後のsetStateで既存のpendingCueを保つ）。
 
   let groupResult: GroupResultData | null = null;
   if (live.current_phase === "group_result" && turn && topic) {
@@ -459,6 +467,7 @@ async function refreshTurnDerived(): Promise<boolean> {
     currentTopic: topic,
     activeAnswer,
     turnAnswers: answers,
+    pendingCue: cueResult.ok ? cueResult.cue : s.pendingCue,
     // 2026-09-03:「締切直前の最後の1票のボールが端末によって出ない」不具合対策。
     // fetchAnswersAndScoreForTurnが、確定直後(resolved後)も含めて「このターンで
     // 直近にrevealedされた回答」のscoresを常に取得し直すようになったため、ここでは
