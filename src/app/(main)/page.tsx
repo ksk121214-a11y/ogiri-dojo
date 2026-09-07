@@ -64,8 +64,14 @@ export default function Home() {
       {/* 2026-09-06:「X連携は本人確認にのみ使う」旨の補足文言。未ログイン時（authLoadingが
           終わっていて、かつ未ログインと確定した場合）だけ、名前カードのすぐ下に控えめに表示する。
           ログイン中はAccountSummary側で名前・段位が出るため、この案内自体が不要になる。 */}
+      {/* 2026-09-07（不具合修正）：ホーム画面本体の背景はStadiumAppShellのdark面
+          （contentThemeを渡していないためデフォルトのdark）で、--inkはgrainPaper等
+          「明るいカード内」専用の濃色トークン（#171513）のため、ページ地の上に直接
+          置くと暗い背景に暗い文字でほぼ見えなくなっていた。ページ地に直接置く控えめな
+          文字は他の同ページコンポーネント（StadiumHeader等）と同じ--muted-on-dark
+          （明るい背景色向けのトーンダウン済みの色）を使う。 */}
       {!authLoading && !authUser && (
-        <p className="text-center font-sans text-[11px] leading-relaxed text-[var(--ink)]/55">
+        <p className="text-center font-sans text-[11px] leading-relaxed text-[var(--muted-on-dark)]">
           X連携はログイン確認にのみ使用します。
           <br />
           Xへの投稿・DM、タイムラインの取得・保存は行いません。
