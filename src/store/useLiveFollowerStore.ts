@@ -63,6 +63,12 @@ interface LiveFollowerState {
   currentTopic: TopicRow | null;
   activeAnswer: AnswerRow | null;
   turnAnswers: AnswerRow[]; // このターンの全員ぶんの回答（誰の回答が確定したかを見せるため保持）
+  // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが本人以外に
+  // 返らなくなった（answers RLSの変更）ことで、他端末は「誰の回答席を光らせるか」
+  // 「送信ボタンを即座にロックすべきか」をturnAnswersから計算できなくなった。
+  // 回答本文を一切含まない専用テーブル(answering_cues、DBトリガーで自動更新)を
+  // 見て、この2値だけを演出に使う（詳細はsupabase/migrations/0063参照）。
+  pendingCue: { turnId: string; pendingParticipantId: string | null; busy: boolean } | null;
   activeAnswerScores: ScoreRow[]; // 表示中の回答についた採点全員分（採点ボードの玉演出用）
   myAnswerCount: number;
   myScore: number | null;
@@ -313,6 +319,29 @@ async function fetchAnswersAndScoreForTurn(
   return { ok: true, answers: rows, activeAnswer, myScore, myAnswerCount, activeAnswerScores };
 }
 
+// 2026-09-08（P1-8/9セキュリティレビュー対応）：answering_cues
+// （回答本文を一切含まない、演出用の最小限の合図。supabase/migrations/0063参照）を
+// 取得する。取得失敗時は既存の値を保つ（他の取得関数と同じ方針）。
+async function fetchAnsweringCue(
+  liveId: string,
+): Promise<{ ok: true; cue: { turnId: string; pendingParticipantId: string | null; busy: boolean } | null } | { ok: false }> {
+  const { data, error } = await supabase
+    .from("answering_cues")
+    .select("*")
+    .eq("live_id", liveId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[live] answering_cues取得に失敗", error);
+    return { ok: false };
+  }
+  if (!data) return { ok: true, cue: null };
+  const row = data as { turn_id: string; pending_participant_id: string | null; busy: boolean };
+  return {
+    ok: true,
+    cue: { turnId: row.turn_id, pendingParticipantId: row.pending_participant_id, busy: row.busy },
+  };
+}
+
 async function refreshFinalResult() {
   const { live, myParticipant, participants, participantNames } =
     useLiveFollowerStore.getState();
@@ -371,6 +400,7 @@ async function refreshTurnDerived(): Promise<boolean> {
       currentTopic: null,
       activeAnswer: null,
       turnAnswers: [],
+      pendingCue: null,
       activeAnswerScores: [],
       myScore: null,
       myAnswerCount: 0,
@@ -386,6 +416,13 @@ async function refreshTurnDerived(): Promise<boolean> {
   if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
   if (!answersResult.ok) return false; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
   const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } = answersResult;
+
+  // pendingCueは演出の補助情報のため、取得に失敗してもここでは処理を止めない
+  // （既存の値をそのまま保つ。以降はRealtime購読が直接更新し続ける）。
+  const cueResult = await fetchAnsweringCue(live.id);
+  if (requestId === turnDerivedRequestId && cueResult.ok) {
+    useLiveFollowerStore.setState({ pendingCue: cueResult.cue });
+  }
 
   let groupResult: GroupResultData | null = null;
   if (live.current_phase === "group_result" && turn && topic) {
@@ -453,6 +490,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   currentTopic: null,
   activeAnswer: null,
   turnAnswers: [],
+  pendingCue: null,
   activeAnswerScores: [],
   myAnswerCount: 0,
   myScore: null,
@@ -662,7 +700,37 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       )
       .subscribe(onSubscribeStatus);
 
-    channels = [livesCh, participantsCh, answersCh, scoresCh, tsukkomiChannel];
+    // 2026-09-08（P1-8/9セキュリティレビュー対応）：answering_cuesは回答本文を
+    // 一切含まない（pending_participant_id・turn_id・busyだけの）テーブルのため、
+    // tsukkomiと同じくpayloadをそのまま使ってよい（answers/scoresのように
+    // 再取得を挟む必要が無く、演出の即時性を保てる）。
+    const answeringCueChannel = supabase
+      .channel("follower-answering-cue")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "answering_cues" },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as
+            | { live_id: string; turn_id: string; pending_participant_id: string | null; busy: boolean }
+            | undefined;
+          const currentLive = useLiveFollowerStore.getState().live;
+          if (!row || !currentLive || row.live_id !== currentLive.id) return;
+          if (payload.eventType === "DELETE") {
+            useLiveFollowerStore.setState({ pendingCue: null });
+            return;
+          }
+          useLiveFollowerStore.setState({
+            pendingCue: {
+              turnId: row.turn_id,
+              pendingParticipantId: row.pending_participant_id,
+              busy: row.busy,
+            },
+          });
+        },
+      )
+      .subscribe(onSubscribeStatus);
+
+    channels = [livesCh, participantsCh, answersCh, scoresCh, tsukkomiChannel, answeringCueChannel];
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") refetchAll();

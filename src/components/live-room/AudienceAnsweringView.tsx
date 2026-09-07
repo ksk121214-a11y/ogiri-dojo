@@ -40,6 +40,9 @@ export default function AudienceAnsweringView() {
   const myScore = useLiveFollowerStore((s) => s.myScore);
   const submitMyScore = useLiveFollowerStore((s) => s.submitMyScore);
   const sendTsukkomi = useLiveFollowerStore((s) => s.sendTsukkomi);
+  // 2026-09-08（P1-8/9セキュリティレビュー対応）：他のuseLiveFollowerStoreフックと
+  // 同じ並び（早期returnより前）で呼ぶ。Rules of Hooks違反を避けるため。
+  const pendingCue = useLiveFollowerStore((s) => s.pendingCue);
 
   const now = useTickingNow(150);
   // 表示中の回答のIDと紐づけて持つことで、次の回答に切り替わったら
@@ -157,12 +160,12 @@ export default function AudienceAnsweringView() {
   const activeParticipantId = activeAnswer?.participant_id ?? null;
   // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者
   // （StageAnsweringViewと同じ理由・同じ選び方）。
-  const revealPendingParticipantId = activeAnswer
-    ? null
-    : [...turnAnswers]
-        .filter((a) => !a.revealed_at)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]
-        ?.participant_id ?? null;
+  // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが投稿者本人以外に
+  // 返らなくなった（answers RLSの変更、supabase/migrations/0063）ため、
+  // turnAnswersからは他人の未発表回答が分からない。回答本文を含まない専用の合図
+  // (pendingCue)を代わりに見る（StageAnsweringViewと同じ理由）。
+  const cueForCurrentTurn = pendingCue?.turnId === currentTurn.id ? pendingCue : null;
+  const revealPendingParticipantId = activeAnswer ? null : (cueForCurrentTurn?.pendingParticipantId ?? null);
   const canJudge =
     myParticipant.role === "player" && myParticipant.group_id !== currentTurn.group_id;
   // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
