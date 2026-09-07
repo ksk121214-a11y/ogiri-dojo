@@ -13,7 +13,6 @@ import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { supabase } from "@/lib/supabase";
 import { useTickingNow } from "@/lib/useTickingNow";
-import { useAuthStore } from "@/store/useAuthStore";
 
 interface ProfileDetail {
   id: string;
@@ -186,22 +185,34 @@ export default function AdminUserDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  const recordSanction = async (type: string, reason: string, detail: string | null, targetRef: string | null) => {
-    const actorId = useAuthStore.getState().user?.id ?? null;
-    await supabase.from("user_sanctions").insert({
-      user_id: userId,
-      type,
-      reason,
-      detail,
-      target_ref: targetRef,
-      created_by: actorId,
-    });
-    await logAdminAction({
-      action: `user_${type}`,
-      targetType: "profiles",
-      targetId: userId,
-      reason,
-      detail: { detail, targetRef },
+  // 2026-09-07（セキュリティレビュー対応）：以前はここで
+  // 「user_sanctions insert → admin_action_logs insert」を2回の別々の
+  // クライアント呼び出しで行っており、さらに呼び出し元でprofiles.updateも
+  // 別呼び出しだったため、途中で失敗すると記録が不完全になり得た。
+  // is_permanently_suspended等の直接UPDATEをauthenticatedから塞いだ（0059）
+  // ことに合わせ、profiles更新・user_sanctions記録・admin_action_logs記録を
+  // まとめてadmin_apply_user_sanction RPC（同一トランザクション、is_host()を
+  // DB内で検証）に統合した。
+  const applySanction = async (
+    type: "warning" | "suspend_temporary" | "suspend_permanent" | "lift",
+    reason: string,
+    detail: string | null,
+    targetRef: string | null,
+    suspendDays?: number,
+    // 2026-09-07（レビュー指摘対応）：以前はwarning時のnotifications insertを
+    // こことは別にクライアント側から直接行っており、そちらが失敗しても
+    // 「警告を送りました」と表示され得た。RPC内の同一トランザクションに含めた
+    // ため、通知本文はここで一緒に渡す（type!=="warning"の場合は無視される）。
+    notificationBody?: string | null,
+  ) => {
+    return supabase.rpc("admin_apply_user_sanction", {
+      p_user_id: userId,
+      p_type: type,
+      p_reason: reason,
+      p_detail: detail,
+      p_target_ref: targetRef,
+      p_suspend_days: suspendDays ?? null,
+      p_notification_body: notificationBody ?? null,
     });
   };
 
@@ -209,7 +220,12 @@ export default function AdminUserDetailPage() {
     if (pendingAction) return;
     setPendingAction("memo");
     try {
-      const { error } = await supabase.from("profiles").update({ admin_memo: memoDraft }).eq("id", userId);
+      // 2026-09-07（セキュリティレビュー対応）：admin_memo等はauthenticatedからの
+      // 直接UPDATEを塞いだため（0059）、is_host()をDB内で検証するRPC経由にした。
+      const { error } = await supabase.rpc("admin_set_profile_memo", {
+        p_user_id: userId,
+        p_memo: memoDraft,
+      });
       if (error) {
         notifyError(error.message);
         return;
@@ -232,13 +248,22 @@ export default function AdminUserDetailPage() {
     const responseNote = warningResponseNote.trim();
     setPendingAction("warning");
     try {
-      await recordSanction("warning", reason, `${body}\n\n対応：${responseNote}`, warningTargetRef.trim() || null);
-      await supabase.from("notifications").insert({
-        user_id: userId,
-        type: "warning",
-        title: "運営からの警告",
-        body: body || reason,
-      });
+      // 2026-09-07（レビュー指摘対応）：notifications作成もRPC内の同一トランザクション
+      // に含めたため、ここでは1回のRPC呼び出しだけで完結する（失敗すれば通知も
+      // user_sanctions/admin_action_logsも一切残らず、成功時だけ「警告を送りました」
+      // と表示される）。
+      const { error } = await applySanction(
+        "warning",
+        reason,
+        `${body}\n\n対応：${responseNote}`,
+        warningTargetRef.trim() || null,
+        undefined,
+        body || reason,
+      );
+      if (error) {
+        notifyError(error.message);
+        return;
+      }
       notifySuccess("警告を送りました。");
       setWarningFormOpen(false);
       setWarningTargetRef("");
@@ -285,13 +310,11 @@ export default function AdminUserDetailPage() {
     const reason = window.prompt("利用停止理由を入力してください", "") ?? "";
     setPendingAction("suspend_temporary");
     try {
-      const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-      const { error } = await supabase.from("profiles").update({ suspended_until: until }).eq("id", userId);
+      const { error } = await applySanction("suspend_temporary", reason, null, null, days);
       if (error) {
         notifyError(error.message);
         return;
       }
-      await recordSanction("suspend_temporary", reason, `${days}日間`, null);
       notifySuccess(`${days}日間の利用停止にしました。`);
       await load();
     } finally {
@@ -306,12 +329,11 @@ export default function AdminUserDetailPage() {
     const reason = window.prompt("永久停止理由を入力してください", "") ?? "";
     setPendingAction("suspend_permanent");
     try {
-      const { error } = await supabase.from("profiles").update({ is_permanently_suspended: true }).eq("id", userId);
+      const { error } = await applySanction("suspend_permanent", reason, null, null);
       if (error) {
         notifyError(error.message);
         return;
       }
-      await recordSanction("suspend_permanent", reason, null, null);
       notifySuccess("永久停止にしました。");
       await load();
     } finally {
@@ -323,15 +345,11 @@ export default function AdminUserDetailPage() {
     if (pendingAction) return;
     setPendingAction("lift");
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ is_permanently_suspended: false, suspended_until: null })
-        .eq("id", userId);
+      const { error } = await applySanction("lift", "利用停止の解除", null, null);
       if (error) {
         notifyError(error.message);
         return;
       }
-      await recordSanction("lift", "利用停止の解除", null, null);
       notifySuccess("停止を解除しました。");
       await load();
     } finally {
