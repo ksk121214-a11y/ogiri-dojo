@@ -39,6 +39,14 @@ import { useProfileStore } from "@/store/useProfileStore";
 // 【残る制約】ブラウザタブを完全に閉じる・PCがスリープする等、JSの実行自体が
 // 止まるケースまではカバーできない（サーバー側の完全自動進行ではないため）。
 // 管理画面側（AdminShell）に注意文言を表示している。
+//
+// 【停止処理（2026-09-09再レビュー対応）】isHostがfalseになった時（ログアウト・
+// 権限剥奪）、およびこのコンポーネント自体のeffect cleanup時（isHostの変化に
+// 伴う次回実行前のクリーンアップを含む）に、useLiveHostStore.stopHostProgress()を
+// 呼んでtickTimer・Realtime channels・進行用のモジュール変数を片付ける。
+// stopHostProgress()は進行の「世代番号」を進めるため、この時点でinit()の
+// 非同期処理が実行中だった場合も、それが後から完了した際にタイマー/channelを
+// 再作成しない（詳細はuseLiveHostStore.tsのprogressGeneration参照）。
 export default function HostProgressController() {
   const isHost = useProfileStore((s) => s.profile?.isHost ?? false);
   const init = useLiveHostStore((s) => s.init);
@@ -60,6 +68,9 @@ export default function HostProgressController() {
       window.removeEventListener("focus", resume);
       window.removeEventListener("pageshow", resume);
       window.removeEventListener("online", resume);
+      // isHostがfalseへ変わる直前（cleanup）、または（本来は起こらないが念のため）
+      // このコンポーネント自体がアンマウントされる時に、必ず進行を止める。
+      useLiveHostStore.getState().stopHostProgress();
     };
   }, [isHost, init]);
 

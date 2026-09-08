@@ -15,6 +15,7 @@ import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { LIVE_ROOM_TIMING, REVEAL_SEQUENCE_MS, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
+import { resolveLiveChildrenSnapshot } from "@/lib/liveHostChildrenSnapshot";
 import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { supabase } from "@/lib/supabase";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
@@ -68,6 +69,14 @@ interface LiveHostState {
   topicBank: TopicBankRow[]; // お題管理・準備画面での選定用（is_active=trueのみ）
   loading: boolean;
   error: string | null;
+  // 2026-09-09（再レビュー対応）：participants/groups/topics/turnsが「今表示中の
+  // ライブについて、一度でも有効なスナップショットを取得できたか」を示す。
+  // HostProgressControllerがfocus/visibilitychange等のたびにinit()を呼び直す
+  // ようになったことで、一時的な取得失敗のたびにturns/groupsが空配列で
+  // 上書きされ、advanceIfDueが「次のターンが無い」と誤判定してfinal_resultへ
+  // 誤って進んでしまう恐れがあった。この値がfalseの間はadvanceIfDueの自動進行を
+  // 一切行わない（詳細はinit()参照）。
+  childrenSnapshotReady: boolean;
   // 事故防止・操作性改善：最後に正常に最新状態を取得できた時刻（refresh()・init()で更新）。
   lastRefreshedAt: string | null;
 
@@ -107,10 +116,21 @@ interface LiveHostState {
   // 2026-09-03: closeLiveのポイント付与が失敗した場合に、closed後いつでも
   // 単独で再試行するためのアクション（管理画面のライブ結果詳細から呼ぶ）。
   retryRankRewards: (liveId: string) => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-09（再レビュー対応）：ログアウト・isHost剥奪時にHostProgressControllerから
+  // 呼ぶ。tickTimer・Realtime channels・進行用のモジュール変数一式を片付け、
+  // 以後古い（stopされる前の）init()呼び出しが後から完了してもタイマー・
+  // channelを再作成しないようにする（世代番号で判定。詳細はinit()参照）。
+  stopHostProgress: () => void;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let channels: ReturnType<typeof supabase.channel>[] = [];
+// 2026-09-09（再レビュー対応）：stopHostProgress()を呼ぶたびに+1する世代番号。
+// init()の非同期処理は開始時点の世代を覚えておき、要所（特にtickTimer/Realtime
+// channelを作る直前）で現在の世代と比較する。ずれていれば、そのinit()呼び出しは
+// 実行中にstopされたということなので、以降の処理・タイマー/channel作成を行わない
+// （stopした後に、古いinit()が遅れて完了してタイマー等を復活させてしまう事故を防ぐ）。
+let progressGeneration = 0;
 // 2026-09-09（複数管理画面タブ対策）：init()は/live/hostページのuseEffectだけでなく、
 // RootLayoutに常駐するHostProgressController（visibilitychange/focus/pageshow/online
 // でも再度init()を呼ぶ）からも呼ばれるようになった。短時間に複数の呼び出しが重なった
@@ -288,15 +308,6 @@ async function fetchScoresForAnswers(
   return { ok: true, data: map };
 }
 
-// round → group.group_order の順に並べたターン一覧。
-function orderedTurns(turns: TurnRow[], groups: GroupRow[]): TurnRow[] {
-  const orderOf = new Map(groups.map((g) => [g.id, g.group_order]));
-  return [...turns].sort((a, b) => {
-    if (a.round !== b.round) return a.round - b.round;
-    return (orderOf.get(a.group_id) ?? 0) - (orderOf.get(b.group_id) ?? 0);
-  });
-}
-
 async function subscribeLiveChannels(liveId: string) {
   cleanupChannels();
 
@@ -304,21 +315,10 @@ async function subscribeLiveChannels(liveId: string) {
     const result = await fetchLiveChildren(liveId);
     if (!result.ok) return; // 取得失敗時は既存stateを維持する（次のRealtimeイベント/再接続で再試行される）
     const profiles = await fetchProfilesFor(result.data.participants);
-    useLiveHostStore.setState({ ...result.data, profiles });
+    useLiveHostStore.setState({ ...result.data, childrenSnapshotReady: true, profiles });
   };
 
-  const refetchAnswersAndScores = async () => {
-    const { live } = useLiveHostStore.getState();
-    if (!live?.current_turn_id) return;
-    await refreshAnswersForTurn(live.current_turn_id);
-    const active = useLiveHostStore
-      .getState()
-      .answers.find((a) => a.revealed_at && !a.resolved);
-    if (active) {
-      const result = await fetchScoresForAnswer(active.id);
-      if (result.ok) useLiveHostStore.setState({ scores: result.data });
-    }
-  };
+  const refetchAnswersAndScores = resyncAnswersAndScoresForCurrentLive;
 
   // 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
   // RPC（begin_game等）や別タブからのlives行の更新は、この購読が無いとRealtimeに
@@ -416,7 +416,34 @@ async function refreshAnswersForTurn(turnId: string | null) {
   // 「未処理回答なし」と誤認してprocessRevealQueue/resolveIfDueが誤動作しうる）。
   // 次のRealtimeイベントや次回tickでの再試行に委ねる。
   if (!result.ok) return;
+  // 2026-09-09（再レビュー対応）：この取得は非同期のため、完了する頃には既に
+  // 別のターンへ進んでいる可能性がある（例：0行更新後の再取得が完了する前に、
+  // 別タブの遷移がRealtime経由で先に届いた場合）。取得を開始したturnIdが、
+  // 今のlive.current_turn_idと一致する場合だけ反映する（一致しなければ古い
+  // 取得結果なので捨てる。次のRealtime/tickでの取得に委ねる）。
+  if (useLiveHostStore.getState().live?.current_turn_id !== turnId) return;
   useLiveHostStore.setState({ answers: result.data, scores: [] });
+}
+
+// 2026-09-09（再レビュー対応）：processRevealQueue/resolveIfDueが「条件付き
+// UPDATEが0行だった」場合に呼ぶ、現在ターンのanswers/scoresの再同期。
+// Realtimeイベントの到着（切断・通信状況によって取り逃す可能性がある）だけに
+// 依存せず、DBから直接取り直すことでローカルstateを追いつかせる。
+async function resyncAnswersAndScoresForCurrentLive() {
+  const { live } = useLiveHostStore.getState();
+  if (!live?.current_turn_id) return;
+  const turnId = live.current_turn_id;
+  await refreshAnswersForTurn(turnId);
+  // refreshAnswersForTurn自体がturnIdの一致を確認してから反映するため、ここでも
+  // 同じturnIdのままであることを確認してからscoresの再同期に進む（ターンが
+  // 変わっていれば、以降の探索は無意味だが害も無いので単に打ち切る）。
+  if (useLiveHostStore.getState().live?.current_turn_id !== turnId) return;
+  const active = useLiveHostStore.getState().answers.find((a) => a.revealed_at && !a.resolved);
+  if (!active) return;
+  const result = await fetchScoresForAnswer(active.id);
+  if (result.ok && useLiveHostStore.getState().live?.current_turn_id === turnId) {
+    useLiveHostStore.setState({ scores: result.data });
+  }
 }
 
 async function updateLive(id: string, patch: Partial<LiveRow>) {
@@ -468,7 +495,15 @@ async function updateLiveIfPhase(
   }
   const rows = (data ?? []) as LiveRow[];
   if (rows.length === 0) {
-    // 別の管理画面タブが既にこの遷移を行った後（想定内。エラーではない）。
+    // 0行更新：別の管理画面タブが既にこの遷移を行った後の可能性が高いが、
+    // Realtimeイベントは切断や通信状況によって取り逃すことがあるため、
+    // 「別タブが更新済みのはず」と決めつけてstateを古いまま放置しない。
+    // 必ずDBから対象ライブを再取得し、stateへ反映する（Realtimeの到着だけに
+    // 依存しない）。取得自体に失敗した場合は次のtickで再試行される。
+    const latest = await fetchLiveRow(id);
+    if (latest.ok && latest.data) {
+      useLiveHostStore.setState({ live: latest.data });
+    }
     return { ok: true, updated: false, error: null };
   }
   useLiveHostStore.setState({ live: rows[0] });
@@ -531,14 +566,18 @@ async function processRevealQueue() {
     return;
   }
   if (!revealedRows || revealedRows.length === 0) {
-    // 別のタブが既にこの回答をrevealした後（想定内。エラーではない）。
+    // 0行更新：別のタブが既にこの回答をrevealした可能性が高いが、Realtimeイベントは
+    // 切断・通信状況によって取り逃すことがあるため、決めつけずDBの現在ターンの
+    // answers/scoresを取り直してローカルstateを追いつかせる（Realtimeの到着だけに
+    // 依存しない）。
+    await resyncAnswersAndScoresForCurrentLive();
     return;
   }
   const currentTurnId = useLiveHostStore.getState().live?.current_turn_id;
   if (currentTurnId) {
-    const refreshed = await fetchAnswersForTurn(currentTurnId);
-    // 取得失敗時は前の状態のまま（次のtick/Realtimeイベントでの再試行に委ねる）。
-    if (refreshed.ok) useLiveHostStore.setState({ answers: refreshed.data, scores: [] });
+    // refreshAnswersForTurn自体がturnIdの一致を確認してから反映するため、この
+    // 取得が完了するまでの間にターンが切り替わっていても古い結果で上書きしない。
+    await refreshAnswersForTurn(currentTurnId);
   }
 }
 
@@ -630,7 +669,17 @@ async function resolveIfDue() {
       return;
     }
     if (!resolvedRows || resolvedRows.length === 0) {
-      // 別のタブが既にこの回答を確定済み（想定内。エラーではない）。
+      // 0行更新：別のタブが既にこの回答を確定済みの可能性が高いが、Realtime
+      // イベントは切断・通信状況によって取り逃すことがあるため、決めつけず
+      // DBの現在ターンのanswers/scores、およびlives（reveal_sequence_until等）を
+      // 取り直してローカルstateを追いつかせる（Realtimeの到着だけに依存しない）。
+      await resyncAnswersAndScoresForCurrentLive();
+      if (state.live) {
+        const latestLive = await fetchLiveRow(state.live.id);
+        if (latestLive.ok && latestLive.data) {
+          useLiveHostStore.setState({ live: latestLive.data });
+        }
+      }
       return;
     }
 
@@ -812,6 +861,12 @@ async function advanceIfDue() {
   const state = useLiveHostStore.getState();
   const { live } = state;
   if (!live) return;
+  // 2026-09-09（再レビュー対応）：participants/groups/topics/turnsの有効な
+  // スナップショットを一度も取得できていない間は、自動進行を一切行わない。
+  // 特にgroup_result→次ターンの判定はturns/groupsを見て「次のターンがあるか」を
+  // 決めるため、一時的な取得失敗でturns/groupsが空のまま進行してしまうと、
+  // 残りの組を飛ばしてfinal_resultへ誤って進む恐れがある（詳細はinit()参照）。
+  if (!state.childrenSnapshotReady) return;
 
   if (live.current_phase === "answering") {
     // src/store/useLiveDemoStore.tsのtick()と同じ考え方：このtickを始める時点でbusy
@@ -857,32 +912,61 @@ async function advanceIfDue() {
       useLiveHostStore.setState({ answers: dbAnswers });
       return; // 現在表示中の1件・演出シーケンス・未表示の回答が残っている間は待つ
     }
-    answeringRemainingMsTrue = null;
-    lastAnsweringTickAt = null;
+    // 2026-09-09（再レビュー対応）：以前はここでanswringRemainingMsTrue/
+    // lastAnsweringTickAtを両方nullへ戻してからDB更新を試みていたが、その後の
+    // 更新が通信エラーで失敗すると、次のtickの時点でanswringRemainingMsTrueが
+    // nullのため「if (answeringRemainingMsTrue === null || ... > 0) return;」に
+    // 引っかかり、二度とこの遷移を試みられなくなっていた（0秒のまま永久停止）。
+    // 更新に成功した（＝自分がこの遷移を行った）ことを確認できるまでは0のまま
+    // 維持し、次のtickで再試行できるようにする。
+    answeringRemainingMsTrue = 0;
+
     // reveal_sequence_untilは意図的にここに含めない：もしDBにこの列がまだ無い環境
     // （マイグレーション未適用）だと、存在しない列を含むUPDATEはPostgreSQL側で
     // エラーになりUPDATE全体が失敗する。これをcurrent_phase遷移と同じ呼び出しに
     // 混ぜていたせいで、マイグレーション未適用の環境ではフェーズ遷移そのものが
-    // 常に失敗し、時間切れになっても画面が進まなくなっていた。次の周のresolveJudging
-    // が新しい値を上書きするため、ここで明示的にnullへ戻す必要は無い。
-    // 2026-09-09（複数管理画面タブ対策）：想定している現在の状態(answering・
-    // このturn_id)と一致する行だけを更新する。複数の管理画面タブが同時に
-    // この遷移を検知しても、実際に更新できた1つのタブだけがturnsのstatus更新を
-    // 行う（0行更新＝別タブが既に処理済みは想定内の正常系としてスキップする）。
-    const { updated: advancedToGroupResult } = await updateLiveIfPhase(
-      latest.id,
-      "answering",
-      latest.current_turn_id,
-      {
-        current_phase: "group_result",
-        phase_deadline: new Date(Date.now() + LIVE_ROOM_TIMING.groupResultMs).toISOString(),
-        answering_paused: false,
-        answering_remaining_ms: null,
-      },
-    );
-    if (advancedToGroupResult && latest.current_turn_id) {
-      await supabase.from("turns").update({ status: "done" }).eq("id", latest.current_turn_id);
+    // 常に失敗し、時間切れになっても画面が進まなくなっていた。
+    // 2026-09-09（再レビュー対応・0065）：以前はupdateLiveIfPhase（lives更新）＋
+    // 別呼び出しのturns status更新という2段階だったため、turns更新のエラーを
+    // 確認しておらず、また途中で失敗した場合に両方をロールバックする手段も
+    // 無かった。現在ターンのdone化とlives更新を1つのSECURITY DEFINER RPC
+    // （1トランザクション、is_host()確認・行ロック・期待するphase/turn_idの
+    // 確認込み）にまとめた。複数タブから同時に呼ばれても実際の遷移は1回だけ、
+    // 既に他タブが遷移済みならupdated:falseが返る（エラーにはならない）。
+    const { data: advanceData, error: advanceError } = await supabase
+      .rpc("host_advance_answering_to_group_result", {
+        p_live_id: latest.id,
+        p_expected_turn_id: latest.current_turn_id,
+        p_group_result_deadline: new Date(Date.now() + LIVE_ROOM_TIMING.groupResultMs).toISOString(),
+      })
+      .single();
+
+    if (advanceError) {
+      console.error("host_advance_answering_to_group_result failed", advanceError);
+      // 通信エラー等：answeringRemainingMsTrueは0のままなので、次のtickで再試行する。
+      return;
     }
+
+    const advanceResult = advanceData as { updated: boolean; live: LiveRow | null };
+    if (advanceResult.live) {
+      useLiveHostStore.setState({ live: advanceResult.live });
+    }
+
+    if (advanceResult.updated) {
+      // 自分の呼び出しで遷移できた：ローカルタイマーをクリアする。
+      answeringRemainingMsTrue = null;
+      lastAnsweringTickAt = null;
+      return;
+    }
+
+    if (advanceResult.live && advanceResult.live.current_phase !== "answering") {
+      // 0行更新：RPCの戻り値から、別タブが既に本当に遷移済みだったと確認できた。
+      // このタブのローカルタイマーもクリアしてよい。
+      answeringRemainingMsTrue = null;
+      lastAnsweringTickAt = null;
+    }
+    // まだ"answering"のまま（何らかの理由でexpected turn_idが一致しなかった等）
+    // なら、answeringRemainingMsTrueは0のままにしておき、次のtickで再試行する。
     return;
   }
 
@@ -892,29 +976,40 @@ async function advanceIfDue() {
   if (Date.now() < new Date(latest.phase_deadline).getTime()) return;
 
   if (live.current_phase === "group_result") {
-    const sorted = orderedTurns(state.turns, state.groups);
-    const currentIndex = sorted.findIndex((t) => t.id === live.current_turn_id);
-    const nextTurn = sorted[currentIndex + 1];
-    if (nextTurn) {
-      // 2026-09-09（複数管理画面タブ対策）：livesの遷移を「今group_result・この
-      // turn_id」という条件付きで先に試み、実際に更新できたタブだけがturnsの
-      // status更新・回答一覧の再取得まで行う。
-      const { updated } = await updateLiveIfPhase(live.id, "group_result", live.current_turn_id, {
-        current_turn_id: nextTurn.id,
-        current_phase: "topic_reveal",
-        phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
-        answering_paused: false,
-        answering_remaining_ms: null,
-      });
-      if (updated) {
-        await supabase.from("turns").update({ status: "active" }).eq("id", nextTurn.id);
-        await refreshAnswersForTurn(nextTurn.id);
-      }
-    } else {
-      await updateLiveIfPhase(live.id, "group_result", live.current_turn_id, {
-        current_phase: "final_result",
-        phase_deadline: null,
-      });
+    // 2026-09-09（再レビュー対応・0065）：以前は次ターンの特定(JS側でturns/groups
+    // から計算)・turnsのstatus更新・lives更新が別々の呼び出しに分かれており、
+    // turns更新のエラーを確認していなかった。次ターンの特定・active化・lives更新を
+    // 1つのSECURITY DEFINER RPC（1トランザクション、is_host()確認・行ロック・
+    // 期待するphase/turn_idの確認込み）にまとめた。次ターンがなければRPC内で
+    // final_resultへ進める。複数タブから同時に呼ばれても実際の遷移は1回だけ、
+    // 既に他タブが遷移済みならupdated:falseが返る（エラーにはならない）。
+    const { data: advanceData, error: advanceError } = await supabase
+      .rpc("host_advance_group_result_to_next", {
+        p_live_id: live.id,
+        p_expected_turn_id: live.current_turn_id,
+        p_topic_reveal_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
+      })
+      .single();
+
+    if (advanceError) {
+      console.error("host_advance_group_result_to_next failed", advanceError);
+      return; // 通信エラー等：次のtickで再試行する
+    }
+
+    const advanceResult = advanceData as {
+      updated: boolean;
+      advanced_to: "topic_reveal" | "final_result" | null;
+      live: LiveRow | null;
+    };
+    if (advanceResult.live) {
+      useLiveHostStore.setState({ live: advanceResult.live });
+    }
+    if (
+      advanceResult.updated &&
+      advanceResult.advanced_to === "topic_reveal" &&
+      advanceResult.live?.current_turn_id
+    ) {
+      await refreshAnswersForTurn(advanceResult.live.current_turn_id);
     }
     return;
   }
@@ -960,6 +1055,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   topicBank: [],
   loading: true,
   error: null,
+  childrenSnapshotReady: false,
   lastRefreshedAt: null,
 
   loadTopicBank: async () => {
@@ -976,10 +1072,17 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     // 同じ処理を並行して始めず、その完了を待つだけにする（intervalやRealtime
     // channelの二重作成防止。詳細はinitInFlightの定義コメント参照）。
     if (initInFlight) return initInFlight;
+    // 2026-09-09（再レビュー対応）：この呼び出しの「世代」を覚えておく。
+    // stopHostProgress()が呼ばれるとprogressGenerationが+1され、この非同期処理が
+    // 後から（stopされた後に）続きを実行しようとした際、要所でこの値を比較して
+    // 中断する（stop後にtickTimer/Realtime channelが復活しないようにするため）。
+    const myGeneration = progressGeneration;
     const run = async () => {
+      const prevState = get();
       set({ loading: true, error: null });
       void get().loadTopicBank();
       const activeLiveResult = await fetchActiveLive();
+      if (myGeneration !== progressGeneration) return; // stopされた
       if (!activeLiveResult.ok) {
         // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
         // 取得失敗を「ライブが無い」と誤認して準備画面に進めると、実際には進行中の
@@ -994,11 +1097,36 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       }
       const live = activeLiveResult.data;
       if (live) {
+        // 2026-09-09（再レビュー対応）：fetchLiveChildren失敗時、無条件に空配列で
+        // 上書きすると、HostProgressControllerがfocus/visibilitychange等の
+        // たびに呼ぶinit()が一時的な通信失敗のたびにturns/groupsを空にしてしまい、
+        // advanceIfDueが「次のターンが無い」と誤判定してfinal_resultへ誤って
+        // 進む恐れがあった。同じライブについての直前のデータがあればそれを維持し、
+        // 別のライブ（またはinit()が初めて成功する前）なら空のままにする。
+        const sameLiveAsBefore = prevState.live?.id === live.id;
         const childrenResult = await fetchLiveChildren(live.id);
-        const children = childrenResult.ok
-          ? childrenResult.data
-          : { participants: [], groups: [], topics: [], turns: [] };
-        const profiles = await fetchProfilesFor(children.participants);
+        // 一度でも有効なスナップショットを取得できていれば（今回失敗しても）
+        // readyのまま維持する。新しいライブで初回から失敗した場合はfalseのまま
+        // ＝advanceIfDueの自動進行を行わない（詳細はadvanceIfDue・
+        // src/lib/liveHostChildrenSnapshot.ts参照）。
+        const { children, ready: childrenSnapshotReady } = resolveLiveChildrenSnapshot({
+          fetchOk: childrenResult.ok,
+          freshChildren: childrenResult.data,
+          sameLiveAsBefore,
+          prevChildren: {
+            participants: prevState.participants,
+            groups: prevState.groups,
+            topics: prevState.topics,
+            turns: prevState.turns,
+          },
+          prevReady: prevState.childrenSnapshotReady,
+          emptyChildren: { participants: [], groups: [], topics: [], turns: [] },
+        });
+        const profiles = childrenResult.ok
+          ? await fetchProfilesFor(children.participants)
+          : sameLiveAsBefore
+            ? prevState.profiles
+            : [];
         const answersResult = live.current_turn_id
           ? await fetchAnswersForTurn(live.current_turn_id)
           : { ok: true as const, data: [] as AnswerRow[] };
@@ -1007,6 +1135,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
           resolvedAnswers.map((a) => a.id),
         );
+        if (myGeneration !== progressGeneration) return; // stopされた
         const anyFailed =
           !childrenResult.ok ||
           !answersResult.ok ||
@@ -1015,6 +1144,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         set({
           live,
           ...children,
+          childrenSnapshotReady,
           profiles,
           answers: answersResult.ok ? answersResult.data : [],
           resolvedAnswers,
@@ -1043,11 +1173,18 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
           answeringRemainingMsTrue = null;
           lastAnsweringTickAt = null;
         }
+        if (myGeneration !== progressGeneration) return; // stopされた（channelを作らない）
         await subscribeLiveChannels(live.id);
       } else {
-        set({ live: null, loading: false });
+        set({ live: null, loading: false, childrenSnapshotReady: false });
       }
 
+      if (myGeneration !== progressGeneration) {
+        // stopされた：ここまでの間にsubscribeLiveChannelsでchannelを作って
+        // しまっていた場合に備え、念のため片付けてからtickTimerも作らずに終える。
+        cleanupChannels();
+        return;
+      }
       if (tickTimer) clearInterval(tickTimer);
       tickTimer = setInterval(() => {
         advanceIfDue();
@@ -1058,6 +1195,26 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     });
     initInFlight = promise;
     return promise;
+  },
+
+  // 2026-09-09（再レビュー対応）：ログアウト・isHost剥奪時にHostProgressControllerの
+  // effect cleanupから呼ぶ。進行中のinit()を無効化（progressGenerationを進める）
+  // した上で、tickTimer・Realtime channels・進行用のモジュール変数一式を片付ける。
+  stopHostProgress: () => {
+    progressGeneration += 1;
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+    cleanupChannels();
+    initInFlight = null;
+    pendingRevealAt = null;
+    answeringRemainingMsTrue = null;
+    lastAnsweringTickAt = null;
+    resolvingAnswerIds.clear();
+    botCooldownUntil.clear();
+    answerPerfectRoundIds.clear();
+    lastBotTsukkomiAt = 0;
   },
 
   // 事故防止・操作性改善：ページ全体をリロードせず、現在表示中のライブ情報一式だけを
@@ -1076,7 +1233,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       if (liveError) return { ok: false, reason: liveError.message };
       if (!freshLiveData) {
         // ライブ行自体が無くなっている（通常は起こらないが念のため）。
-        set({ live: null, lastRefreshedAt: new Date().toISOString() });
+        set({ live: null, childrenSnapshotReady: false, lastRefreshedAt: new Date().toISOString() });
         return { ok: true };
       }
       const freshLive = freshLiveData as LiveRow;
@@ -1084,14 +1241,22 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
       // 各取得が失敗した項目は、[]やnullで上書きせず直前のstateをそのまま維持する。
       const childrenResult = await fetchLiveChildren(live.id);
-      const children = childrenResult.ok
-        ? childrenResult.data
-        : {
-            participants: prev.participants,
-            groups: prev.groups,
-            topics: prev.topics,
-            turns: prev.turns,
-          };
+      // refresh()は常に同じライブ(live.id)に対してしか呼ばれないため、常に
+      // sameLiveAsBefore:trueとしてresolveLiveChildrenSnapshotへ渡す
+      // （init()と同じ判断ロジックを共有する。詳細はsrc/lib/liveHostChildrenSnapshot.ts参照）。
+      const { children, ready: childrenSnapshotReady } = resolveLiveChildrenSnapshot({
+        fetchOk: childrenResult.ok,
+        freshChildren: childrenResult.data,
+        sameLiveAsBefore: true,
+        prevChildren: {
+          participants: prev.participants,
+          groups: prev.groups,
+          topics: prev.topics,
+          turns: prev.turns,
+        },
+        prevReady: prev.childrenSnapshotReady,
+        emptyChildren: { participants: [], groups: [], topics: [], turns: [] },
+      });
       const profiles = childrenResult.ok ? await fetchProfilesFor(children.participants) : prev.profiles;
       const answersResult = freshLive.current_turn_id
         ? await fetchAnswersForTurn(freshLive.current_turn_id)
@@ -1117,6 +1282,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         groups: children.groups,
         topics: children.topics,
         turns: children.turns,
+        childrenSnapshotReady,
         profiles,
         answers,
         scores,
@@ -1620,7 +1786,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     }
     if (childrenResult.ok) {
       const profiles = await fetchProfilesFor(childrenResult.data.participants);
-      set({ ...childrenResult.data, profiles, error: liveResult.ok ? null : get().error });
+      set({
+        ...childrenResult.data,
+        childrenSnapshotReady: true,
+        profiles,
+        error: liveResult.ok ? null : get().error,
+      });
     } else if (liveResult.ok) {
       // ゲーム開始自体（begin_game）は既に成功しているので、ここでは進行は止めず、
       // 参加者一覧などの取得失敗だけをerrorとして伝える（次のRealtime更新や
