@@ -730,6 +730,54 @@ begin
 end $$;
 
 -- ============================================================
+-- テスト25（再レビュー3回目・項目1）：answering_cues.revisionは、
+--           recompute_answering_cue_for_turnを呼ぶたびに単調増加する
+--           （テスト19の時点でlives.current_turn_idはpending_turn_id側へ
+--           既に進んでいるため、そちら＝現在のターンに対して確認する）。
+-- ============================================================
+do $$
+declare
+  v_live_id uuid;
+  v_current_turn_id uuid;
+  v_rev1 bigint;
+  v_rev2 bigint;
+begin
+  select live_id, pending_turn_id into v_live_id, v_current_turn_id from _t0063_ctx2;
+
+  select revision into v_rev1 from public.answering_cues where live_id = v_live_id;
+  if v_rev1 is null or v_rev1 <= 0 then
+    raise exception 'FAIL: revisionが正の値になっていない(revision=%)', v_rev1;
+  end if;
+
+  perform public.recompute_answering_cue_for_turn(v_current_turn_id);
+  select revision into v_rev2 from public.answering_cues where live_id = v_live_id;
+  if v_rev2 <= v_rev1 then
+    raise exception 'FAIL: 再計算のたびにrevisionが増えていない(before=%, after=%)', v_rev1, v_rev2;
+  end if;
+
+  raise notice 'PASS: revisionは正の値で、再計算のたびに単調増加する(% → %)', v_rev1, v_rev2;
+end $$;
+
+-- ============================================================
+-- テスト26（再レビュー3回目・項目1）：revision列に正数チェック制約が
+--           入っている（0を含む0以下への更新が拒否される）。
+-- ============================================================
+do $$
+declare
+  v_live_id uuid;
+begin
+  select live_id into v_live_id from _t0063_ctx2;
+  reset role;
+  begin
+    update public.answering_cues set revision = 0 where live_id = v_live_id;
+    raise exception 'FAIL: revision=0への更新がチェック制約で拒否されなかった';
+  exception
+    when check_violation then
+      raise notice 'PASS: revisionの正数チェック制約(revision > 0)が効いている';
+  end;
+end $$;
+
+-- ============================================================
 -- テスト20（項目5）：公開済み結果に含まれるお題は第三者から取得できる
 --           （1本目のライブ、test15で既に結果公開済み）。
 -- ============================================================
@@ -746,6 +794,26 @@ begin
     raise exception 'FAIL: 公開済み結果に含まれるお題を第三者が取得できない';
   end if;
   raise notice 'PASS: 公開済み結果に含まれるお題は第三者から取得できる';
+end $$;
+
+-- ============================================================
+-- テスト20b（再レビュー3回目・項目2）：公開済み結果に含まれる回答は、お題だけ
+--           でなく回答本文自体も、同じライブのincluded回答であれば第三者から
+--           引き続き取得できる（既存の公開結果表示を壊していないことの確認）。
+-- ============================================================
+do $$
+declare
+  v_answer_id uuid;
+  v_body text;
+begin
+  select id into v_answer_id from public.answers where turn_id = (select active_turn_id from _t0063_ctx);
+  set local role authenticated;
+  perform set_config('myapp.uid', 'd1000000-0000-0000-0000-0000000000ff', true);
+  select body into v_body from public.answers where id = v_answer_id;
+  if v_body is null then
+    raise exception 'FAIL: 公開済み結果に含まれる回答本文を第三者が取得できない';
+  end if;
+  raise notice 'PASS: 公開済み結果に含まれる回答本文は第三者から取得できる（既存の公開結果表示は壊れていない）';
 end $$;
 
 -- ============================================================
@@ -768,10 +836,34 @@ begin
 end $$;
 
 -- ============================================================
--- テスト22（項目5）：別ライブの公開結果に不整合に紐付けても、無関係な
---           （未公開の）別ライブのお題は取得できない。t2.live_id=r.live_id /
---           topics.live_id=r.live_idの明示的な一致条件が無いと、理屈の上では
---           「1本目(公開済み)のsns_live_resultsに2本目(未公開)の回答を
+-- テスト21b（再レビュー3回目・項目2）：未公開ライブの回答本文は第三者から
+--           取得できない（2本目のライブは進行中でresults未公開、結果にも
+--           一切紐付いていない状態）。
+-- ============================================================
+do $$
+declare
+  v_answer_id uuid;
+  v_found boolean;
+begin
+  select id into v_answer_id from public.answers
+    where turn_id = (select active_turn_id from _t0063_ctx2)
+    order by created_at asc limit 1;
+  set local role authenticated;
+  perform set_config('myapp.uid', 'd1000000-0000-0000-0000-0000000000ff', true);
+  select exists(select 1 from public.answers where id = v_answer_id) into v_found;
+  if v_found then
+    raise exception 'FAIL: 未公開ライブの回答を第三者が取得できてしまった';
+  end if;
+  raise notice 'PASS: 未公開ライブの回答は第三者から取得できない';
+end $$;
+
+-- ============================================================
+-- テスト22（項目5・再レビュー3回目で項目2も統合）：別ライブの公開結果に
+--           不整合に紐付けても、無関係な（未公開の）別ライブの「お題」と
+--           「回答本文」のどちらも取得できない。t2.live_id=r.live_id /
+--           topics.live_id=r.live_id（お題側）、r.live_id=answers.live_id /
+--           t.live_id=r.live_id（回答側）の明示的な一致条件が無いと、理屈の
+--           上では「1本目(公開済み)のsns_live_resultsに2本目(未公開)の回答を
 --           誤って(あるいは悪意を持って)紐付けた」場合に漏れうる経路を、
 --           意図的にその不整合な行を作って検証する。
 -- ============================================================
@@ -780,7 +872,8 @@ declare
   v_live1_result_id uuid;
   v_live2_topic_id uuid;
   v_live2_answer_id uuid;
-  v_found boolean;
+  v_found_topic boolean;
+  v_found_answer boolean;
 begin
   reset role;
   select id into v_live1_result_id from public.sns_live_results
@@ -795,16 +888,80 @@ begin
 
   set local role authenticated;
   perform set_config('myapp.uid', 'd1000000-0000-0000-0000-0000000000ff', true);
-  select exists(select 1 from public.topics where id = v_live2_topic_id) into v_found;
+  select exists(select 1 from public.topics where id = v_live2_topic_id) into v_found_topic;
+  select exists(select 1 from public.answers where id = v_live2_answer_id) into v_found_answer;
 
   reset role;
   delete from public.sns_live_result_answers
     where live_result_id = v_live1_result_id and answer_id = v_live2_answer_id;
 
-  if v_found then
+  if v_found_topic then
     raise exception 'FAIL: 別ライブの公開結果に不整合に紐付けることで、無関係なライブの未公開お題が取得できてしまった';
   end if;
-  raise notice 'PASS: t2.live_id=r.live_id・topics.live_id=r.live_idの一致条件により、別ライブの公開結果を経由した漏洩は防がれる';
+  if v_found_answer then
+    raise exception 'FAIL: 別ライブの公開結果に不整合に紐付けることで、無関係なライブの未公開回答本文が取得できてしまった';
+  end if;
+  raise notice 'PASS: 一致条件（お題・回答本文とも）により、別ライブの公開結果を経由した漏洩は防がれる';
+end $$;
+
+-- ============================================================
+-- テスト22b（再レビュー3回目・項目2）：不整合な紐付けの有無に関わらず、
+--           回答者本人は自分の未公開回答を引き続き取得できる（回帰確認。
+--           既存のテスト9と同じ確認をlive2でも行う）。
+-- ============================================================
+do $$
+declare
+  v_answerer_user_id uuid;
+  v_answer_id uuid;
+  v_count int;
+begin
+  select answerer_user_id into v_answerer_user_id from _t0063_ctx2;
+  select id into v_answer_id from public.answers
+    where turn_id = (select active_turn_id from _t0063_ctx2)
+    order by created_at asc limit 1;
+
+  set local role authenticated;
+  perform set_config('myapp.uid', v_answerer_user_id::text, true);
+  select count(*) into v_count from public.answers where id = v_answer_id;
+  if v_count <> 1 then
+    raise exception 'FAIL: 回答者本人が自分の未公開回答を取得できない';
+  end if;
+  raise notice 'PASS: 回答者本人は引き続き自分の未公開回答を取得できる';
+end $$;
+
+-- ============================================================
+-- テスト22c（再レビュー3回目・項目2）：発表済み(revealed_at設定済み)回答は、
+--           同じライブの非退場参加者が引き続き取得できる（回帰確認。既存の
+--           テスト13と同じ確認をlive2でも行う）。
+-- ============================================================
+do $$
+declare
+  v_live_id uuid;
+  v_answer_id uuid;
+  v_answerer_participant_id uuid;
+  v_judge_user_id uuid;
+  v_count int;
+begin
+  select live_id, answerer_participant_id into v_live_id, v_answerer_participant_id from _t0063_ctx2;
+  select id into v_answer_id from public.answers
+    where turn_id = (select active_turn_id from _t0063_ctx2)
+    order by created_at asc limit 1;
+
+  reset role;
+  update public.answers set revealed_at = coalesce(revealed_at, now()) where id = v_answer_id;
+
+  -- 回答者本人ではない、同じライブの別のplayerを1人特定する。
+  select p.user_id into v_judge_user_id from public.participants p
+    where p.live_id = v_live_id and p.role = 'player' and p.id <> v_answerer_participant_id
+    limit 1;
+
+  set local role authenticated;
+  perform set_config('myapp.uid', v_judge_user_id::text, true);
+  select count(*) into v_count from public.answers where id = v_answer_id;
+  if v_count <> 1 then
+    raise exception 'FAIL: 発表済み回答を同じライブの他参加者が取得できない';
+  end if;
+  raise notice 'PASS: 発表済み回答は引き続き同じライブの非退場参加者が取得できる';
 end $$;
 
 -- ============================================================

@@ -85,6 +85,22 @@
 -- 正しく効くよう、ここで改めて正しい構文で設定し直す。念のため、本migration
 -- 自身が新設する関数にも個別に明示revokeを行い、デフォルトの挙動だけに
 -- 頼らない多層防御にする。
+--
+-- 【再レビュー指摘（2回目）への対応（0063適用前、この版で反映済み）】
+--
+-- d) answering_cuesの新旧逆転：fetchAnsweringCue()による再取得と、
+--    answering_cuesのRealtimeイベント受信は別々の非同期経路で同じ
+--    pendingCue stateを更新しており、どちらが先に完了するかは保証されない
+--    （古い再取得が新しいRealtimeイベントの後に完了して上書きする、または
+--    その逆）。単調増加するrevision列を追加し、UPSERTのたびに+1する。
+--    クライアント側はliveId・revisionの両方を見て「より新しい方（同値含む）」
+--    だけを採用する（詳細はsrc/lib/answeringCue.ts参照）。
+--
+-- e) answers_select_own_revealed_host_or_publishedの公開済みライブ結果経由の
+--    分岐も、topics同様にr.live_id = answers.live_idが抜けていた。無関係な
+--    別ライブ（未公開）の回答が誤って公開済みライブのsns_live_result_answers
+--    に紐付けられた場合、その回答本文自体が第三者に漏れる余地があったため、
+--    r.live_id = answers.live_id / t.live_id = r.live_id を追加した。
 
 begin;
 
@@ -163,11 +179,23 @@ create policy "answers_select_own_revealed_host_or_published"
   using (
     is_host()
     or exists (
+      -- 【再レビュー指摘（2回目）対応】r.live_id = answers.live_id を明示的に
+      -- 要求する（さらにturns経由でも同じライブであることを二重に確認する）。
+      -- これが無いと、topicsの公開判定と同様に、無関係な別ライブ（未公開）の
+      -- 回答が誤って（あるいは悪意を持って）公開済みライブのsns_live_result_answers
+      -- に紐付けられた場合、sra.included and l.results_publishedの条件だけを
+      -- 満たしてしまい、その未公開の回答本文自体が第三者に漏れる余地が
+      -- 理屈の上で残っていた。
       select 1
       from public.sns_live_result_answers sra
       join public.sns_live_results r on r.id = sra.live_result_id
       join public.lives l on l.id = r.live_id
-      where sra.answer_id = answers.id and sra.included and l.results_published
+      join public.turns t on t.id = answers.turn_id
+      where sra.answer_id = answers.id
+        and sra.included
+        and l.results_published
+        and r.live_id = answers.live_id
+        and t.live_id = r.live_id
     )
     or exists (
       select 1 from public.participants p
@@ -194,6 +222,15 @@ create table public.answering_cues (
   -- 未処理の回答（未発表、または発表済みだが未確定）が存在するかどうか。
   -- 送信ボタンの即時ロックに使う（answers本体を見なくても判定できる）。
   busy boolean not null default false,
+  -- 【再レビュー指摘（2回目）対応】fetchAnsweringCue()による再取得と、
+  -- answering_cuesのRealtimeイベント受信は別々の非同期経路であり、どちらが
+  -- 先に完了するかは保証されない。単調増加するrevisionを持たせることで、
+  -- クライアント側は「後から届いた方」ではなく「revisionが大きい（同じ場合を
+  -- 含む）方」を採用でき、古い取得結果や遅延したRealtimeイベントによる
+  -- 新旧逆転（回答席の点灯・送信ロック・送信音・pending状態のずれ）を防げる。
+  -- 1ライブにつき1行(PK=live_id)なので、ターンが変わってもrevisionは
+  -- リセットされず単調に増え続ける。
+  revision bigint not null default 1 check (revision > 0),
   updated_at timestamptz not null default now()
 );
 
@@ -267,12 +304,16 @@ begin
       and (revealed_at is null or (revealed_at is not null and resolved = false))
   ) into v_busy;
 
+  -- 新規行はrevision=1（列のdefault）から始まり、既存行を更新するたびに
+  -- revisionを+1する（同一ライブ内でターンが変わっても、行はPK=live_idで
+  -- 使い回されるため、リセットされず単調に増え続ける）。
   insert into public.answering_cues (live_id, turn_id, pending_participant_id, busy, updated_at)
   values (v_live_id, p_turn_id, v_pending, v_busy, now())
   on conflict (live_id) do update
     set turn_id = excluded.turn_id,
         pending_participant_id = excluded.pending_participant_id,
         busy = excluded.busy,
+        revision = public.answering_cues.revision + 1,
         updated_at = now();
 end;
 $$;

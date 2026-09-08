@@ -4,6 +4,7 @@
 import { create } from "zustand";
 
 import { MAX_ANSWER_BODY_LENGTH } from "@/data/liveRoomTiming";
+import { resolveAnsweringCue, type AnsweringCueSnapshot } from "@/lib/answeringCue";
 import {
   getBestAnswer,
   getGroupTurnRanking,
@@ -68,7 +69,11 @@ interface LiveFollowerState {
   // 「送信ボタンを即座にロックすべきか」をturnAnswersから計算できなくなった。
   // 回答本文を一切含まない専用テーブル(answering_cues、DBトリガーで自動更新)を
   // 見て、この2値だけを演出に使う（詳細はsupabase/migrations/0063参照）。
-  pendingCue: { turnId: string; pendingParticipantId: string | null; busy: boolean } | null;
+  // 2026-09-08（再レビュー2回目対応）：fetchAnsweringCue()による再取得と
+  // Realtimeイベント受信の2経路が同じstateを個別に更新するため、新旧逆転
+  // （古い方が後から届いて上書きする）が起こり得た。liveId・revisionを保持し、
+  // 反映は必ずsrc/lib/answeringCue.tsのresolveAnsweringCue経由で行う。
+  pendingCue: AnsweringCueSnapshot | null;
   activeAnswerScores: ScoreRow[]; // 表示中の回答についた採点全員分（採点ボードの玉演出用）
   myAnswerCount: number;
   myScore: number | null;
@@ -322,12 +327,14 @@ async function fetchAnswersAndScoreForTurn(
 // 2026-09-08（P1-8/9セキュリティレビュー対応）：answering_cues
 // （回答本文を一切含まない、演出用の最小限の合図。supabase/migrations/0063参照）を
 // 取得する。取得失敗時は既存の値を保つ（他の取得関数と同じ方針）。
+// 2026-09-08（再レビュー2回目対応）：select("*")ではなく、新旧判定に必要な列
+// （liveId比較用のlive_id・revision比較用のrevision含む）だけを明示的に取得する。
 async function fetchAnsweringCue(
   liveId: string,
-): Promise<{ ok: true; cue: { turnId: string; pendingParticipantId: string | null; busy: boolean } | null } | { ok: false }> {
+): Promise<{ ok: true; cue: AnsweringCueSnapshot | null } | { ok: false }> {
   const { data, error } = await supabase
     .from("answering_cues")
-    .select("*")
+    .select("live_id, turn_id, pending_participant_id, busy, revision")
     .eq("live_id", liveId)
     .maybeSingle();
   if (error) {
@@ -335,10 +342,22 @@ async function fetchAnsweringCue(
     return { ok: false };
   }
   if (!data) return { ok: true, cue: null };
-  const row = data as { turn_id: string; pending_participant_id: string | null; busy: boolean };
+  const row = data as {
+    live_id: string;
+    turn_id: string;
+    pending_participant_id: string | null;
+    busy: boolean;
+    revision: number;
+  };
   return {
     ok: true,
-    cue: { turnId: row.turn_id, pendingParticipantId: row.pending_participant_id, busy: row.busy },
+    cue: {
+      liveId: row.live_id,
+      turnId: row.turn_id,
+      pendingParticipantId: row.pending_participant_id,
+      busy: row.busy,
+      revision: row.revision,
+    },
   };
 }
 
@@ -395,6 +414,9 @@ async function refreshTurnDerived(): Promise<boolean> {
   } = useLiveFollowerStore.getState();
   if (!live?.current_turn_id) {
     if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
+    // ライブが無い・current_turn_idが無い（interlude/opening等）状態は、revisionの
+    // 大小に関わらず確定的にpendingCueを消してよい（次にcurrent_turn_idが
+    // 立った時、pendingCueがnullなのでresolveAnsweringCueは新しい値を必ず採用する）。
     useLiveFollowerStore.setState({
       currentTurn: null,
       currentTopic: null,
@@ -431,6 +453,11 @@ async function refreshTurnDerived(): Promise<boolean> {
   const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } = answersResult;
   // pendingCueだけは演出の補助情報のため、取得に失敗しても他の値の反映は止めない
   // （cueResult.ok===falseの場合は、直後のsetStateで既存のpendingCueを保つ）。
+  // 2026-09-08（再レビュー2回目対応）：取得できた場合も無条件に上書きせず、
+  // 必ずresolveAnsweringCue経由で「同じ実行中に届いたかもしれないRealtime
+  // イベントより新しいか」をliveId・revisionで判定してから反映する
+  // （setStateのupdater内でs.pendingCue＝反映直前の最新値を見るため、この
+  // 関数の実行途中にRealtimeイベントが先に反映されていても正しく比較できる）。
 
   let groupResult: GroupResultData | null = null;
   if (live.current_phase === "group_result" && turn && topic) {
@@ -467,7 +494,7 @@ async function refreshTurnDerived(): Promise<boolean> {
     currentTopic: topic,
     activeAnswer,
     turnAnswers: answers,
-    pendingCue: cueResult.ok ? cueResult.cue : s.pendingCue,
+    pendingCue: cueResult.ok ? resolveAnsweringCue(s.pendingCue, live.id, cueResult.cue) : s.pendingCue,
     // 2026-09-03:「締切直前の最後の1票のボールが端末によって出ない」不具合対策。
     // fetchAnswersAndScoreForTurnが、確定直後(resolved後)も含めて「このターンで
     // 直近にrevealedされた回答」のscoresを常に取得し直すようになったため、ここでは
@@ -713,6 +740,12 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // 一切含まない（pending_participant_id・turn_id・busyだけの）テーブルのため、
     // tsukkomiと同じくpayloadをそのまま使ってよい（answers/scoresのように
     // 再取得を挟む必要が無く、演出の即時性を保てる）。
+    // 2026-09-08（再レビュー2回目対応）：fetchAnsweringCue()による再取得と、
+    // ここでのRealtime受信は別々の非同期経路のため、どちらが先に完了するかは
+    // 保証されない。payloadを無条件にsetStateするのではなく、必ず
+    // resolveAnsweringCue経由で「liveId・revisionから見て今の値より新しいか」を
+    // 判定してから反映する（判定ロジックをrefreshTurnDerived側と共通化することで、
+    // 2経路での新旧判定のずれを防ぐ）。
     const answeringCueChannel = supabase
       .channel("follower-answering-cue")
       .on(
@@ -720,21 +753,29 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         { event: "*", schema: "public", table: "answering_cues" },
         (payload) => {
           const row = (payload.new ?? payload.old) as
-            | { live_id: string; turn_id: string; pending_participant_id: string | null; busy: boolean }
+            | {
+                live_id: string;
+                turn_id: string;
+                pending_participant_id: string | null;
+                busy: boolean;
+                revision: number;
+              }
             | undefined;
           const currentLive = useLiveFollowerStore.getState().live;
           if (!row || !currentLive || row.live_id !== currentLive.id) return;
-          if (payload.eventType === "DELETE") {
-            useLiveFollowerStore.setState({ pendingCue: null });
-            return;
-          }
-          useLiveFollowerStore.setState({
-            pendingCue: {
-              turnId: row.turn_id,
-              pendingParticipantId: row.pending_participant_id,
-              busy: row.busy,
-            },
-          });
+          const incoming: AnsweringCueSnapshot | null =
+            payload.eventType === "DELETE"
+              ? null
+              : {
+                  liveId: row.live_id,
+                  turnId: row.turn_id,
+                  pendingParticipantId: row.pending_participant_id,
+                  busy: row.busy,
+                  revision: row.revision,
+                };
+          useLiveFollowerStore.setState((s) => ({
+            pendingCue: resolveAnsweringCue(s.pendingCue, row.live_id, incoming),
+          }));
         },
       )
       .subscribe(onSubscribeStatus);
