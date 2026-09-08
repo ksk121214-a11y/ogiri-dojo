@@ -14,7 +14,7 @@ const PRODUCTION_TIMING = {
   answerMs: 60_000, // 2026-08-27改訂：90秒→60秒
   judgeMs: 10_000, // 実仕様どおり：採点10秒
   judgeGraceMs: 400, // 採点タイマー表示が0になった後の滑り込み猶予
-  groupResultMs: 30_000, // 実仕様: 組結果20〜40秒
+  groupResultMs: 15_000, // 2026-09-08改訂：30秒→15秒（実仕様: 組結果15秒）
   // 回答表示前の間。採点確定→弾ける演出→この間→次の回答表示、という流れなので、
   // 弾ける演出(ScoringPhysicsBoardのresolvedPopDelayMs+ポップの尺)より
   // 十分長く、かつ消えた後にも間が感じられる長さにしてある。

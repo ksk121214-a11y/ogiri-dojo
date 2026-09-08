@@ -400,19 +400,30 @@ begin
 end $$;
 
 -- ============================================================
--- テスト13: 審査開始後（revealed_atが立った後）、審査員が現在の回答を取得でき、
---           pending状態が正しく解除される。
+-- テスト13: 審査開始後（revealed_atが立った後）、審査員が現在の回答を取得できる。
+--           pending_participant_idの解除タイミングについては、
+--           2026-09-09の0064（回答席の消灯防止）で仕様を変更した：
+--           以前は「revealed_atが立った時点」でpending_participant_idを
+--           nullへ解除していたが、これだとフロント側でactiveAnswerの反映が
+--           遅れる間に回答席が一瞬消灯する不具合があったため、0064以降は
+--           「resolved=trueになった時点（採点確定時）」まで同じ回答者を
+--           指し続けるように変更している。この期待値は0064のテスト
+--           （supabase/tests/0064_keep_answering_cue_participant_through_reveal.test.sql）
+--           に合わせて更新した（0063本体は書き換えていない）。
 -- ============================================================
 do $$
 declare
   v_live_id uuid;
   v_active_turn_id uuid;
+  v_answerer_participant_id uuid;
   v_judge_user_id uuid;
   v_answer_id uuid;
   v_count int;
   v_pending uuid;
 begin
-  select live_id, active_turn_id, judge_user_id into v_live_id, v_active_turn_id, v_judge_user_id from _t0063_ctx;
+  select live_id, active_turn_id, answerer_participant_id, judge_user_id
+    into v_live_id, v_active_turn_id, v_answerer_participant_id, v_judge_user_id
+    from _t0063_ctx;
   select id into v_answer_id from public.answers where turn_id = v_active_turn_id;
 
   reset role;
@@ -426,12 +437,13 @@ begin
     raise exception 'FAIL: 発表後に審査員が回答を取得できない';
   end if;
 
+  -- 0064以降の仕様：reveal直後（resolved=falseのまま）はまだ回答者を指し続ける。
   select pending_participant_id into v_pending from public.answering_cues where live_id = v_live_id;
-  if v_pending is not null then
-    raise exception 'FAIL: 発表後もpending_participant_idが解除されていない';
+  if v_pending is distinct from v_answerer_participant_id then
+    raise exception 'FAIL: reveal直後（採点確定前）にpending_participant_idが回答者以外になっている(got=%)', v_pending;
   end if;
 
-  raise notice 'PASS: 発表後は審査員も回答を取得でき、pending状態も正しく解除される';
+  raise notice 'PASS: 発表後は審査員も回答を取得でき、pending_participant_idは採点確定前まで同じ回答者を指し続ける（0064仕様）';
 end $$;
 
 -- ============================================================

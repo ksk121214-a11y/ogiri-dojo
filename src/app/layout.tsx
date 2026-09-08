@@ -3,6 +3,7 @@ import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
 
 import AmbientBgmController from "@/components/app/AmbientBgmController";
 import AudioProvider from "@/components/app/AudioProvider";
+import HostProgressController from "@/components/app/HostProgressController";
 import StadiumSfxController from "@/components/app/StadiumSfxController";
 
 import "./globals.css";
@@ -54,6 +55,7 @@ export default function RootLayout({
         <AudioProvider>
           <AmbientBgmController />
           <StadiumSfxController />
+          <HostProgressController />
           {children}
         </AudioProvider>
       </body>

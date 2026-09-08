@@ -177,12 +177,18 @@ export default function StageAnsweringView() {
     .map((p) => ({ id: p.id, name: participantNames[p.id] ?? "（名前未設定）" }));
 
   const activeParticipantId = activeAnswer?.participant_id ?? null;
-  // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者。
+  // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者、および
+  // reveal直後にactiveAnswerの反映がまだ届いていない間の対象者。
   // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが投稿者本人以外に
   // 返らなくなった（answers RLSの変更、supabase/migrations/0063）ため、以前のように
   // turnAnswers（=answers全件）から他人の未発表回答を直接見つけて判定することが
   // できなくなった。回答本文を含まない専用の合図(pendingCue、DBトリガーで自動更新)を
   // 代わりに見る。currentTurnと一致しない（切り替わり途中の古い合図）場合は無視する。
+  // 2026-09-08（0064）：pendingCue.pendingParticipantIdは「まだ採点確定していない
+  // 回答者」を採点確定(resolved=true)まで指し続ける（reveal時にnullへ戻らない）よう
+  // DB側を修正した。これにより、activeAnswerの反映がまだ届いていない一瞬の間も
+  // 同じparticipantIdがここに残り続け、回答席の光が途切れない
+  // （詳細はsupabase/migrations/0064参照）。
   const cueForCurrentTurn = pendingCue?.turnId === currentTurn.id ? pendingCue : null;
   const revealPendingParticipantId = activeAnswer ? null : (cueForCurrentTurn?.pendingParticipantId ?? null);
   // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。

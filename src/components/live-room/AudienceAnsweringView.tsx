@@ -162,12 +162,16 @@ export default function AudienceAnsweringView() {
     .map((p) => ({ id: p.id, name: participantNames[p.id] ?? "（名前未設定）" }));
 
   const activeParticipantId = activeAnswer?.participant_id ?? null;
-  // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者
+  // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者、および
+  // reveal直後にactiveAnswerの反映がまだ届いていない間の対象者
   // （StageAnsweringViewと同じ理由・同じ選び方）。
   // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが投稿者本人以外に
   // 返らなくなった（answers RLSの変更、supabase/migrations/0063）ため、
   // turnAnswersからは他人の未発表回答が分からない。回答本文を含まない専用の合図
   // (pendingCue)を代わりに見る（StageAnsweringViewと同じ理由）。
+  // 2026-09-08（0064）：pendingCue.pendingParticipantIdは採点確定(resolved=true)まで
+  // 同じ回答者を指し続ける（reveal時にnullへ戻らない）ため、activeAnswerの反映が
+  // 遅れても回答席の光が途切れない（StageAnsweringViewと同じ、supabase/migrations/0064参照）。
   const cueForCurrentTurn = pendingCue?.turnId === currentTurn.id ? pendingCue : null;
   const revealPendingParticipantId = activeAnswer ? null : (cueForCurrentTurn?.pendingParticipantId ?? null);
   const canJudge =

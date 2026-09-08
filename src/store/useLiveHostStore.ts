@@ -111,6 +111,14 @@ interface LiveHostState {
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let channels: ReturnType<typeof supabase.channel>[] = [];
+// 2026-09-09（複数管理画面タブ対策）：init()は/live/hostページのuseEffectだけでなく、
+// RootLayoutに常駐するHostProgressController（visibilitychange/focus/pageshow/online
+// でも再度init()を呼ぶ）からも呼ばれるようになった。短時間に複数の呼び出しが重なった
+// 場合、後発の呼び出しが同じ非同期処理を並行してもう一度始めてしまうと、
+// tickTimer/channels自体はcleanup→再作成で最終的には1つに収束するものの、無駄な
+// 重複リクエストが発生する。進行中のinit()があれば同じPromiseを返すことで、
+// 呼び出しを実質1本化する（intervalやRealtime channelが増殖しないことの追加の保険）。
+let initInFlight: Promise<void> | null = null;
 // ボット観客がたまにツッコミ/爆笑/拍手を送るためのブロードキャストチャンネル。
 // useLiveFollowerStore.tsと同じ"follower-tsukkomi"チャンネルに直接送るため、
 // 参加者としての書き込み(bot.client)は不要で、司会クライアント自身の
@@ -429,6 +437,44 @@ async function updateLive(id: string, patch: Partial<LiveRow>) {
   return { data: data as LiveRow | null, error };
 }
 
+// 2026-09-09（複数管理画面タブ対策）：フェーズ遷移専用のupdateLive。
+// 「今まさにこのタブが見ている状態(expectedPhase・expectedTurnId)」をUPDATEの
+// WHERE条件そのものに含めることで、同じライブ進行を複数の管理画面タブ
+// （例：/live/hostを開いたタブと、RootLayoutの常駐コントローラーが動く別タブ）が
+// 同時に検知した場合でも、実際に行を更新できたタブだけがupdated:trueを受け取り、
+// 後続処理（ターンの状態更新・演出締切の設定等）を行う。既に他のタブが同じ遷移を
+// 済ませていた場合はWHERE条件に一致する行が無く0行更新になるが、これはエラー
+// ではなく「想定内の正常系」としてupdated:falseを返す（呼び出し側は後続処理を
+// スキップするだけで良い）。
+// expectedTurnIdをundefinedにすると、current_turn_idの一致は確認しない
+// （interludeやgroup_resultからfinal_resultへの遷移など、current_turn_idを
+// 問わない遷移向け）。
+async function updateLiveIfPhase(
+  id: string,
+  expectedPhase: LivePhase,
+  expectedTurnId: string | null | undefined,
+  patch: Partial<LiveRow>,
+): Promise<{ ok: boolean; updated: boolean; error: unknown }> {
+  let query = supabase.from("lives").update(patch).eq("id", id).eq("current_phase", expectedPhase);
+  if (expectedTurnId !== undefined) {
+    query = expectedTurnId === null
+      ? query.is("current_turn_id", null)
+      : query.eq("current_turn_id", expectedTurnId);
+  }
+  const { data, error } = await query.select();
+  if (error) {
+    console.error("updateLiveIfPhase failed", { id, expectedPhase, expectedTurnId, patch, error });
+    return { ok: false, updated: false, error };
+  }
+  const rows = (data ?? []) as LiveRow[];
+  if (rows.length === 0) {
+    // 別の管理画面タブが既にこの遷移を行った後（想定内。エラーではない）。
+    return { ok: true, updated: false, error: null };
+  }
+  useLiveHostStore.setState({ live: rows[0] });
+  return { ok: true, updated: true, error: null };
+}
+
 // 現在のターンの回答キューを処理する：表示中(revealed)の回答が無く、
 // 未表示の回答があれば、一呼吸(revealDelayMs)置いてから1件だけrevealする。
 async function processRevealQueue() {
@@ -465,18 +511,32 @@ async function processRevealQueue() {
 
   const target = queued[0];
   const now = Date.now();
-  const { error } = await supabase
+  // 2026-09-09（複数管理画面タブ対策）：revealed_at is null AND resolved=false
+  // の行だけを対象にする。複数タブが同時に同じ回答をrevealしようとしても、
+  // 実際に更新できた1つのタブだけが0件でない結果(revealedRows)を受け取る
+  // （0行更新＝別タブが既にrevealした後は、想定内としてここで終える）。
+  const { data: revealedRows, error } = await supabase
     .from("answers")
     .update({
       revealed_at: new Date(now).toISOString(),
       judging_ends_at: new Date(now + LIVE_ROOM_TIMING.judgeMs).toISOString(),
     })
-    .eq("id", target.id);
+    .eq("id", target.id)
+    .is("revealed_at", null)
+    .eq("resolved", false)
+    .select("id");
   pendingRevealAt = null;
-  if (!error && useLiveHostStore.getState().live?.current_turn_id) {
-    const refreshed = await fetchAnswersForTurn(
-      useLiveHostStore.getState().live!.current_turn_id!,
-    );
+  if (error) {
+    console.error("processRevealQueue: revealの更新に失敗", error);
+    return;
+  }
+  if (!revealedRows || revealedRows.length === 0) {
+    // 別のタブが既にこの回答をrevealした後（想定内。エラーではない）。
+    return;
+  }
+  const currentTurnId = useLiveHostStore.getState().live?.current_turn_id;
+  if (currentTurnId) {
+    const refreshed = await fetchAnswersForTurn(currentTurnId);
     // 取得失敗時は前の状態のまま（次のtick/Realtimeイベントでの再試行に委ねる）。
     if (refreshed.ok) useLiveHostStore.setState({ answers: refreshed.data, scores: [] });
   }
@@ -547,7 +607,12 @@ async function resolveIfDue() {
     const topScoreVotes = freshScores.filter((s) => s.points === 3).length;
     const laughTriggered = topScoreVotes > Math.floor(eligibleJudges.length / 2);
 
-    const { error } = await supabase
+    // 2026-09-09（複数管理画面タブ対策）：resolved=falseの行だけを対象にする。
+    // 複数タブが同時に同じ回答を確定しようとしても、実際に更新できた1つの
+    // タブだけが0件でない結果(resolvedRows)を受け取り、演出締切の設定・
+    // resolvedAnswersへの追記まで行う（0行更新＝別タブが既に確定済みは
+    // 想定内の正常系としてここで終える）。
+    const { data: resolvedRows, error } = await supabase
       .from("answers")
       .update({
         resolved: true,
@@ -556,19 +621,30 @@ async function resolveIfDue() {
         judge_count: eligibleJudges.length,
         laugh_triggered: laughTriggered,
       })
-      .eq("id", active.id);
+      .eq("id", active.id)
+      .eq("resolved", false)
+      .select("id");
+
+    if (error) {
+      console.error("resolveIfDue: 採点確定の更新に失敗", error);
+      return;
+    }
+    if (!resolvedRows || resolvedRows.length === 0) {
+      // 別のタブが既にこの回答を確定済み（想定内。エラーではない）。
+      return;
+    }
 
     // 採点確定と同時に、演出シーケンス（フリップが消える→間を置く→玉が消える→
     // 得点表示→しばらく見せる→間を置く）が終わるまでの締切を全クライアントに配信する。
     // これによりlives.answering_paused（isAnsweringBusy経由）が、この一連の間ずっと
     // trueのままになり、他の参加者の送信もロックされ続ける。
-    if (!error && state.live) {
+    if (state.live) {
       await updateLive(state.live.id, {
         reveal_sequence_until: new Date(Date.now() + REVEAL_SEQUENCE_MS).toISOString(),
       });
     }
 
-    if (!error && state.live?.current_turn_id) {
+    if (state.live?.current_turn_id) {
       const answersResult = await fetchAnswersForTurn(state.live.current_turn_id);
       const resolvedEntry: AnswerRow = {
         ...active,
@@ -789,13 +865,22 @@ async function advanceIfDue() {
     // 混ぜていたせいで、マイグレーション未適用の環境ではフェーズ遷移そのものが
     // 常に失敗し、時間切れになっても画面が進まなくなっていた。次の周のresolveJudging
     // が新しい値を上書きするため、ここで明示的にnullへ戻す必要は無い。
-    await updateLive(latest.id, {
-      current_phase: "group_result",
-      phase_deadline: new Date(Date.now() + LIVE_ROOM_TIMING.groupResultMs).toISOString(),
-      answering_paused: false,
-      answering_remaining_ms: null,
-    });
-    if (latest.current_turn_id) {
+    // 2026-09-09（複数管理画面タブ対策）：想定している現在の状態(answering・
+    // このturn_id)と一致する行だけを更新する。複数の管理画面タブが同時に
+    // この遷移を検知しても、実際に更新できた1つのタブだけがturnsのstatus更新を
+    // 行う（0行更新＝別タブが既に処理済みは想定内の正常系としてスキップする）。
+    const { updated: advancedToGroupResult } = await updateLiveIfPhase(
+      latest.id,
+      "answering",
+      latest.current_turn_id,
+      {
+        current_phase: "group_result",
+        phase_deadline: new Date(Date.now() + LIVE_ROOM_TIMING.groupResultMs).toISOString(),
+        answering_paused: false,
+        answering_remaining_ms: null,
+      },
+    );
+    if (advancedToGroupResult && latest.current_turn_id) {
       await supabase.from("turns").update({ status: "done" }).eq("id", latest.current_turn_id);
     }
     return;
@@ -811,26 +896,40 @@ async function advanceIfDue() {
     const currentIndex = sorted.findIndex((t) => t.id === live.current_turn_id);
     const nextTurn = sorted[currentIndex + 1];
     if (nextTurn) {
-      await supabase.from("turns").update({ status: "active" }).eq("id", nextTurn.id);
-      await updateLive(live.id, {
+      // 2026-09-09（複数管理画面タブ対策）：livesの遷移を「今group_result・この
+      // turn_id」という条件付きで先に試み、実際に更新できたタブだけがturnsの
+      // status更新・回答一覧の再取得まで行う。
+      const { updated } = await updateLiveIfPhase(live.id, "group_result", live.current_turn_id, {
         current_turn_id: nextTurn.id,
         current_phase: "topic_reveal",
         phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
         answering_paused: false,
         answering_remaining_ms: null,
       });
-      await refreshAnswersForTurn(nextTurn.id);
+      if (updated) {
+        await supabase.from("turns").update({ status: "active" }).eq("id", nextTurn.id);
+        await refreshAnswersForTurn(nextTurn.id);
+      }
     } else {
-      await updateLive(live.id, { current_phase: "final_result", phase_deadline: null });
+      await updateLiveIfPhase(live.id, "group_result", live.current_turn_id, {
+        current_phase: "final_result",
+        phase_deadline: null,
+      });
     }
     return;
   }
 
   if (live.current_phase === "topic_reveal") {
     const answerMs = PHASE_DURATIONS_MS.answering!;
+    // ローカルの残り時間トラッキングは、このタブがDB更新に勝ったかどうかに
+    // 関わらず初期化する（後続のadvanceIfDueの「answering」分岐がこの
+    // ローカル値を見て進行判定するため。DB上の実際の遷移自体は下の
+    // updateLiveIfPhaseがガードするので、二重にはならない）。
     answeringRemainingMsTrue = answerMs;
     lastAnsweringTickAt = Date.now();
-    await updateLive(live.id, {
+    // 2026-09-09（複数管理画面タブ対策）：想定している現在の状態(topic_reveal・
+    // このturn_id)と一致する行だけを更新する。
+    await updateLiveIfPhase(live.id, "topic_reveal", live.current_turn_id, {
       current_phase: "answering",
       phase_deadline: new Date(Date.now() + answerMs).toISOString(),
     });
@@ -872,82 +971,93 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     if (!error) set({ topicBank: (data ?? []) as TopicBankRow[] });
   },
 
-  init: async () => {
-    set({ loading: true, error: null });
-    void get().loadTopicBank();
-    const activeLiveResult = await fetchActiveLive();
-    if (!activeLiveResult.ok) {
-      // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
-      // 取得失敗を「ライブが無い」と誤認して準備画面に進めると、実際には進行中の
-      // ライブがあるのに気づかず二重に作成しようとする事故につながる。
-      set({
-        loading: false,
-        error: "ライブの状態を取得できませんでした。再読み込みしてください。",
-      });
-      if (tickTimer) clearInterval(tickTimer);
-      tickTimer = setInterval(() => advanceIfDue(), 500);
-      return;
-    }
-    const live = activeLiveResult.data;
-    if (live) {
-      const childrenResult = await fetchLiveChildren(live.id);
-      const children = childrenResult.ok
-        ? childrenResult.data
-        : { participants: [], groups: [], topics: [], turns: [] };
-      const profiles = await fetchProfilesFor(children.participants);
-      const answersResult = live.current_turn_id
-        ? await fetchAnswersForTurn(live.current_turn_id)
-        : { ok: true as const, data: [] as AnswerRow[] };
-      const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
-      const resolvedAnswers = resolvedAnswersResult.ok ? resolvedAnswersResult.data : [];
-      const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
-        resolvedAnswers.map((a) => a.id),
-      );
-      const anyFailed =
-        !childrenResult.ok ||
-        !answersResult.ok ||
-        !resolvedAnswersResult.ok ||
-        !resolvedScoresByAnswerResult.ok;
-      set({
-        live,
-        ...children,
-        profiles,
-        answers: answersResult.ok ? answersResult.data : [],
-        resolvedAnswers,
-        resolvedScoresByAnswer: resolvedScoresByAnswerResult.ok
-          ? resolvedScoresByAnswerResult.data
-          : {},
-        loading: false,
-        lastRefreshedAt: new Date().toISOString(),
-        error: anyFailed
-          ? "一部の情報の取得に失敗しました。「最新状態を取得」で再試行してください。"
-          : null,
-      });
-      // 司会画面を開き直した時、answeringフェーズの途中であればanswerRemainingMsTrue
-      // （ホスト内メモリのみ）を最善努力で復元する。これが無いと再読込のたびに
-      // 強制終了の判定が効かなくなる（pendingRevealAt等と同じ既知の制約：司会ブラウザの
-      // 再読込・再起動をまたいだ完全な復元は今回のスコープ外。DBの一時停止スナップショット
-      // をそのまま使うため、直前に長い連続審査があった場合はズレる可能性がある）。
-      if (live.current_phase === "answering") {
-        answeringRemainingMsTrue = live.answering_paused
-          ? (live.answering_remaining_ms ?? 0)
-          : live.phase_deadline
-            ? Math.max(0, new Date(live.phase_deadline).getTime() - Date.now())
-            : null;
-        lastAnsweringTickAt = Date.now();
-      } else {
-        answeringRemainingMsTrue = null;
-        lastAnsweringTickAt = null;
+  init: () => {
+    // 2026-09-09（複数管理画面タブ対策）：既に進行中のinit()があれば、新しく
+    // 同じ処理を並行して始めず、その完了を待つだけにする（intervalやRealtime
+    // channelの二重作成防止。詳細はinitInFlightの定義コメント参照）。
+    if (initInFlight) return initInFlight;
+    const run = async () => {
+      set({ loading: true, error: null });
+      void get().loadTopicBank();
+      const activeLiveResult = await fetchActiveLive();
+      if (!activeLiveResult.ok) {
+        // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
+        // 取得失敗を「ライブが無い」と誤認して準備画面に進めると、実際には進行中の
+        // ライブがあるのに気づかず二重に作成しようとする事故につながる。
+        set({
+          loading: false,
+          error: "ライブの状態を取得できませんでした。再読み込みしてください。",
+        });
+        if (tickTimer) clearInterval(tickTimer);
+        tickTimer = setInterval(() => advanceIfDue(), 500);
+        return;
       }
-      await subscribeLiveChannels(live.id);
-    } else {
-      set({ live: null, loading: false });
-    }
+      const live = activeLiveResult.data;
+      if (live) {
+        const childrenResult = await fetchLiveChildren(live.id);
+        const children = childrenResult.ok
+          ? childrenResult.data
+          : { participants: [], groups: [], topics: [], turns: [] };
+        const profiles = await fetchProfilesFor(children.participants);
+        const answersResult = live.current_turn_id
+          ? await fetchAnswersForTurn(live.current_turn_id)
+          : { ok: true as const, data: [] as AnswerRow[] };
+        const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
+        const resolvedAnswers = resolvedAnswersResult.ok ? resolvedAnswersResult.data : [];
+        const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
+          resolvedAnswers.map((a) => a.id),
+        );
+        const anyFailed =
+          !childrenResult.ok ||
+          !answersResult.ok ||
+          !resolvedAnswersResult.ok ||
+          !resolvedScoresByAnswerResult.ok;
+        set({
+          live,
+          ...children,
+          profiles,
+          answers: answersResult.ok ? answersResult.data : [],
+          resolvedAnswers,
+          resolvedScoresByAnswer: resolvedScoresByAnswerResult.ok
+            ? resolvedScoresByAnswerResult.data
+            : {},
+          loading: false,
+          lastRefreshedAt: new Date().toISOString(),
+          error: anyFailed
+            ? "一部の情報の取得に失敗しました。「最新状態を取得」で再試行してください。"
+            : null,
+        });
+        // 司会画面を開き直した時、answeringフェーズの途中であればanswerRemainingMsTrue
+        // （ホスト内メモリのみ）を最善努力で復元する。これが無いと再読込のたびに
+        // 強制終了の判定が効かなくなる（pendingRevealAt等と同じ既知の制約：司会ブラウザの
+        // 再読込・再起動をまたいだ完全な復元は今回のスコープ外。DBの一時停止スナップショット
+        // をそのまま使うため、直前に長い連続審査があった場合はズレる可能性がある）。
+        if (live.current_phase === "answering") {
+          answeringRemainingMsTrue = live.answering_paused
+            ? (live.answering_remaining_ms ?? 0)
+            : live.phase_deadline
+              ? Math.max(0, new Date(live.phase_deadline).getTime() - Date.now())
+              : null;
+          lastAnsweringTickAt = Date.now();
+        } else {
+          answeringRemainingMsTrue = null;
+          lastAnsweringTickAt = null;
+        }
+        await subscribeLiveChannels(live.id);
+      } else {
+        set({ live: null, loading: false });
+      }
 
-    if (tickTimer) clearInterval(tickTimer);
-    tickTimer = setInterval(() => {
-      advanceIfDue();
-    }, 500);
+      if (tickTimer) clearInterval(tickTimer);
+      tickTimer = setInterval(() => {
+        advanceIfDue();
+      }, 500);
+    };
+    const promise = run().finally(() => {
+      initInFlight = null;
+    });
+    initInFlight = promise;
+    return promise;
   },
 
   // 事故防止・操作性改善：ページ全体をリロードせず、現在表示中のライブ情報一式だけを
