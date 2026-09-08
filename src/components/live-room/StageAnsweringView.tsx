@@ -40,6 +40,9 @@ export default function StageAnsweringView() {
   const activeAnswerScores = useLiveFollowerStore((s) => s.activeAnswerScores);
   const myAnswerCount = useLiveFollowerStore((s) => s.myAnswerCount);
   const submitMyAnswer = useLiveFollowerStore((s) => s.submitMyAnswer);
+  // 2026-09-08（P1-8/9セキュリティレビュー対応）：他のuseLiveFollowerStoreフックと
+  // 同じ並び（早期returnより前）で呼ぶ。Rules of Hooks違反を避けるため。
+  const pendingCue = useLiveFollowerStore((s) => s.pendingCue);
 
   const now = useTickingNow(150);
 
@@ -122,16 +125,31 @@ export default function StageAnsweringView() {
       playSfx("spotlightIn");
     }
   }, [boardRoundId]);
-  // 回答送信音は誰が送信しても鳴らしたいので、turnAnswersの件数増加を監視する
-  // （turnAnswersはターンが変わるたびに[]へリセットされるが、その場合は「減少」なので
-  // 何も鳴らさず基準だけ更新される＝次のターンでも正しく動く）。
-  const answerCountSeenRef = useRef<number | null>(null);
+  // 回答送信音は「answering_cues.busy」がfalse/null→trueになった瞬間に、全員の画面で
+  // 鳴らす（2026-09-08 P1-8/9再レビュー対応）。以前はturnAnswers.length（＝answers件数）
+  // の増加を監視していたが、未発表回答が本人以外に返らなくなった(0063のRLS変更)ことで、
+  // 本人以外の端末ではturnAnswersの件数が回答公開(reveal)まで増えず、送信音が遅れる・
+  // 鳴らない不具合が生じていた。busyは回答本文を含まないanswering_cuesの列で、
+  // 送信と同時にDBトリガーで即座にtrueへ更新されるため、これを基準にする。
+  // busyPrevRef.currentの初期値はnull（＝「前回値がまだ無い」）にし、
+  // 判定はnull→trueでは鳴らさずfalse→trueの時だけ鳴らす条件にすることで、
+  // 初回読み込み・リロードによるstate復元時（既にbusy=trueの状態からstart）には
+  // 鳴らないようにする。busyはreveal・採点が終わって次の回答が来るまでtrueのまま
+  // 変化しないため（recompute_answering_cue_for_turn参照）、同一回答の公開・確定時に
+  // 遅れて鳴ったり複数回鳴ったりすることもない。ターンが変わるとcueForCurrentTurnは
+  // 一旦null(busy=false相当)に戻ってから次の回答でtrueになるため、次ターンでも
+  // 正常に再生される。送信者本人も他の参加者と同じくこの合図経由で1回だけ鳴る
+  // （二重再生防止のため、以前あったturnAnswers.length基準の再生処理は削除した）。
+  const busyPrevRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (answerCountSeenRef.current !== null && turnAnswers.length > answerCountSeenRef.current) {
+    const turnId = currentTurn?.id ?? null;
+    const cue = pendingCue && turnId && pendingCue.turnId === turnId ? pendingCue : null;
+    const currentBusy = cue?.busy ?? false;
+    if (busyPrevRef.current === false && currentBusy) {
       playSfx("answerSubmit");
     }
-    answerCountSeenRef.current = turnAnswers.length;
-  }, [turnAnswers.length]);
+    busyPrevRef.current = currentBusy;
+  }, [pendingCue, currentTurn?.id]);
 
   // 確定した瞬間も回答カードを表示し続ける猶予ぶんだけ残す（activeAnswerは確定と同時にnullになるため）。
   // revealGraceMsを明示的に渡すことで、玉が弾け始めるタイミング(resolvedPopDelayMs)や
@@ -160,15 +178,13 @@ export default function StageAnsweringView() {
 
   const activeParticipantId = activeAnswer?.participant_id ?? null;
   // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者。
-  // activeAnswerが無い間、キューの先頭(最も古い未表示回答、司会側のprocessRevealQueueが
-  // 次にrevealする対象と同じ選び方)の投稿者を光らせる。回答フリップがまだ画面を
-  // 覆っていないため、回答席の光る演出が実際に見える唯一のタイミング。
-  const revealPendingParticipantId = activeAnswer
-    ? null
-    : [...turnAnswers]
-        .filter((a) => !a.revealed_at)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]
-        ?.participant_id ?? null;
+  // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが投稿者本人以外に
+  // 返らなくなった（answers RLSの変更、supabase/migrations/0063）ため、以前のように
+  // turnAnswers（=answers全件）から他人の未発表回答を直接見つけて判定することが
+  // できなくなった。回答本文を含まない専用の合図(pendingCue、DBトリガーで自動更新)を
+  // 代わりに見る。currentTurnと一致しない（切り替わり途中の古い合図）場合は無視する。
+  const cueForCurrentTurn = pendingCue?.turnId === currentTurn.id ? pendingCue : null;
+  const revealPendingParticipantId = activeAnswer ? null : (cueForCurrentTurn?.pendingParticipantId ?? null);
   // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
   // participants一覧から毎回計算するのをやめ、ゲーム開始時にサーバー側で1回だけ
   // 確定させたturns.eligible_judge_count（全クライアント共通）を使う（0049）。
@@ -178,10 +194,10 @@ export default function StageAnsweringView() {
   // いない」間もtrueのままになるよう司会側(useLiveHostStore.ts)で拡張済みだが、これは司会の
   // ポーリング(最大500ms間隔)を経由してlivesテーブル経由で伝わるため、多少の遅れが出うる。
   // 誰かが送信した直後、実際にはもう「busy」なのにこの伝搬が間に合わず送信ボタンが
-  // 一瞬押せてしまう隙間があったため、turnAnswers（Realtimeで即座に届く）から
-  // 未表示・未確定の回答が無いかを自前でも判定し、両方のORで即座にロックする
+  // 一瞬押せてしまう隙間があったため、pendingCue.busy（Realtimeで即座に届く、回答本文を
+  // 含まない合図）からも未表示・未確定の回答が無いかを判定し、両方のORで即座にロックする
   // （最終的な二重送信の防止はDB側のanswers_one_unresolved_per_turn制約が担保する）。
-  const busyByTurnAnswers = turnAnswers.some((a) => !a.revealed_at || (a.revealed_at && !a.resolved));
+  const busyByTurnAnswers = cueForCurrentTurn?.busy ?? false;
   const busyWithOthers = live.answering_paused || busyByTurnAnswers;
 
   const answeringRemainingMs =
