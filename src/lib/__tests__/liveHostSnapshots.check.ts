@@ -728,38 +728,19 @@ async function main() {
     console.log("PASS: 追加必須6（古い購読世代のエラーが現在の runtime を無効化しない）");
   }
 
-  // ========== createChannelSwapController（購読の入れ替え：P1）==========
+  // ========== createChannelSwapController（購読の入れ替え：P1／観客側）==========
 
   // 疑似 Supabase チャンネル。topic を記録し、status を後から手動で流せる。
   type FakeChannel = { topic: string; onStatus: (kind: string, s: string) => void; removed: boolean };
-  const makeSwapDeps = () => {
-    const spawned: FakeChannel[][] = [];
+  const KINDS = ["lives", "participants", "answers", "scores", "tsukkomi", "answering-cue"];
+  const makeSwapEnv = () => {
     const removed: FakeChannel[] = [];
     const removeDeferrals: Array<() => void> = []; // 保留中の removeChannel を後で解決する
     let removeMode: "resolve" | "pending" | "throw" = "resolve";
     const deps = {
-      kinds: ["lives", "participants", "turns", "answers", "scores"],
-      spawn: (args: {
-        liveId: string;
-        gen: number;
-        tracker: ChannelSubscriptionTracker;
-        isCurrentGen: () => boolean;
-        topicFor: (kind: string) => string;
-      }) => {
-        const chs: FakeChannel[] = deps.kinds.map((kind) => {
-          const ch: FakeChannel = {
-            topic: args.topicFor(kind),
-            removed: false,
-            onStatus: (k, s) => {
-              if (!args.isCurrentGen()) return; // 古い購読世代は無視
-              args.tracker.note(k, s);
-            },
-          };
-          return ch;
-        });
-        spawned.push(chs);
-        return chs;
-      },
+      kinds: KINDS,
+      topicFor: (kind: string, _liveId: string, gen: number) =>
+        buildChannelTopic("follower", kind, gen),
       remove: (ch: FakeChannel) => {
         removed.push(ch);
         ch.removed = true;
@@ -770,9 +751,24 @@ async function main() {
         return Promise.resolve();
       },
     };
+    // spawn：controller が呼ぶ。isCurrentGen で古い世代のコールバックを弾く FakeChannel を作る。
+    const spawn = (args: {
+      gen: number;
+      tracker: ChannelSubscriptionTracker;
+      isCurrentGen: () => boolean;
+      topicFor: (kind: string) => string;
+    }): FakeChannel[] =>
+      KINDS.map((kind) => ({
+        topic: args.topicFor(kind),
+        removed: false,
+        onStatus: (k, s) => {
+          if (!args.isCurrentGen()) return; // 古い購読世代は無視
+          args.tracker.note(k, s);
+        },
+      }));
     return {
       deps,
-      spawned,
+      spawn,
       removed,
       flushRemovals: () => removeDeferrals.splice(0).forEach((f) => f()),
       setRemoveMode: (m: "resolve" | "pending" | "throw") => {
@@ -781,95 +777,116 @@ async function main() {
     };
   };
 
-  // 追加必須2：購読世代ごとに一意な topic（同名衝突しない）。
+  // 追加必須2：購読世代ごとに一意な topic（固定topic名に依存しない・同名衝突しない）。
   {
-    assert.equal(buildChannelTopic("lives", "L1", 1), "host-lives-L1-g1");
-    assert.notEqual(buildChannelTopic("lives", "L1", 1), buildChannelTopic("lives", "L1", 2));
-    console.log("PASS: 追加必須2（buildChannelTopic：購読世代ごとに一意な topic）");
+    assert.equal(buildChannelTopic("follower", "tsukkomi", 1), "follower-tsukkomi-g1");
+    assert.equal(buildChannelTopic("host", "lives", 3, "L1"), "host-lives-L1-g3");
+    assert.notEqual(
+      buildChannelTopic("follower", "lives", 1),
+      buildChannelTopic("follower", "lives", 2),
+    );
+    console.log("PASS: 追加必須2（buildChannelTopic：世代固有・固定topic名に依存しない）");
   }
 
-  // 追加必須1/2：removeChannel を保留中に同じ liveId を再 swap しても、古い同名
-  // チャンネルを再利用しない（gen固有 topic で衝突しない）。
+  // 追加必須1/2/4：removeChannel 保留中に再 swap しても古い同名を再利用しない
+  // （gen固有 topic）。旧世代だけ除去され、新世代は除去されない。
   {
-    const h = makeSwapDeps();
-    h.setRemoveMode("pending"); // removeChannel は解決しない（leaving のまま）
-    const c = createChannelSwapController(h.deps);
-    const s1 = c.swap("L1");
-    const s2 = c.swap("L1"); // removeChannel 保留中に同じ liveId を再 swap
+    const e = makeSwapEnv();
+    e.setRemoveMode("pending");
+    const c = createChannelSwapController(e.deps);
+    const s1 = c.swap("", e.spawn);
+    const s2 = c.swap("", e.spawn); // removeChannel 保留中に再 swap
     assert.notDeepEqual(
       s1.channels.map((x) => x.topic),
       s2.channels.map((x) => x.topic),
       "removeChannel 保留中でも新しい世代は別 topic のチャンネルを作る（古い同名を再利用しない）",
     );
     assert.equal(c.currentGen(), 2);
-    // s1 の全チャンネルは remove 対象になっている（背景除去、保留中でも呼ばれる）。
-    for (const ch of s1.channels) assert.ok(h.removed.includes(ch), "旧世代チャンネルが除去されていない");
-    // s2 の全チャンネルは remove されていない。
-    for (const ch of s2.channels) assert.ok(!h.removed.includes(ch), "新世代チャンネルが誤って除去された（必須4）");
+    for (const ch of s1.channels) assert.ok(e.removed.includes(ch), "旧世代チャンネルが除去されていない");
+    for (const ch of s2.channels) assert.ok(!e.removed.includes(ch), "新世代チャンネルが誤って除去された（必須4）");
     console.log("PASS: 追加必須1/2/4（保留 removeChannel 中でも新世代は別topic・旧世代のみ除去）");
   }
 
-  // 追加必須3：入れ替え要求を2回並行させても、最後の世代だけが currentGen と一致する。
+  // 追加必須3/10：入れ替えを2回並行させても、最後の世代だけが有効。
   {
-    const h = makeSwapDeps();
-    const c = createChannelSwapController(h.deps);
-    const s1 = c.swap("L1");
-    const s2 = c.swap("L2");
+    const e = makeSwapEnv();
+    const c = createChannelSwapController(e.deps);
+    const s1 = c.swap("", e.spawn);
+    const s2 = c.swap("", e.spawn);
     assert.equal(c.currentGen(), s2.gen);
-    // s1 の status コールバックは無効（古い世代）→ s1.tracker に反映されない。
     s1.channels[0].onStatus("lives", "SUBSCRIBED");
-    assert.deepEqual(s1.tracker.state().subscribed, [], "古い世代の SUBSCRIBED は古い tracker にも入らない（必須3）");
-    // s2 の status は有効。
-    for (const kind of ["lives", "participants", "turns", "answers", "scores"]) {
-      const idx = ["lives", "participants", "turns", "answers", "scores"].indexOf(kind);
-      s2.channels[idx].onStatus(kind, "SUBSCRIBED");
+    assert.deepEqual(s1.tracker.state().subscribed, [], "古い世代の SUBSCRIBED は反映されない（必須3/10）");
+    for (const kind of KINDS) {
+      s2.channels[KINDS.indexOf(kind)].onStatus(kind, "SUBSCRIBED");
     }
-    assert.equal(s2.tracker.allSubscribed(), true, "最新世代の SUBSCRIBED は集約される");
-    console.log("PASS: 追加必須3（並行入れ替え：最後の世代だけが有効）");
+    assert.equal(s2.tracker.allSubscribed(), true, "最新世代の SUBSCRIBED は集約される（必須13）");
+    console.log("PASS: 追加必須3/10/13（並行入れ替え：最後の世代だけが有効・SUBSCRIBEDは通る）");
   }
 
-  // 追加必須4：古い削除処理の完了（保留していた removeChannel の解決）が、新しい
-  // チャンネルを削除しない。
+  // 追加必須11：古い swap 結果の dispose を後から実行しても、新しい世代の
+  // チャンネルは消えず、新しい世代は無効化されない（所有権付き cleanup）。
   {
-    const h = makeSwapDeps();
-    h.setRemoveMode("pending");
-    const c = createChannelSwapController(h.deps);
-    c.swap("L1");
-    const s2 = c.swap("L1");
-    h.flushRemovals(); // 1回目 swap の removeChannel が今になって完了
-    for (const ch of s2.channels) assert.ok(!ch.removed, "古い削除の完了が新しいチャンネルを削除した（必須4）");
-    console.log("PASS: 追加必須4（古い削除処理の完了が新しいチャンネルを消さない）");
+    const e = makeSwapEnv();
+    const c = createChannelSwapController(e.deps);
+    const s1 = c.swap("", e.spawn);
+    const s2 = c.swap("", e.spawn); // s1 に追い越される
+    const genBefore = c.currentGen();
+    s1.dispose(); // 古い subscribe の cleanup を後から実行
+    for (const ch of s1.channels) assert.ok(ch.removed, "自分（s1）の世代のチャンネルは除去される");
+    for (const ch of s2.channels) assert.ok(!ch.removed, "古い cleanup が新しい世代のチャンネルを消した（必須11）");
+    assert.equal(c.currentGen(), genBefore, "古い cleanup が世代を進めた（新しい世代を無効化した）");
+    assert.equal(c.current(), s2, "古い cleanup が current を消した");
+    // s2 の status は今も有効。
+    s2.channels[0].onStatus("lives", "SUBSCRIBED");
+    assert.deepEqual(s2.tracker.state().subscribed, ["lives"], "新しい世代の購読は生きている");
+    console.log("PASS: 追加必須11（所有権付き dispose：古い cleanup が最新世代を invalidate しない）");
   }
 
-  // 追加必須（removeChannel の失敗・同期例外でも永久停止しない）。
+  // 追加必須12/14：dispose した自分の世代のコールバックは以降無効。再マウント相当で
+  // 何度 swap→dispose を繰り返してもチャンネルは増殖せず、最後の1世代だけが有効。
   {
-    const h = makeSwapDeps();
-    h.setRemoveMode("throw"); // removeChannel が同期例外を投げる
-    const c = createChannelSwapController(h.deps);
-    c.swap("L1");
-    // 例外が伝播せず次の swap が普通にできる。
-    const s2 = c.swap("L1");
+    const e = makeSwapEnv();
+    const c = createChannelSwapController(e.deps);
+    let last = c.swap("", e.spawn);
+    for (let i = 0; i < 5; i++) {
+      const prev = last;
+      last = c.swap("", e.spawn);
+      prev.dispose(); // 直前の subscribe の cleanup（新しい swap の後に走る）
+    }
+    // 古い世代のコールバックはすべて無効。
+    // （5回ぶんの prev は dispose 済みだが、swap 側で既に無効化済みなので二重でも安全）
+    assert.equal(c.current(), last, "最後の swap だけが current");
+    last.channels[0].onStatus("lives", "SUBSCRIBED");
+    assert.deepEqual(last.tracker.state().subscribed, ["lives"], "最新世代だけが state を触れる（必須12/14）");
+    console.log("PASS: 追加必須12/14（再マウント相当の swap/dispose 反復でも最新1世代のみ有効）");
+  }
+
+  // 追加必須15相当（removeChannel の同期例外でも進行を止めない）。
+  {
+    const e = makeSwapEnv();
+    e.setRemoveMode("throw");
+    const c = createChannelSwapController(e.deps);
+    c.swap("", e.spawn);
+    const s2 = c.swap("", e.spawn); // 例外が伝播せず次の swap が普通にできる
     assert.equal(c.currentGen(), 2);
-    assert.equal(s2.channels.length, 5);
-    console.log("PASS: 追加必須（removeChannel の同期例外でも swap は継続できる＝永久停止しない）");
+    assert.equal(s2.channels.length, KINDS.length);
+    s2.dispose(); // dispose 内の remove が throw しても例外は漏れない
+    console.log("PASS: 追加必須15相当（removeChannel の同期例外でも swap/dispose は継続）");
   }
 
   // 追加必須11：invalidate（stop 相当）後、遅延 status / 遅延削除がチャンネルを復活させない。
   {
-    const h = makeSwapDeps();
-    h.setRemoveMode("pending");
-    const c = createChannelSwapController(h.deps);
-    const s1 = c.swap("L1");
-    c.invalidate(); // stopHostProgress 相当
+    const e = makeSwapEnv();
+    e.setRemoveMode("pending");
+    const c = createChannelSwapController(e.deps);
+    const s1 = c.swap("", e.spawn);
+    c.invalidate();
     assert.equal(c.current(), null, "invalidate 後は current が無い");
-    // 遅れて届く SUBSCRIBED は古い世代なので tracker に入らない。
     s1.channels[0].onStatus("lives", "SUBSCRIBED");
     assert.deepEqual(s1.tracker.state().subscribed, [], "invalidate 後の遅延 SUBSCRIBED は無視される（必須11）");
-    // 遅れて removeChannel が完了しても current は null のまま。
-    h.flushRemovals();
+    e.flushRemovals();
     assert.equal(c.current(), null);
-    // invalidate 後にもう一度 swap でき、世代は進む。
-    const s2 = c.swap("L2");
+    const s2 = c.swap("", e.spawn);
     assert.equal(s2.gen, c.currentGen());
     console.log("PASS: 追加必須11（invalidate 後の遅延 status/削除がチャンネルを復活させない）");
   }

@@ -303,12 +303,12 @@ const count = (needle: string) => src.split(needle).length - 1;
     "cleanupChannels が channelSwap.invalidate() へ委譲していない",
   );
   assert.ok(
-    /function subscribeLiveChannels\(liveId: string\) \{\s*\n\s*const \{ tracker \} = channelSwap\.swap\(liveId\);/.test(src),
-    "subscribeLiveChannels が channelSwap.swap(liveId) 経由になっていない",
+    /function subscribeLiveChannels\(liveId: string\) \{\s*\n\s*const \{ tracker \} = channelSwap\.swap\(liveId, spawnLiveChannels\);/.test(src),
+    "subscribeLiveChannels が channelSwap.swap(liveId, spawnLiveChannels) 経由になっていない",
   );
   assert.ok(
-    /spawn: \(args\) => spawnLiveChannels\(args\)/.test(src),
-    "channelSwap の spawn が spawnLiveChannels を使っていない",
+    /topicFor: \(kind, liveId, gen\) => buildChannelTopic\("host", kind, gen, liveId\)/.test(src),
+    "channelSwap の topicFor が gen固有 topic（buildChannelTopic）を使っていない",
   );
   assert.ok(
     /function spawnLiveChannels\(/.test(src) &&
@@ -394,24 +394,80 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-16d（ensureTickTimer はタイマーを重複作成しない）");
 }
 
-// 16e: tsukkomi チャンネルは DB購読チャンネルのライフサイクルから分離。
-//   - ensureTsukkomiChannel が1インスタンスを保持（!tsukkomiChannel のときだけ作る）
-//   - cleanupChannels / stopHostProgress で tsukkomi を削除・null 化しない
-//   - channelSwap の kinds に tsukkomi を含めない
+// 16e: ホスト側は "follower-tsukkomi" の生 Broadcast チャンネルを一切作らず、
+//      ボット反応はホスト専用 RPC host_send_bot_tsukkomi 経由で送る。
 {
+  assert.ok(!/ensureTsukkomiChannel/.test(src), "ensureTsukkomiChannel が残っている（廃止するはず）");
+  assert.ok(!/"follower-tsukkomi"/.test(src), "ホスト側に固定topic名 \"follower-tsukkomi\" が残っている");
   assert.ok(
-    /function ensureTsukkomiChannel\(\) \{\s*\n\s*if \(!tsukkomiChannel\) \{/.test(src),
-    "ensureTsukkomiChannel が1インスタンス保持になっていない",
+    !/type: "broadcast",\s*\n\s*event: "tsukkomi"/.test(src),
+    "ホスト側に生の Realtime Broadcast 送信（event:\"tsukkomi\"）が残っている",
   );
-  const cleanup = src.match(/function cleanupChannels\(\) \{[\s\S]*?\n\}/);
-  assert.ok(cleanup && !/tsukkomiChannel/.test(cleanup[0]), "cleanupChannels が tsukkomiChannel を触っている（分離できていない）");
-  const stop = src.match(/stopHostProgress: \(\) => \{[\s\S]*?\n {2}\},/);
-  assert.ok(stop && !/tsukkomiChannel/.test(stop[0]), "stopHostProgress が tsukkomiChannel を触っている（分離できていない）");
+  // ボット反応は host_send_bot_tsukkomi RPC。発生確率・間隔・テンプレート・
+  // clap/stamp割合は不変（0.05 / 1_500 / TSUKKOMI_TEMPLATES / roll<1/3・<2/3）。
+  const botBlock = src.match(
+    /if \(bots\.length > 0 && now - lastBotTsukkomiAt > 1_500 && Math\.random\(\) < 0\.05\) \{[\s\S]*?\n {2}\}/,
+  );
+  assert.ok(botBlock, "ボット反応ブロックが見つからない（頻度ロジックが変わっている）");
   assert.ok(
-    /kinds: \[\.\.\.REQUIRED_CHANNELS\]/.test(src) && !/REQUIRED_CHANNELS = \[[^\]]*tsukkomi/.test(src),
-    "channelSwap の必須チャンネルに tsukkomi が混ざっている",
+    /roll < 1 \/ 3[\s\S]*?TSUKKOMI_TEMPLATES\[Math\.floor\(Math\.random\(\) \* TSUKKOMI_TEMPLATES\.length\)\][\s\S]*?roll < 2 \/ 3[\s\S]*?"爆笑"[\s\S]*?"clap", "👏"/.test(
+      botBlock[0],
+    ),
+    "clap/stamp の割合・テンプレートが変わっている",
   );
-  console.log("PASS: 配線-16e（follower-tsukkomi は DB購読チャンネルのライフサイクルから分離）");
+  assert.ok(
+    /supabase\s*\n?\s*\.rpc\("host_send_bot_tsukkomi", \{\s*\n\s*p_live_id: live\.id,\s*\n\s*p_participant_id: senderBot\.participantId,\s*\n\s*p_kind: kind,\s*\n\s*p_text: text,/.test(
+      botBlock[0],
+    ),
+    "ボット反応が host_send_bot_tsukkomi RPC 経由で送られていない",
+  );
+  assert.ok(
+    /if \(error\) console\.warn\("\[tsukkomi\] ボット反応の送信に失敗", error\)/.test(botBlock[0]),
+    "RPC失敗時に進行を止めずコンソール警告に留めていない",
+  );
+  console.log("PASS: 配線-16e（ホスト：Broadcast廃止・ボット反応は host_send_bot_tsukkomi RPC・頻度不変）");
+}
+
+// 16g: 観客側（useLiveFollowerStore）の購読も channelSwap 化。
+{
+  const follower = readFileSync(
+    join(process.cwd(), "src", "store", "useLiveFollowerStore.ts"),
+    "utf8",
+  );
+  const fcount = (n: string) => follower.split(n).length - 1;
+  assert.ok(
+    /const followerChannelSwap = createChannelSwapController</.test(follower),
+    "観客側が createChannelSwapController を使っていない",
+  );
+  assert.ok(
+    /topicFor: \(kind, _liveId, gen\) => buildChannelTopic\("follower", kind, gen\)/.test(follower),
+    "観客側の topic が世代固有（follower-<kind>-g<gen>）になっていない",
+  );
+  assert.ok(
+    !/\.channel\("follower-/.test(follower),
+    "観客側に固定topic名 \"follower-…\" のチャンネルが残っている（固定topic名依存）",
+  );
+  assert.ok(!/let channels\b/.test(follower) && !/let tsukkomiChannel\b/.test(follower), "観客側の旧チャンネル配列/固定tsukkomiChannel が残っている");
+  assert.ok(!/function cleanupChannels\b/.test(follower), "観客側の非所有権 cleanupChannels が残っている");
+  assert.ok(
+    /const channelSwapResult = followerChannelSwap\.swap\(""/.test(follower),
+    "観客側が followerChannelSwap.swap(...) を使っていない",
+  );
+  assert.ok(
+    /channelSwapResult\.dispose\(\);/.test(follower),
+    "観客側の cleanup が所有権付き dispose() を使っていない",
+  );
+  // 各コールバックの世代ガード（isCurrentGen）。
+  assert.ok(
+    fcount("if (!isCurrentGen()) return;") >= 3 && /const isCurrentGen = swapArgs\.isCurrentGen;/.test(follower),
+    "観客側コールバックの古い世代ガード（isCurrentGen）が不足",
+  );
+  // live_tsukkomi_events の Postgres Changes 購読は維持（固定topic名は使わない）。
+  assert.ok(
+    /table: "live_tsukkomi_events"/.test(follower) && /swapArgs\.topicFor\("tsukkomi"\)/.test(follower),
+    "観客側が live_tsukkomi_events を世代固有 topic で購読していない",
+  );
+  console.log("PASS: 配線-16g（観客側：channelSwap化・固定topic名廃止・所有権付きcleanup・世代ガード）");
 }
 
 // 16f: loadSnapshotSlice の beginGuard は gate.begin より前（対象不一致で gate を進めない）。

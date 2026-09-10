@@ -6,6 +6,11 @@ import { create } from "zustand";
 import { MAX_ANSWER_BODY_LENGTH } from "@/data/liveRoomTiming";
 import { resolveAnsweringCue, type AnsweringCueSnapshot } from "@/lib/answeringCue";
 import {
+  buildChannelTopic,
+  createChannelSwapController,
+  type ChannelSwapSpawnArgs,
+} from "@/lib/liveHostSnapshots";
+import {
   getBestAnswer,
   getGroupTurnRanking,
   getOverallRanking,
@@ -115,8 +120,31 @@ interface LiveFollowerState {
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
 }
 
-let channels: ReturnType<typeof supabase.channel>[] = [];
-let tsukkomiChannel: ReturnType<typeof supabase.channel> | null = null;
+// 2026-09-15（レビュー対応）：観客側の Realtime 購読はすべて Postgres Changes。
+// - 以前は固定 topic 名（"follower-lives" 等、ツッコミは "follower-tsukkomi"）で
+//   毎 subscribe に removeChannel を待たず再作成しており、削除中(leaving)の
+//   古いインスタンスが再利用される・古い cleanup が新しい購読を消す、といった
+//   競合があった。さらに "follower-tsukkomi" はホスト側の Broadcast 送信用 topic と
+//   衝突しうる固定名だった。
+// - createChannelSwapController で購読世代を発行し、全 topic を
+//   `follower-<kind>-g<gen>` の世代固有名にする（固定 topic 名へ一切依存しない）。
+//   live_tsukkomi_events など各テーブルの Postgres Changes は従来どおり受信する。
+// - subscribe() が返す cleanup は所有権付き（swap 結果の dispose）：自分の世代の
+//   チャンネルだけ除去し、新しい subscribe に追い越されていたら最新世代を触らない。
+const FOLLOWER_CHANNEL_KINDS = [
+  "lives",
+  "participants",
+  "answers",
+  "scores",
+  "tsukkomi",
+  "answering-cue",
+] as const;
+const followerChannelSwap = createChannelSwapController<ReturnType<typeof supabase.channel>>({
+  kinds: [...FOLLOWER_CHANNEL_KINDS],
+  // 観客側はテーブル全体を購読し liveId で絞らないため scope は付けない。
+  topicFor: (kind, _liveId, gen) => buildChannelTopic("follower", kind, gen),
+  remove: (ch) => supabase.removeChannel(ch),
+});
 let tsukkomiIdCounter = 0;
 // retrySyncアクションから、subscribe()内で今動いているrefetchAllを直接叩けるようにする
 // ための参照（subscribe()のクリーンアップでnullに戻す）。
@@ -126,12 +154,6 @@ let currentRefetchAllRef: (() => void) | null = null;
 // ここ1箇所でガードすれば全ボタンに効く。
 const TSUKKOMI_COOLDOWN_MS = 1_000;
 let lastTsukkomiSentAt = 0;
-
-function cleanupChannels() {
-  for (const ch of channels) supabase.removeChannel(ch);
-  channels = [];
-  tsukkomiChannel = null;
-}
 
 // ホーム画面の「次回ライブ」チケット（参加ボタン押下時に「既に参加済みか」を確認する
 // 用途、src/components/home/useLiveJoinFlow.ts参照）でも使うためexportしている。
@@ -686,101 +708,109 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     currentRefetchAllRef = refetchAll;
     refetchAll();
 
-    // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す。
-    // Realtimeは切断中に起きた変更を後から届けてくれないため、visibilitychange等の
-    // イベントだけでなく、購読状態そのものの復帰でも明示的に再取得する。
-    const onSubscribeStatus = (status: string) => {
-      if (status === "SUBSCRIBED") refetchAll();
+    // 購読世代（channelSwap）越しに全 Postgres Changes チャンネルを作る。
+    // - topic は `follower-<kind>-g<gen>` の世代固有名（固定 topic 名に依存しない）
+    // - 各コールバックは自分の世代（swapArgs.isCurrentGen）を確認してから state を触る
+    //   ＝古い subscribe の cleanup 後に遅れて届くイベントは反映されない
+    // - この subscribe が返す cleanup は所有権付き（swap.dispose）
+    const spawnFollowerChannels = (swapArgs: ChannelSwapSpawnArgs) => {
+      const isCurrentGen = swapArgs.isCurrentGen;
+      // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す。
+      const onSubscribeStatus = (status: string) => {
+        if (!isCurrentGen()) return;
+        if (status === "SUBSCRIBED") refetchAll();
+      };
+      const guardedRefetchAll = () => {
+        if (isCurrentGen()) refetchAll();
+      };
+      const guardedRefreshTurnDerived = () => {
+        if (isCurrentGen()) void refreshTurnDerived();
+      };
+
+      const livesCh = supabase
+        .channel(swapArgs.topicFor("lives"))
+        .on("postgres_changes", { event: "*", schema: "public", table: "lives" }, guardedRefetchAll)
+        .subscribe(onSubscribeStatus);
+      const participantsCh = supabase
+        .channel(swapArgs.topicFor("participants"))
+        .on("postgres_changes", { event: "*", schema: "public", table: "participants" }, guardedRefetchAll)
+        .subscribe(onSubscribeStatus);
+      const answersCh = supabase
+        .channel(swapArgs.topicFor("answers"))
+        .on("postgres_changes", { event: "*", schema: "public", table: "answers" }, guardedRefreshTurnDerived)
+        .subscribe(onSubscribeStatus);
+      const scoresCh = supabase
+        .channel(swapArgs.topicFor("scores"))
+        .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, guardedRefreshTurnDerived)
+        .subscribe(onSubscribeStatus);
+
+      // ツッコミ/拍手：DBの public.live_tsukkomi_events への INSERT を Postgres Changes
+      // で受信する（0044/レビュー対応）。topic 名は世代固有で、ホスト側の送信用
+      // 固定 topic とは無関係。ホストのボット反応も RPC 経由でこのテーブルへ INSERT
+      // されるため、ここで一般参加者ぶんと同じく受信できる。
+      const tsukkomiCh = supabase
+        .channel(swapArgs.topicFor("tsukkomi"))
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "live_tsukkomi_events" },
+          (payload) => {
+            if (!isCurrentGen()) return;
+            const row = payload.new as { live_id: string; kind: "clap" | "stamp"; text: string };
+            const currentLive = useLiveFollowerStore.getState().live;
+            if (!currentLive || row.live_id !== currentLive.id) return;
+            tsukkomiIdCounter += 1;
+            useLiveFollowerStore.setState((s) => ({
+              tsukkomiSeq: s.tsukkomiSeq + 1,
+              lastTsukkomi: { id: tsukkomiIdCounter, kind: row.kind, text: row.text },
+            }));
+          },
+        )
+        .subscribe(onSubscribeStatus);
+
+      // answering_cues：回答本文を含まない演出専用データ。payload をそのまま使うが、
+      // resolveAnsweringCue で liveId・revision の新旧判定を通す（2経路のずれ防止）。
+      const answeringCueCh = supabase
+        .channel(swapArgs.topicFor("answering-cue"))
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "answering_cues" },
+          (payload) => {
+            if (!isCurrentGen()) return;
+            const row = (payload.new ?? payload.old) as
+              | {
+                  live_id: string;
+                  turn_id: string;
+                  pending_participant_id: string | null;
+                  busy: boolean;
+                  revision: number;
+                }
+              | undefined;
+            const currentLive = useLiveFollowerStore.getState().live;
+            if (!row || !currentLive || row.live_id !== currentLive.id) return;
+            const incoming: AnsweringCueSnapshot | null =
+              payload.eventType === "DELETE"
+                ? null
+                : {
+                    liveId: row.live_id,
+                    turnId: row.turn_id,
+                    pendingParticipantId: row.pending_participant_id,
+                    busy: row.busy,
+                    revision: row.revision,
+                  };
+            useLiveFollowerStore.setState((s) => ({
+              pendingCue: resolveAnsweringCue(s.pendingCue, row.live_id, incoming),
+            }));
+          },
+        )
+        .subscribe(onSubscribeStatus);
+
+      return [livesCh, participantsCh, answersCh, scoresCh, tsukkomiCh, answeringCueCh];
     };
 
-    cleanupChannels();
-    const livesCh = supabase
-      .channel("follower-lives")
-      .on("postgres_changes", { event: "*", schema: "public", table: "lives" }, refetchAll)
-      .subscribe(onSubscribeStatus);
-    const participantsCh = supabase
-      .channel("follower-participants")
-      .on("postgres_changes", { event: "*", schema: "public", table: "participants" }, refetchAll)
-      .subscribe(onSubscribeStatus);
-    const answersCh = supabase
-      .channel("follower-answers")
-      .on("postgres_changes", { event: "*", schema: "public", table: "answers" }, refreshTurnDerived)
-      .subscribe(onSubscribeStatus);
-    const scoresCh = supabase
-      .channel("follower-scores")
-      .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, refreshTurnDerived)
-      .subscribe(onSubscribeStatus);
-
-    // 2026-09-02: 以前はDBに残さない演出専用イベントとして、認可設定のない生の
-    // Realtimeブロードキャスト（固定チャンネル名）で送受信していたが、チャンネル名さえ
-    // 分かれば誰でも任意のliveId/kind/textを送信できてしまっていた（初回ライブ実開催前
-    // レビュー対応）。他の4チャンネル(lives/participants/answers/scores)と同じ
-    // 「テーブルへのINSERT＋postgres_changes購読」パターンに揃え、送信自体は
-    // send_tsukkomi RPC（0044、参加登録済みユーザーのみ・許可されたkind/textのみ・
-    // レート制限あり）経由に限定する。
-    tsukkomiChannel = supabase
-      .channel("follower-tsukkomi")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "live_tsukkomi_events" },
-        (payload) => {
-          const row = payload.new as { live_id: string; kind: "clap" | "stamp"; text: string };
-          const currentLive = useLiveFollowerStore.getState().live;
-          if (!currentLive || row.live_id !== currentLive.id) return;
-          tsukkomiIdCounter += 1;
-          useLiveFollowerStore.setState((s) => ({
-            tsukkomiSeq: s.tsukkomiSeq + 1,
-            lastTsukkomi: { id: tsukkomiIdCounter, kind: row.kind, text: row.text },
-          }));
-        },
-      )
-      .subscribe(onSubscribeStatus);
-
-    // 2026-09-08（P1-8/9セキュリティレビュー対応）：answering_cuesは回答本文を
-    // 一切含まない（pending_participant_id・turn_id・busyだけの）テーブルのため、
-    // tsukkomiと同じくpayloadをそのまま使ってよい（answers/scoresのように
-    // 再取得を挟む必要が無く、演出の即時性を保てる）。
-    // 2026-09-08（再レビュー2回目対応）：fetchAnsweringCue()による再取得と、
-    // ここでのRealtime受信は別々の非同期経路のため、どちらが先に完了するかは
-    // 保証されない。payloadを無条件にsetStateするのではなく、必ず
-    // resolveAnsweringCue経由で「liveId・revisionから見て今の値より新しいか」を
-    // 判定してから反映する（判定ロジックをrefreshTurnDerived側と共通化することで、
-    // 2経路での新旧判定のずれを防ぐ）。
-    const answeringCueChannel = supabase
-      .channel("follower-answering-cue")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "answering_cues" },
-        (payload) => {
-          const row = (payload.new ?? payload.old) as
-            | {
-                live_id: string;
-                turn_id: string;
-                pending_participant_id: string | null;
-                busy: boolean;
-                revision: number;
-              }
-            | undefined;
-          const currentLive = useLiveFollowerStore.getState().live;
-          if (!row || !currentLive || row.live_id !== currentLive.id) return;
-          const incoming: AnsweringCueSnapshot | null =
-            payload.eventType === "DELETE"
-              ? null
-              : {
-                  liveId: row.live_id,
-                  turnId: row.turn_id,
-                  pendingParticipantId: row.pending_participant_id,
-                  busy: row.busy,
-                  revision: row.revision,
-                };
-          useLiveFollowerStore.setState((s) => ({
-            pendingCue: resolveAnsweringCue(s.pendingCue, row.live_id, incoming),
-          }));
-        },
-      )
-      .subscribe(onSubscribeStatus);
-
-    channels = [livesCh, participantsCh, answersCh, scoresCh, tsukkomiChannel, answeringCueChannel];
+    // liveId は購読時点で未確定（refetchAll が発見する）。観客側の購読はテーブル
+    // 全体で liveId 絞りも無いため、swap の liveId には空文字を渡す（topic は
+    // `follower-<kind>-g<gen>` で世代固有になる）。
+    const channelSwapResult = followerChannelSwap.swap("", spawnFollowerChannels);
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") refetchAll();
@@ -810,7 +840,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
       unsubscribeAuth();
-      cleanupChannels();
+      // 所有権付きクリーンアップ：この subscribe の世代のチャンネルだけを除去する。
+      // 既に新しい subscribe に追い越されていたら、最新世代の channels/gen には触らない。
+      channelSwapResult.dispose();
     };
   },
 

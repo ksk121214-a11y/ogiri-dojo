@@ -19,6 +19,7 @@ import {
   answersSnapshotMatches,
   awaitChannelsSubscribed,
   botScoringAllowed,
+  buildChannelTopic,
   childrenSnapshotReady,
   createChannelSwapController,
   createRecoveryCoordinator,
@@ -180,22 +181,16 @@ let progressGeneration = 0;
 // 重複リクエストが発生する。進行中のinit()があれば同じPromiseを返すことで、
 // 呼び出しを実質1本化する（intervalやRealtime channelが増殖しないことの追加の保険）。
 let initInFlight: Promise<void> | null = null;
-// ボット観客がたまにツッコミ/爆笑/拍手を送るためのブロードキャストチャンネル。
-// useLiveFollowerStore.tsと同じ固定topic名 "follower-tsukkomi"（followerが受信する）
-// のため、購読世代ごとに一意化できない。DB購読チャンネルのライフサイクルから
-// 完全に分離し、ページ存続中は1インスタンスだけを保持する（cleanupChannels /
-// subscribeLiveChannels / stopHostProgress で作り直さない・削除しない）。
-// これにより「削除途中(leaving)の古いインスタンスを参照する」事故が構造的に起きない。
-// 送信専用・liveId非依存（payload に liveId を載せる）なので保持し続けても害は無い。
-let tsukkomiChannel: ReturnType<typeof supabase.channel> | null = null;
-function ensureTsukkomiChannel() {
-  if (!tsukkomiChannel) {
-    tsukkomiChannel = supabase
-      .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
-      .subscribe();
-  }
-  return tsukkomiChannel;
-}
+// 2026-09-15（レビュー対応）：ボットのツッコミ/爆笑/拍手は、以前は固定topic名の
+// 生の Realtime Broadcast で送っていたが、
+// (1) 観客側は 0044 以降 Broadcast を受信しておらず（public.live_tsukkomi_events の
+//     Postgres Changes を購読）、受信者がいなかった。
+// (2) その固定topic名を観客側の Postgres Changes 購読と共有しており、
+//     supabase.channel() が同一クライアント内で既存チャンネルを返すことで
+//     観客側の後付け購読がサーバーへ反映されない衝突が起きえた。
+// 対応：ホスト側の Broadcast チャンネルを廃止し、ホスト専用の SECURITY DEFINER RPC
+// host_send_bot_tsukkomi 経由で live_tsukkomi_events へ安全に INSERT する
+// （観客側の既存 Postgres Changes 購読へ届く）。
 let lastBotTsukkomiAt = 0;
 let pendingRevealAt: number | null = null; // 次の回答をrevealする予定時刻（ホスト内メモリのみ）
 // 回答受付フェーズの「本当の残り持ち時間」（ホスト内メモリのみ）。src/store/useLiveDemoStore.tsの
@@ -292,11 +287,11 @@ const answerPerfectRoundIds = new Map<string, boolean>();
 const resolvingAnswerIds = new Set<string>();
 
 // DB購読チャンネル（lives/participants/turns/answers/scores）の入れ替え管理。
-// spawn は下の spawnLiveChannels（関数宣言なので巻き上げ済み）。
-// tsukkomi は含めない（ensureTsukkomiChannel が別管理）。
+// spawn は swap() 呼び出しごとに渡す（spawnLiveChannels、関数宣言なので巻き上げ済み）。
+// topic は購読世代 ＋ liveId ごとに一意。ツッコミ演出用の固定topic名は一切扱わない。
 const channelSwap = createChannelSwapController<ReturnType<typeof supabase.channel>>({
   kinds: [...REQUIRED_CHANNELS],
-  spawn: (args) => spawnLiveChannels(args),
+  topicFor: (kind, liveId, gen) => buildChannelTopic("host", kind, gen, liveId),
   remove: (ch) => supabase.removeChannel(ch),
 });
 
@@ -640,12 +635,10 @@ function spawnLiveChannels(args: {
 // spawnLiveChannels 内の onChannelStatus が「全必須チャンネル SUBSCRIBED」を
 // 確認したときだけ設定する（runtimeReadyLiveId は hydrate が確立する）。
 function subscribeLiveChannels(liveId: string) {
-  const { tracker } = channelSwap.swap(liveId);
+  const { tracker } = channelSwap.swap(liveId, spawnLiveChannels);
   currentChannelTracker = tracker;
   currentChannelLiveId = liveId;
   subscribedLiveId = null;
-  // tsukkomi は DB購読チャンネルのライフサイクルから分離（1インスタンスを保持）。
-  ensureTsukkomiChannel();
 }
 
 // hydrateAfterLive の subscribeAndWait 実装。必須チャンネルが実際に SUBSCRIBED に
@@ -1261,9 +1254,11 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
   const busy = isAnsweringBusy(answers, live);
 
   // 客席のボットがたまにツッコミ/爆笑/拍手ボタンを押したかのように送る
-  // （見た目の賑やかし用のブロードキャストのみで、どのボットが送ったかは扱わない）。
+  // （見た目の賑やかし。どのボットが送ったかは表示に使わない）。
   // 60秒の回答フェーズ中に数回程度発生する頻度を狙っている（2026-08-19：2%→5%に引き上げ）。
-  // tsukkomi は DB購読チャンネルと分離した1インスタンス（ensureTsukkomiChannel）。
+  // 発生確率(0.05)・間隔(1.5秒)・テンプレート・clap/stampの割合(1/3ずつ)は不変。
+  // 送信経路だけをホスト専用 RPC host_send_bot_tsukkomi へ変更し、観客側の既存
+  // Postgres Changes 購読（public.live_tsukkomi_events）へ安全に届くようにする。
   if (bots.length > 0 && now - lastBotTsukkomiAt > 1_500 && Math.random() < 0.05) {
     lastBotTsukkomiAt = now;
     const roll = Math.random();
@@ -1273,11 +1268,21 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
         : roll < 2 / 3
           ? ["stamp", "爆笑"]
           : ["clap", "👏"];
-    ensureTsukkomiChannel().send({
-      type: "broadcast",
-      event: "tsukkomi",
-      payload: { liveId: live.id, kind, text },
-    });
+    // 代理送信者はこの組のボット参加者（RPC が「対象ライブの実在する退場していない
+    // player 参加者・運営者本人でない」ことを DB 側で検証する）。
+    const senderBot = bots[Math.floor(Math.random() * bots.length)];
+    void supabase
+      .rpc("host_send_bot_tsukkomi", {
+        p_live_id: live.id,
+        p_participant_id: senderBot.participantId,
+        p_kind: kind,
+        p_text: text,
+      })
+      .then(({ error }) => {
+        // RPC失敗（レート制限・フェーズ変化・通信エラー等）でも進行は止めない。
+        // 生のPostgres/Supabaseエラーは画面へ出さず、コンソール警告に留める。
+        if (error) console.warn("[tsukkomi] ボット反応の送信に失敗", error);
+      });
   }
 
   // 各ボットの行動判定・DB書き込みは互いに独立しているため、for...ofの逐次awaitではなく

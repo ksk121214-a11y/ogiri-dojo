@@ -252,13 +252,21 @@ export async function awaitChannelsSubscribed(deps: AwaitChannelsDeps): Promise<
 // 対策：
 // - Postgres Changes 用の topic を「購読世代ごとに一意」にする（buildChannelTopic）。
 //   新旧で topic が衝突しないため、古いインスタンスが返ることが構造的に起きない。
+//   固定topic名（例：観客側の "follower-tsukkomi"）へも一切依存しない。
 // - 購読を入れ替えるたびに世代を同期的に +1（＝古い世代のコールバックを即無効化）。
 // - 旧チャンネルは「入れ替え時にローカルへ確保してから」背景除去する（await しない）。
 //   確保済みの集合だけを除去するので、後から新しいチャンネルを消すことはない。
 // - removeChannel が同期例外・拒否を返しても握りつぶす（永久停止しない）。
 // - invalidate()（stop 用）でも世代を +1 して旧チャンネルを背景除去する。
-export function buildChannelTopic(kind: string, liveId: string, gen: number): string {
-  return `host-${kind}-${liveId}-g${gen}`;
+// - swap 結果の dispose() は所有権付きクリーンアップ：自分の世代のチャンネルだけを
+//   除去し、自分がまだ現行のときだけ世代を +1（新しい swap に追い越されていたら
+//   世代・current には触らない）。古い subscribe の cleanup が最新世代を
+//   invalidate しないようにするため。
+//
+// scope（第3引数）はライブ単位で分けたいとき（ホスト側）に付ける。観客側のように
+// テーブル全体を購読していて liveId で絞らない場合は省略してよい。
+export function buildChannelTopic(prefix: string, kind: string, gen: number, scope?: string): string {
+  return scope ? `${prefix}-${kind}-${scope}-g${gen}` : `${prefix}-${kind}-g${gen}`;
 }
 
 export interface ChannelSwapSpawnArgs {
@@ -267,14 +275,14 @@ export interface ChannelSwapSpawnArgs {
   tracker: ChannelSubscriptionTracker;
   /** この世代が今も現行か（コールバック内の古い世代ガード用）。 */
   isCurrentGen: () => boolean;
-  /** kind と gen固有 topic を組み立てる（buildChannelTopic のショートカット）。 */
+  /** kind と gen固有 topic を組み立てる（deps.topicFor を liveId/gen へ束縛したもの）。 */
   topicFor: (kind: string) => string;
 }
 
 export interface ChannelSwapDeps<TChannel> {
   kinds: string[];
-  /** 全必須チャンネルを作成し .subscribe() まで行って返す（gen固有 topic を使う）。 */
-  spawn: (args: ChannelSwapSpawnArgs) => TChannel[];
+  /** kind・liveId・gen から一意な topic 名を作る。 */
+  topicFor: (kind: string, liveId: string, gen: number) => string;
   /** チャンネル1つを除去する（Promise 可。await されない。例外は握りつぶされる）。 */
   remove: (channel: TChannel) => unknown;
 }
@@ -284,13 +292,17 @@ export interface ChannelSwapResult<TChannel> {
   liveId: string;
   tracker: ChannelSubscriptionTracker;
   channels: TChannel[];
+  /** 所有権付きクリーンアップ。自分の世代のチャンネルだけ除去し、自分がまだ
+   *  現行のときだけ世代を +1（＝自分のコールバックを無効化）する。新しい swap に
+   *  追い越されていたら世代・current には触らない。 */
+  dispose: () => void;
 }
 
 export interface ChannelSwapController<TChannel> {
   /** 購読を入れ替える。旧世代を同期的に無効化し旧チャンネルを背景除去してから
    *  新世代を spawn する。最後の swap の世代だけが currentGen と一致する。 */
-  swap: (liveId: string) => ChannelSwapResult<TChannel>;
-  /** stop 用。現在の世代を無効化し旧チャンネルを背景除去する（新規 spawn はしない）。 */
+  swap: (liveId: string, spawn: (args: ChannelSwapSpawnArgs) => TChannel[]) => ChannelSwapResult<TChannel>;
+  /** stop 用（無条件）。現在の世代を無効化し旧チャンネルを背景除去する。 */
   invalidate: () => void;
   currentGen: () => number;
   /** 診断・テスト用。現在の swap 結果。 */
@@ -314,28 +326,46 @@ export function createChannelSwapController<TChannel>(
     }
   };
 
+  const doSwap = (
+    liveId: string,
+    spawn: (args: ChannelSwapSpawnArgs) => TChannel[],
+  ): ChannelSwapResult<TChannel> => {
+    // 1) 旧世代を同期的に無効化（古いコールバックは以降 isCurrentGen()=false）。
+    gen += 1;
+    const myGen = gen;
+    // 2) 旧チャンネルをローカルへ確保してから背景除去（新チャンネルは絶対に消さない）。
+    const prev = current;
+    current = null;
+    if (prev) removeCaptured(prev.channels);
+    // 3) 新世代の tracker とチャンネルを作る（gen固有 topic）。
+    const tracker = createChannelSubscriptionTracker(deps.kinds);
+    const channels = spawn({
+      liveId,
+      gen: myGen,
+      tracker,
+      isCurrentGen: () => myGen === gen,
+      topicFor: (kind) => deps.topicFor(kind, liveId, myGen),
+    });
+    const result: ChannelSwapResult<TChannel> = {
+      gen: myGen,
+      liveId,
+      tracker,
+      channels,
+      dispose: () => {
+        // 自分の世代のチャンネルだけ除去（captured なので新世代は消さない）。
+        removeCaptured(channels);
+        // 自分がまだ現行なら current をクリア＋世代 +1（自分のコールバックを無効化）。
+        // 新しい swap に追い越されていたら（gen !== myGen）世代・current には触らない。
+        if (current === result) current = null;
+        if (gen === myGen) gen += 1;
+      },
+    };
+    current = result;
+    return result;
+  };
+
   return {
-    swap(liveId) {
-      // 1) 旧世代を同期的に無効化（古いコールバックは以降 isCurrentGen()=false）。
-      gen += 1;
-      const myGen = gen;
-      // 2) 旧チャンネルをローカルへ確保してから背景除去（新チャンネルは絶対に消さない）。
-      const prev = current;
-      current = null;
-      if (prev) removeCaptured(prev.channels);
-      // 3) 新世代の tracker とチャンネルを作る（gen固有 topic）。
-      const tracker = createChannelSubscriptionTracker(deps.kinds);
-      const channels = deps.spawn({
-        liveId,
-        gen: myGen,
-        tracker,
-        isCurrentGen: () => myGen === gen,
-        topicFor: (kind) => buildChannelTopic(kind, liveId, myGen),
-      });
-      const result: ChannelSwapResult<TChannel> = { gen: myGen, liveId, tracker, channels };
-      current = result;
-      return result;
-    },
+    swap: doSwap,
     invalidate() {
       gen += 1;
       const prev = current;
