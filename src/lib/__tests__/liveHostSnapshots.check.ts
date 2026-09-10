@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 
 import {
   answersSnapshotMatches,
+  awaitChannelsSubscribed,
   botScoringAllowed,
   childrenSnapshotReady,
+  createChannelSubscriptionTracker,
   createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
@@ -19,6 +21,7 @@ import {
   shouldReleaseInitInFlight,
   shouldReleaseRetryFlag,
   shouldRetryNow,
+  type ChannelSubscribeOutcome,
   type HostHydrationDeps,
   type HostHydrationOutcome,
   type ProgressGuardState,
@@ -62,8 +65,9 @@ function buildHydrationDeps(
     finishLoading: (u: boolean) => {
       rec.calls.push(`finishLoading:${u}`);
     },
-    subscribe: () => {
-      rec.calls.push("subscribe");
+    subscribeAndWait: async () => {
+      rec.calls.push("subscribeAndWait");
+      return "subscribed" as ChannelSubscribeOutcome;
     },
     markRuntimeReady: () => {
       rec.calls.push("markRuntimeReady");
@@ -377,11 +381,11 @@ async function main() {
       "scores",
       "restoreTimer",
       "finishLoading:false",
-      "subscribe",
+      "subscribeAndWait",
       "markRuntimeReady",
     ]);
-    assert.ok(rec.calls.indexOf("restoreTimer") < rec.calls.indexOf("subscribe"), "タイマー復元は購読より前（必須2/0秒停止しない）");
-    assert.ok(rec.calls.indexOf("subscribe") < rec.calls.indexOf("markRuntimeReady"), "ready は購読の後にだけ立つ");
+    assert.ok(rec.calls.indexOf("restoreTimer") < rec.calls.indexOf("subscribeAndWait"), "タイマー復元は購読より前（必須2/0秒停止しない）");
+    assert.ok(rec.calls.indexOf("subscribeAndWait") < rec.calls.indexOf("markRuntimeReady"), "ready は購読の後にだけ立つ");
     console.log("PASS: 必須1/2相当（applied で完全復旧：children→answers→resolved→scores→タイマー→購読→ready）");
   }
 
@@ -395,7 +399,7 @@ async function main() {
       buildHydrationDeps({ loadAnswers: async () => "unconfirmed" as SliceLoadOutcome }, rec, refs),
     );
     assert.equal(r, "not-ready", "データが未確認なので戻り値は not-ready（自動進行は per-tick ガードで止まる）");
-    assert.ok(rec.calls.includes("subscribe"), "unconfirmed でも同じliveIdの購読は張る（再取得待ち）");
+    assert.ok(rec.calls.includes("subscribeAndWait"), "unconfirmed でも同じliveIdの購読は張る（再取得待ち）");
     assert.ok(
       rec.calls.includes("markRuntimeReady"),
       "unconfirmed は購読済み＝構造は確立。runtime ready にして放置しない（必須3）",
@@ -436,7 +440,7 @@ async function main() {
       ),
     );
     assert.equal(r, "target-changed");
-    assert.ok(!rec.calls.includes("subscribe"), "古いliveIdでは購読しない（必須5/6）");
+    assert.ok(!rec.calls.includes("subscribeAndWait"), "古いliveIdでは購読しない（必須5/6）");
     assert.ok(!rec.calls.includes("restoreTimer"));
     assert.ok(!rec.calls.includes("markRuntimeReady"), "target-changed を ready 扱いしない（必須6）");
     console.log("PASS: 必須5/6相当（target-changed は購読も ready もしない）");
@@ -473,7 +477,7 @@ async function main() {
       ),
     );
     assert.equal(r, "stopped");
-    assert.ok(!rec.calls.includes("subscribe"));
+    assert.ok(!rec.calls.includes("subscribeAndWait"));
     assert.ok(!rec.calls.includes("restoreTimer"));
     assert.ok(!rec.calls.includes("markRuntimeReady"));
     console.log("PASS: 必須14相当（復旧途中のstopでtimer/channel/stateを復活させない）");
@@ -497,7 +501,7 @@ async function main() {
       ),
     );
     assert.equal(r, "stopped");
-    assert.ok(!rec.calls.includes("subscribe"));
+    assert.ok(!rec.calls.includes("subscribeAndWait"));
     console.log("PASS: 必須14相当（所有権喪失後は購読しない）");
   }
 
@@ -526,9 +530,199 @@ async function main() {
     const rec2: Rec = { calls: [] };
     const r2 = await hydrateAfterLive(buildHydrationDeps({ targetLiveId: "L2" }, rec2, refs2));
     assert.equal(r2, "ready");
-    assert.ok(rec2.calls.includes("subscribe"), "最終的に新しいライブ(L2)だけを購読する（必須8）");
+    assert.ok(rec2.calls.includes("subscribeAndWait"), "最終的に新しいライブ(L2)だけを購読する（必須8）");
     assert.ok(rec2.calls.includes("markRuntimeReady"));
     console.log("PASS: 必須8/15相当（target-changed→新liveIdで完全復旧、デッドロックしない）");
+  }
+
+  // ========== Realtime 購読の接続状態集約（P1-2）==========
+
+  // 追加必須3：一部の必須チャンネルだけ SUBSCRIBED では allSubscribed=false。
+  {
+    const t = createChannelSubscriptionTracker(["lives", "participants", "turns", "answers", "scores"]);
+    t.note("lives", "SUBSCRIBED");
+    t.note("participants", "SUBSCRIBED");
+    t.note("turns", "SUBSCRIBED");
+    assert.equal(t.allSubscribed(), false, "一部だけ SUBSCRIBED では runtime 確立にならない");
+    assert.equal(t.hasFailure(), false);
+    t.note("answers", "SUBSCRIBED");
+    t.note("scores", "SUBSCRIBED");
+    // 追加必須4：全必須チャンネル SUBSCRIBED でだけ allSubscribed=true。
+    assert.equal(t.allSubscribed(), true, "全必須チャンネル SUBSCRIBED でだけ runtime 確立");
+    // 追加必須5：CLOSED で異常＝凍結対象に。
+    t.note("answers", "CLOSED");
+    assert.equal(t.allSubscribed(), false);
+    assert.equal(t.hasFailure(), true, "CLOSED は無視しない");
+    console.log("PASS: 追加必須3/4/5（チャンネル接続状態の集約：一部/全/異常）");
+  }
+
+  // 追加必須5：CHANNEL_ERROR / TIMED_OUT でも hasFailure。
+  {
+    for (const bad of ["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"] as const) {
+      const t = createChannelSubscriptionTracker(["lives"]);
+      t.note("lives", "SUBSCRIBED");
+      t.note("lives", bad);
+      assert.equal(t.hasFailure(), true, `${bad} で hasFailure`);
+      assert.equal(t.allSubscribed(), false, `${bad} 後は allSubscribed=false`);
+    }
+    console.log("PASS: 追加必須5（CHANNEL_ERROR / TIMED_OUT / CLOSED を無視しない）");
+  }
+
+  // awaitChannelsSubscribed：subscribed / error / timeout / aborted の区別。
+  {
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    // subscribed：遅れて全チャンネルが SUBSCRIBED になる → "subscribed"
+    {
+      const t = createChannelSubscriptionTracker(["a", "b"]);
+      setTimeout(() => t.note("a", "SUBSCRIBED"), 20);
+      setTimeout(() => t.note("b", "SUBSCRIBED"), 40);
+      const o = await awaitChannelsSubscribed({
+        tracker: t,
+        aborted: () => false,
+        timeoutMs: 1000,
+        pollMs: 10,
+        now: () => Date.now(),
+        sleep,
+      });
+      assert.equal(o, "subscribed", "全必須チャンネル SUBSCRIBED 後に subscribed");
+    }
+    // error：途中で CHANNEL_ERROR → "error"
+    {
+      const t = createChannelSubscriptionTracker(["a", "b"]);
+      setTimeout(() => t.note("a", "SUBSCRIBED"), 10);
+      setTimeout(() => t.note("b", "CHANNEL_ERROR"), 20);
+      const o = await awaitChannelsSubscribed({
+        tracker: t,
+        aborted: () => false,
+        timeoutMs: 1000,
+        pollMs: 10,
+        now: () => Date.now(),
+        sleep,
+      });
+      assert.equal(o, "error", "必須チャンネル異常で error（自動進行を凍結させる）");
+    }
+    // timeout：いつまでも SUBSCRIBED にならない → "timeout"
+    {
+      const t = createChannelSubscriptionTracker(["a"]);
+      const o = await awaitChannelsSubscribed({
+        tracker: t,
+        aborted: () => false,
+        timeoutMs: 30,
+        pollMs: 10,
+        now: () => Date.now(),
+        sleep,
+      });
+      assert.equal(o, "timeout");
+    }
+    // 追加必須7：stop 中／ライブ切替中は、遅れて allSubscribed になっても "aborted"。
+    {
+      const t = createChannelSubscriptionTracker(["a"]);
+      t.note("a", "SUBSCRIBED"); // 既に全 SUBSCRIBED
+      const o = await awaitChannelsSubscribed({
+        tracker: t,
+        aborted: () => true, // stop / 世代変更 / liveId 変更 相当
+        timeoutMs: 1000,
+        pollMs: 10,
+        now: () => Date.now(),
+        sleep,
+      });
+      assert.equal(o, "aborted", "中断条件が真なら allSubscribed でも aborted（遅延SUBSCRIBEDを無視）");
+    }
+    console.log("PASS: awaitChannelsSubscribed（subscribed / error / timeout / aborted の区別）");
+  }
+
+  // 追加必須3/5：hydrateAfterLive で subscribeAndWait が "error" → markRuntimeReady しない。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps(
+        { subscribeAndWait: async () => "error" as ChannelSubscribeOutcome },
+        rec,
+        refs,
+      ),
+    );
+    assert.equal(r, "not-ready", "接続異常なら runtime ready にせず not-ready");
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "接続異常で runtime ready にしない（CHANNEL_ERROR等で凍結）");
+    console.log("PASS: 追加必須5（subscribeAndWait error → runtime ready にしない）");
+  }
+  // subscribeAndWait が "timeout" → 同上。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps(
+        { subscribeAndWait: async () => "timeout" as ChannelSubscribeOutcome },
+        rec,
+        refs,
+      ),
+    );
+    assert.equal(r, "not-ready");
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "接続タイムアウトで runtime ready にしない");
+    console.log("PASS: 追加必須（subscribeAndWait timeout → runtime ready にしない）");
+  }
+  // 追加必須7：subscribeAndWait が "aborted"（stop/切替）→ stopped、markRuntimeReady しない。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps(
+        { subscribeAndWait: async () => "aborted" as ChannelSubscribeOutcome },
+        rec,
+        refs,
+      ),
+    );
+    assert.equal(r, "stopped");
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "中断時は runtime ready にしない");
+    console.log("PASS: 追加必須7（subscribeAndWait aborted → stopped・runtime ready にしない）");
+  }
+
+  // 追加必須1/2：古い購読世代の refetch 結果で現在のライブを上書きしない
+  // （stillCurrent が「購読世代一致 ＋ 現在の live.id 一致」を確認する）。
+  {
+    const gate = createSliceGate();
+    let channelGen = 1; // 現在の購読世代
+    let currentLiveId = "A";
+    let state = "A-initial";
+    // ライブA向けの refetchLive を開始（購読世代1、対象 A）
+    const myGen = channelGen;
+    const myLiveId = "A";
+    const r = loadSnapshotSlice<string>({
+      gate,
+      fetch: async () => {
+        await delay(30); // A のコールバックが遅延
+        return { ok: true, data: "A-late" };
+      },
+      // `stillCurrent: () => true` は廃止。購読世代と現在の live.id を確認する。
+      stillCurrent: () => channelGen === myGen && currentLiveId === myLiveId,
+      applyFresh: (d) => {
+        state = d;
+      },
+      markUnconfirmed: () => {},
+    });
+    await delay(5);
+    // ライブBへ切り替え（cleanupChannels 相当で購読世代が進む）
+    channelGen = 2;
+    currentLiveId = "B";
+    state = "B-current";
+    const o = await r;
+    assert.equal(o, "target-changed", "古い購読世代・別liveIdの refetch は反映しない");
+    assert.equal(state, "B-current", "ライブAの遅延結果がライブBを上書きしない（P1-1）");
+    console.log("PASS: 追加必須1/2（古い購読世代のコールバックが現在のライブを上書きしない）");
+  }
+
+  // 追加必須6：古い購読世代のエラーは、新しい世代の tracker に影響しない
+  // （世代ごとに tracker が分かれている）。
+  {
+    const oldTracker = createChannelSubscriptionTracker(["lives"]);
+    const newTracker = createChannelSubscriptionTracker(["lives"]);
+    newTracker.note("lives", "SUBSCRIBED");
+    // 古い世代のチャンネルから遅れて CHANNEL_ERROR が届いた（古い tracker へ）
+    oldTracker.note("lives", "CHANNEL_ERROR");
+    assert.equal(oldTracker.hasFailure(), true);
+    assert.equal(newTracker.hasFailure(), false, "古い世代のエラーは新しい世代の tracker に影響しない");
+    assert.equal(newTracker.allSubscribed(), true, "新しい世代の runtime ready は解除されない（必須6）");
+    console.log("PASS: 追加必須6（古い購読世代のエラーが現在の runtime を無効化しない）");
   }
 
   console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");

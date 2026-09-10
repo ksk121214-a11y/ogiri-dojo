@@ -17,8 +17,10 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(m, "liveHostSnapshotsからのimport文が見つからない");
   for (const name of [
     "answersSnapshotMatches",
+    "awaitChannelsSubscribed",
     "botScoringAllowed",
     "childrenSnapshotReady",
+    "createChannelSubscriptionTracker",
     "createRecoveryCoordinator",
     "createSliceGate",
     "hydrateAfterLive",
@@ -44,7 +46,9 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(src.includes("const recovery = createRecoveryCoordinator()"), "recovery コーディネータが無い");
   assert.ok(/let subscribedLiveId: string \| null = null;/.test(src), "subscribedLiveId が無い");
   assert.ok(/let runtimeReadyLiveId: string \| null = null;/.test(src), "runtimeReadyLiveId が無い");
-  console.log("PASS: 配線-2（5スライスゲート ＋ recoveryコーディネータ ＋ subscribedLiveId/runtimeReadyLiveId）");
+  assert.ok(/let channelGeneration = 0;/.test(src), "購読世代 channelGeneration が無い");
+  assert.ok(/let currentChannelTracker: ChannelSubscriptionTracker \| null = null;/.test(src), "currentChannelTracker が無い");
+  console.log("PASS: 配線-2（5スライスゲート ＋ recoveryコーディネータ ＋ subscribedLiveId/runtimeReadyLiveId/channelGeneration）");
 }
 
 // 3: 各取得経路が loadSnapshotSlice を通っている。
@@ -239,16 +243,16 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(/for \(let attempt = 0; attempt < 3; attempt\+\+\)/.test(src), "target-changed のやり直しループが無い");
   assert.ok(/if \(result === "target-changed"\) \{[\s\S]{0,120}?continue;/.test(src), "target-changed 時に新liveIdでやり直していない");
   assert.ok(/ownsRecovery: \(\) => recovery\.owns\(recoveryToken\)/.test(src), "hydrateAfterLive に ownsRecovery を渡していない");
-  assert.ok(/markRuntimeReady: \(\) => \{\s*\n\s*runtimeReadyLiveId = targetLiveId;/.test(src), "markRuntimeReady で runtimeReadyLiveId を記録していない");
+  assert.ok(/markRuntimeReady: \(\) => \{[\s\S]{0,120}?runtimeReadyLiveId = targetLiveId;/.test(src), "markRuntimeReady で runtimeReadyLiveId を記録していない");
   assert.ok(
-    /subscribe: \(\) => \{[\s\S]{0,260}?void subscribeLiveChannels\(targetLiveId\);/.test(src),
-    "subscribe が targetLiveId で購読していない",
+    /subscribeAndWait: \(\) =>[\s\S]{0,260}?subscribeAndWaitForLive\(\s*\n?\s*targetLiveId,/.test(src),
+    "subscribeAndWait が subscribeAndWaitForLive(targetLiveId, ...) を使っていない（P1-2：SUBSCRIBED を待つ）",
   );
   assert.ok(
     /function ensureHostRecovery\(generation: number\): Promise<HostHydrationOutcome> \{\s*\n\s*return recovery\.run\(/.test(src),
     "ensureHostRecovery が recovery.run 経由になっていない",
   );
-  console.log("PASS: 配線-13（hydrateHostForActiveLive: target-changed ループ ＋ 所有権 ＋ runtimeReady 記録）");
+  console.log("PASS: 配線-13（hydrateHostForActiveLive: target-changed ループ ＋ 所有権 ＋ SUBSCRIBED待ち購読 ＋ runtimeReady 記録）");
 }
 
 // 14: isHostRuntimeEstablished：tickTimer / subscribedLiveId / runtimeReadyLiveId /
@@ -284,12 +288,84 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-15（stopHostProgress: 全ゲート begin ＋ recovery無効化 ＋ 確立/retry/snapshot リセット）");
 }
 
-// 16: cleanupChannels が subscribedLiveId をクリア、subscribeLiveChannels が設定する。
+// 16: P1-2（実際の SUBSCRIBED を待つ）。cleanupChannels が購読世代を +1、
+//     subscribeLiveChannels は subscribedLiveId を直接設定せず、onChannelStatus が
+//     全必須チャンネル SUBSCRIBED を確認したときだけ設定する。
 {
-  assert.ok(/function cleanupChannels\(\) \{[\s\S]*?subscribedLiveId = null;[\s\S]*?\n\}/.test(src), "cleanupChannels が subscribedLiveId をクリアしていない");
-  assert.ok(/channels = \[livesCh[\s\S]{0,200}?subscribedLiveId = liveId;/.test(src), "subscribeLiveChannels が subscribedLiveId を設定していない");
-  assert.ok(/if \(tickTimer\) return;/.test(src), "ensureTickTimer が『既に1本あればそのまま』になっていない");
-  console.log("PASS: 配線-16（subscribedLiveId の管理 ＋ ensureTickTimer は再作成しない）");
+  assert.ok(
+    /function cleanupChannels\(\) \{[\s\S]*?subscribedLiveId = null;[\s\S]*?channelGeneration \+= 1;[\s\S]*?\n\}/.test(src),
+    "cleanupChannels が subscribedLiveId クリア＋購読世代 +1 をしていない",
+  );
+  // subscribeLiveChannels は「作った直後に subscribedLiveId = liveId」を **しない**。
+  assert.ok(
+    !/channels = \[livesCh[\s\S]{0,120}?subscribedLiveId = liveId;/.test(src),
+    "subscribeLiveChannels が .subscribe() 直後に subscribedLiveId を立てている（接続完了ではない）",
+  );
+  assert.ok(
+    src.includes("const REQUIRED_CHANNELS = [\"lives\", \"participants\", \"turns\", \"answers\", \"scores\"]"),
+    "必須チャンネル一覧（REQUIRED_CHANNELS）が無い",
+  );
+  assert.ok(
+    src.includes("createChannelSubscriptionTracker([...REQUIRED_CHANNELS])"),
+    "subscribeLiveChannels が接続状態集約 tracker を作っていない",
+  );
+  // onChannelStatus：古い世代は無視、SUBSCRIBED を集約、全 SUBSCRIBED でだけ確立、
+  // CHANNEL_ERROR / TIMED_OUT / CLOSED でランタイム無効化。
+  const onStatus = src.match(/const onChannelStatus =[\s\S]*?\n {4}\};/);
+  assert.ok(onStatus, "onChannelStatus が見つからない");
+  assert.ok(/if \(!isCurrentGen\(\)\) return;/.test(onStatus[0]), "onChannelStatus が古い購読世代を弾いていない");
+  assert.ok(
+    /if \(tracker\.allSubscribed\(\) && !tracker\.hasFailure\(\)\) \{\s*\n\s*subscribedLiveId = liveId;/.test(onStatus[0]),
+    "全必須チャンネル SUBSCRIBED のときだけ subscribedLiveId を確立していない",
+  );
+  assert.ok(
+    /status === "CHANNEL_ERROR" \|\| status === "TIMED_OUT" \|\| status === "CLOSED"/.test(onStatus[0]) &&
+      /if \(subscribedLiveId === liveId\) subscribedLiveId = null;/.test(onStatus[0]) &&
+      /if \(runtimeReadyLiveId === liveId\) runtimeReadyLiveId = null;/.test(onStatus[0]),
+    "接続異常（CHANNEL_ERROR/TIMED_OUT/CLOSED）で該当liveIdの runtime を無効化していない",
+  );
+  console.log("PASS: 配線-16（P1-2：全必須チャンネル SUBSCRIBED でだけ確立・異常で凍結・古い世代は無視）");
+}
+
+// 16b: P1-1（`stillCurrent: () => true` の廃止 ＋ 購読世代 & liveId 二重確認）。
+{
+  assert.ok(!/stillCurrent: \(\) => true/.test(src), "`stillCurrent: () => true` が残っている（P1-1）");
+  // refetchLive / refetchChildren の stillCurrent が isCurrentGen() と live.id を両方見る。
+  assert.ok(
+    /const refetchLive = \(\) => \{[\s\S]*?stillCurrent: \(\) => isCurrentGen\(\) && useLiveHostStore\.getState\(\)\.live\?\.id === liveId,/.test(src),
+    "refetchLive の stillCurrent が『購読世代一致 ＋ 現在の live.id 一致』になっていない",
+  );
+  assert.ok(
+    /const refetchChildren = \(\) => \{[\s\S]*?stillCurrent: \(\) => isCurrentGen\(\) && useLiveHostStore\.getState\(\)\.live\?\.id === liveId,/.test(src),
+    "refetchChildren の stillCurrent が『購読世代一致 ＋ 現在の live.id 一致』になっていない",
+  );
+  // 各 postgres_changes コールバックが古い購読世代を弾く。
+  assert.ok(count("if (!isCurrentGen()) return;") >= 6, "Realtime コールバックの古い世代ガードが不足");
+  console.log("PASS: 配線-16b（P1-1：stillCurrent:()=>true 廃止・購読世代＋liveId の二重確認）");
+}
+
+// 16c: subscribeAndWaitForLive：awaitChannelsSubscribed で SUBSCRIBED を待ち、
+//      abort に stop / 進行世代 / 対象liveId / 購読世代 を含める。
+{
+  const fn = src.match(/async function subscribeAndWaitForLive\([\s\S]*?\n\}/);
+  assert.ok(fn, "subscribeAndWaitForLive が無い");
+  assert.ok(fn[0].includes("awaitChannelsSubscribed({"), "awaitChannelsSubscribed を使っていない");
+  assert.ok(
+    /aborted: \(\) => channelGeneration !== chGen \|\| abortedFn\(chGen\)/.test(fn[0]),
+    "aborted が購読世代の入れ替わりを見ていない",
+  );
+  assert.ok(
+    /if \(outcome !== "timeout"\) return outcome;[\s\S]{0,120}?subscribeLiveChannels\(targetLiveId\);/.test(fn[0]),
+    "タイムアウト時に一度だけ張り直す経路が無い（無限待ち防止）",
+  );
+  assert.ok(src.includes("const CHANNEL_SUBSCRIBE_TIMEOUT_MS = 10_000"), "接続待ちタイムアウト定数が無い");
+  console.log("PASS: 配線-16c（subscribeAndWaitForLive: SUBSCRIBED待ち ＋ 中断条件 ＋ タイムアウト再張り）");
+}
+
+// 16d: ensureTickTimer は既に1本あれば張り直さない。
+{
+  assert.ok(/function ensureTickTimer\(generation: number\) \{[\s\S]*?if \(tickTimer\) return;/.test(src), "ensureTickTimer が『既に1本あればそのまま』になっていない");
+  console.log("PASS: 配線-16d（ensureTickTimer はタイマーを重複作成しない）");
 }
 
 // 17: init/hydrate のstop検出ブランチが cleanupChannels() を呼ばない。

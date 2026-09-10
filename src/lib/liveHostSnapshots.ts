@@ -159,6 +159,79 @@ export function shouldReleaseRetryFlag(currentGeneration: number, myGeneration: 
   return currentGeneration === myGeneration;
 }
 
+// ===== Realtime 購読の接続状態集約（実際の SUBSCRIBED を待つ）=====
+//
+// supabase の channel.subscribe() は「購読を開始する」だけで、実際の接続完了は
+// 後から status コールバックで SUBSCRIBED が届く。CHANNEL_ERROR / TIMED_OUT /
+// CLOSED も届く。進行に必要な複数チャンネルの接続状態を1つに集約し、
+// 「全て SUBSCRIBED になったか」「いずれかが異常か」を判定する。
+export type ChannelSubscribeStatus =
+  | "SUBSCRIBED"
+  | "CHANNEL_ERROR"
+  | "TIMED_OUT"
+  | "CLOSED"
+  | (string & {});
+
+export type ChannelSubscribeOutcome = "subscribed" | "error" | "timeout" | "aborted";
+
+export interface ChannelSubscriptionTracker {
+  /** チャンネルの status 変化を記録する（必須チャンネル以外は無視）。 */
+  note: (channel: string, status: ChannelSubscribeStatus) => void;
+  /** 全必須チャンネルが SUBSCRIBED 済みか。 */
+  allSubscribed: () => boolean;
+  /** いずれかの必須チャンネルが異常（CHANNEL_ERROR / TIMED_OUT / CLOSED）か。 */
+  hasFailure: () => boolean;
+  /** 現状のスナップショット（テスト・診断用）。 */
+  state: () => { subscribed: string[]; failed: string[]; required: string[] };
+}
+
+export function createChannelSubscriptionTracker(required: string[]): ChannelSubscriptionTracker {
+  const req = [...new Set(required)];
+  const subscribed = new Set<string>();
+  const failed = new Set<string>();
+  return {
+    note(channel, status) {
+      if (!req.includes(channel)) return;
+      if (status === "SUBSCRIBED") {
+        subscribed.add(channel);
+        failed.delete(channel);
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        failed.add(channel);
+        subscribed.delete(channel);
+      }
+    },
+    allSubscribed: () => req.every((c) => subscribed.has(c)),
+    hasFailure: () => failed.size > 0,
+    state: () => ({ subscribed: [...subscribed], failed: [...failed], required: [...req] }),
+  };
+}
+
+export interface AwaitChannelsDeps {
+  tracker: ChannelSubscriptionTracker;
+  /** 中断すべきか（stop / 進行世代変更 / 対象liveId変更 / 購読世代の入れ替わり）。 */
+  aborted: () => boolean;
+  timeoutMs: number;
+  pollMs: number;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+// 必須チャンネルが全て SUBSCRIBED になるまで待つ。異常・タイムアウト・中断を区別して返す。
+// ポーリング方式（pollMs 間隔）。待機中の stop / 世代変更 / 対象liveId変更は
+// aborted() で検知して即座に "aborted" を返す（遅れて届く SUBSCRIBED を無視できる）。
+export async function awaitChannelsSubscribed(deps: AwaitChannelsDeps): Promise<ChannelSubscribeOutcome> {
+  const start = deps.now();
+  for (;;) {
+    if (deps.aborted()) return "aborted";
+    if (deps.tracker.hasFailure()) return "error";
+    if (deps.tracker.allSubscribed()) return "subscribed";
+    if (deps.now() - start >= deps.timeoutMs) return "timeout";
+    await deps.sleep(deps.pollMs);
+    // sleep 明けにも中断確認（stop 直後に allSubscribed へ滑り込まないように）。
+    if (deps.aborted()) return "aborted";
+  }
+}
+
 // ===== 取得失敗からの完全復旧オーケストレーション（live確定後の順序）=====
 //
 // 初回init()のlive取得が失敗し、その後の読み取り再試行で通信が回復した場合、
@@ -189,9 +262,14 @@ export interface HostHydrationDeps {
   restoreAnsweringTimer: () => void;
   /** loading/error/lastRefreshedAt を確定させる。anyUnconfirmed=true なら注意文言。 */
   finishLoading: (anyUnconfirmed: boolean) => void;
-  /** Realtime を対象 liveId で購読する（同期的に channel を作る前提）。 */
-  subscribe: () => void;
-  /** 進行critical なスライスが全て applied で、購読も済んだ＝完全 ready を記録する。 */
+  /**
+   * Realtime を対象 liveId で購読し、**必須チャンネルが全て SUBSCRIBED になるまで待つ**。
+   * .subscribe() を呼んだだけでは接続完了ではないため、実際の SUBSCRIBED 通知の集約を
+   * 待ってから解決する。待機中の stop / 世代変更 / 対象liveId変更 / タイムアウト /
+   * 接続異常(CHANNEL_ERROR等) を区別して返す。
+   */
+  subscribeAndWait: () => Promise<ChannelSubscribeOutcome>;
+  /** 全必須チャンネルが SUBSCRIBED 済み ＋ 進行critical スライスが揃った＝完全 ready を記録する。 */
   markRuntimeReady: () => void;
 }
 
@@ -238,13 +316,23 @@ export async function hydrateAfterLive(deps: HostHydrationDeps): Promise<HostHyd
     scores === "unconfirmed";
   deps.finishLoading(anyUnconfirmed);
 
-  // subscribe直前に最後の再確認（progressGeneration・所有権・currentLiveId===targetLiveId）。
-  // ここを通過したら subscribe は同期実行され、その間に stopHostProgress が割り込む
-  // 余地は無い（JSは単一スレッド）。古いliveIdでは絶対に購読しない。
+  // 購読直前に最後の再確認（progressGeneration・所有権・currentLiveId===targetLiveId）。
+  // 古いliveIdでは絶対に購読しない。
   a = abort();
   if (a) return a;
-  deps.subscribe();
+  // .subscribe() を呼ぶだけでなく、必須チャンネルが実際に SUBSCRIBED になるまで待つ。
+  const sub = await deps.subscribeAndWait();
+  // 待機中に stop / 世代変更 / 対象liveId変更 が起きていないか再確認。
+  a = abort();
+  if (a) return a;
+  if (sub === "aborted") return "stopped";
+  if (sub !== "subscribed") {
+    // error / timeout：runtime確立しない。呼び出し側（ensureHostRecovery 経由）が
+    // 完全復旧を再試行する（advanceIfDue は isHostRuntimeEstablished=false を見て凍結）。
+    return "not-ready";
+  }
 
+  // ここに来た＝全必須チャンネル SUBSCRIBED 確認済み。
   // markRuntimeReady（＝司会進行環境の「構造」が確立できた）は、進行critical の
   // children/answers/scores が applied または unconfirmed のときに行う。
   // - applied     ：この hydrate が最新データを反映した

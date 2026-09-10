@@ -17,8 +17,10 @@ import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
 import {
   answersSnapshotMatches,
+  awaitChannelsSubscribed,
   botScoringAllowed,
   childrenSnapshotReady,
+  createChannelSubscriptionTracker,
   createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
@@ -31,6 +33,8 @@ import {
   shouldReleaseRetryFlag,
   shouldRetryNow,
   type AnswersSnapshotKey,
+  type ChannelSubscribeOutcome,
+  type ChannelSubscriptionTracker,
   type HostHydrationOutcome,
   type ScoresSnapshotKey,
   type SliceLoadOutcome,
@@ -227,15 +231,31 @@ const SNAPSHOT_RETRY_INTERVAL_MS = 2_000;
 
 // 2026-09-13（再レビュー対応・P1-1）：司会進行環境が「どのliveIdについて完全に
 // 確立済みか」。liveSnapshotConfirmed（live行を取得できた）だけでは不十分で、
-// - subscribedLiveId：Realtimeを対象liveIdで購読済みか（subscribeLiveChannels/
-//   cleanupChannelsが管理）
+// - subscribedLiveId：進行に必要な全Realtimeチャンネルが対象liveIdで実際に
+//   SUBSCRIBED になったか（onChannelStatus が集約して設定、接続異常/cleanupでクリア）
 // - runtimeReadyLiveId：hydrate が children/answers/scores まで applied で
-//   完了し、購読・タイマー復元まで済んだliveId
+//   完了し、全必須チャンネル SUBSCRIBED ＋ タイマー復元まで済んだliveId
 // の両方が現在のlive.idと一致して初めて「完全復旧済み」とみなす（isHostRuntimeEstablished）。
 // 手動refreshがliveGateだけ進めて liveSnapshotConfirmed=true にしても、これらが
 // 揃わない限り advanceIfDue は完全復旧（ensureHostRecovery）へ合流する。
 let subscribedLiveId: string | null = null;
 let runtimeReadyLiveId: string | null = null;
+
+// 2026-09-14（再レビュー対応・P1-1/P1-2）：Realtime購読の「世代」。
+// subscribeLiveChannels を呼ぶたび（＝cleanupChannels のたび）に +1 する。
+// 各チャンネルの status/postgres_changes コールバックは自分が作られたときの
+// 世代を捕捉し、コールバック開始時に channelGeneration と一致するかを確認する。
+// 古い購読世代のコールバック（遅延した refetch・遅れて届く SUBSCRIBED/
+// CHANNEL_ERROR/CLOSED）は現在の state に一切影響させない。
+let channelGeneration = 0;
+// 現在の購読世代が対象としている liveId と、必須チャンネルの接続状態集約。
+let currentChannelLiveId: string | null = null;
+let currentChannelTracker: ChannelSubscriptionTracker | null = null;
+// 進行に必要な（＝SUBSCRIBED を待つ）チャンネル。tsukkomi は送信専用の
+// 賑やかし用ブロードキャストで、接続できなくても進行に支障が無いため必須にしない。
+const REQUIRED_CHANNELS = ["lives", "participants", "turns", "answers", "scores"] as const;
+const CHANNEL_SUBSCRIBE_TIMEOUT_MS = 10_000;
+const CHANNEL_SUBSCRIBE_POLL_MS = 150;
 
 // 完全復旧（init / 初回失敗後のretry / 未初期化状態の手動refresh）を1本化する
 // 所有権コーディネータ。同一世代の完全復旧が進行中なら、その Promise へ合流する
@@ -266,6 +286,16 @@ function cleanupChannels() {
   channels = [];
   tsukkomiChannel = null;
   subscribedLiveId = null;
+  // 購読世代を +1 して、古い（この cleanup より前に作られた）チャンネルの
+  // 遅延コールバックを全て無効化する。
+  channelGeneration += 1;
+  currentChannelLiveId = null;
+  currentChannelTracker = null;
+}
+
+// 待機（awaitChannelsSubscribed のポーリング）で使う sleep。
+function channelSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // 500msの進行tickタイマーを（重複なく）1本だけ確実に張る。指定世代が既に
@@ -449,55 +479,85 @@ async function fetchResolvedWithScores(
   return { ok: true, data: { resolvedAnswers: ra.data, resolvedScoresByAnswer: rs.data } };
 }
 
-async function subscribeLiveChannels(liveId: string) {
-  cleanupChannels();
+// Realtime を対象 liveId で購読する。cleanupChannels で購読世代 channelGeneration を
+// +1 したうえで新しい世代の channel を作る。各コールバックは自分が作られた世代
+// (myGen) を捕捉し、コールバック開始時に channelGeneration と一致するかを確認する。
+// 古い購読世代のコールバック（遅延 refetch・遅れて届く SUBSCRIBED/CHANNEL_ERROR/
+// CLOSED）は現在の state に一切影響させない。
+// 「購読を作った」だけでは接続完了ではないため、subscribedLiveId は
+// onChannelStatus が「全必須チャンネル SUBSCRIBED」を確認したときだけ設定する。
+function subscribeLiveChannels(liveId: string) {
+  cleanupChannels(); // channelGeneration += 1
+  const myGen = channelGeneration;
+  const tracker = createChannelSubscriptionTracker([...REQUIRED_CHANNELS]);
+  currentChannelTracker = tracker;
+  currentChannelLiveId = liveId;
 
-  // 2026-09-11（再レビュー対応）：Realtime起点の再取得も、initやrefreshや別の
-  // Realtimeイベントの取得と並行しうる。スライスゲート（childrenGate/liveGate）で
-  // 新旧を判定し、古い結果が新しい状態を巻き戻さないようにする。取得失敗時は
-  // 表示データは維持しつつ確認状態だけ未確認へ戻す（loadSnapshotSlice参照）。
-  const refetchChildren = () =>
-    loadSnapshotSlice<ChildrenPayload>({
+  // この購読世代がまだ現行か。古い世代のコールバックは全てここで弾く。
+  const isCurrentGen = () => myGen === channelGeneration;
+
+  const refetchChildren = () => {
+    if (!isCurrentGen()) return;
+    void loadSnapshotSlice<ChildrenPayload>({
       gate: childrenGate,
       fetch: () => fetchChildrenWithProfiles(liveId),
-      stillCurrent: () => useLiveHostStore.getState().live?.id === liveId,
-      // 2026-09-12（再レビュー対応・P2-1）：Realtimeで変更を検知して再取得を
-      // 「開始した」時点で、表示中のchildrenは最新か未確認。取得成功まで
-      // 自動進行を凍結する（表示データは維持）。
+      // 2026-09-14（再レビュー対応・P1-1）：「無条件に現在」を返す stillCurrent を廃止。
+      // 「liveIdで絞って取得している」ことは、そのliveIdが現在表示中のライブである
+      // ことを保証しない。購読世代と現在の live.id の両方が一致するときだけ反映する。
+      stillCurrent: () => isCurrentGen() && useLiveHostStore.getState().live?.id === liveId,
       markPending: () => useLiveHostStore.setState({ childrenSnapshotLiveId: null }),
       applyFresh: ({ profiles, ...children }) =>
         useLiveHostStore.setState({ ...children, profiles, childrenSnapshotLiveId: liveId }),
       markUnconfirmed: () => useLiveHostStore.setState({ childrenSnapshotLiveId: null }),
     });
+  };
 
-  const refetchAnswersAndScores = resyncAnswersAndScoresForCurrentLive;
+  const refetchAnswersAndScores = () => {
+    if (!isCurrentGen()) return;
+    void resyncAnswersAndScoresForCurrentLive();
+  };
 
-  // 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
-  // RPC（begin_game等）や別タブからのlives行の更新は、この購読が無いとRealtimeに
-  // 気づけず、司会ブラウザが手動の「最新状態を取得」を押されるまでstate.liveが
-  // 古いまま(advanceIfDueがそれを見て自動進行を判断する)になってしまう。
-  const refetchLive = () =>
-    loadSnapshotSlice<LiveRow | null>({
+  const refetchLive = () => {
+    if (!isCurrentGen()) return;
+    void loadSnapshotSlice<LiveRow | null>({
       gate: liveGate,
       fetch: () => fetchLiveRow(liveId),
-      stillCurrent: () => true, // id=eq.${liveId} で絞っているので常に対象一致
-      // 2026-09-12（再レビュー対応・P2-1）：Realtime変更検知・再接続で再取得を
-      // 「開始した」時点で、表示中のliveは最新か未確認。取得成功まで自動進行を凍結。
+      // 2026-09-14（再レビュー対応・P1-1）：購読世代と現在の live.id の両方を確認する。
+      // ライブAの遅延した refetchLive がライブBを上書きしないようにする。
+      stillCurrent: () => isCurrentGen() && useLiveHostStore.getState().live?.id === liveId,
       markPending: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
       applyFresh: (row) =>
         useLiveHostStore.setState({ live: row ?? null, liveSnapshotConfirmed: true }),
       markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
     });
-
-  // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す
-  // （Realtimeは切断中に起きた変更を後から届けてくれないため）。
-  const onSubscribeStatus = (status: string) => {
-    if (status === "SUBSCRIBED") {
-      refetchLive();
-      refetchChildren();
-      refetchAnswersAndScores();
-    }
   };
+
+  const refetchOnReconnect = (channel: (typeof REQUIRED_CHANNELS)[number]) => {
+    // チャンネルが(再)接続できた瞬間に、そのチャンネルが担う範囲の最新スナップショットを
+    // 取り直す（Realtimeは切断中に起きた変更を後から届けてくれないため）。
+    if (channel === "lives") refetchLive();
+    else if (channel === "participants" || channel === "turns") refetchChildren();
+    else refetchAnswersAndScores();
+  };
+
+  // 各必須チャンネルの status コールバック。古い購読世代は無視。SUBSCRIBED を集約し、
+  // 全必須チャンネル SUBSCRIBED になった時点でだけ subscribedLiveId を確立する。
+  // CHANNEL_ERROR / TIMED_OUT / CLOSED は無視せず、このliveIdの runtime ready を無効化して
+  // 自動進行を凍結する（ensureHostRecovery が再試行する）。
+  const onChannelStatus =
+    (channel: (typeof REQUIRED_CHANNELS)[number]) => (status: string) => {
+      if (!isCurrentGen()) return; // 古い購読世代の通知は現在の状態へ影響させない
+      tracker.note(channel, status);
+      if (status === "SUBSCRIBED") {
+        refetchOnReconnect(channel);
+        if (tracker.allSubscribed() && !tracker.hasFailure()) {
+          subscribedLiveId = liveId;
+        }
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        if (subscribedLiveId === liveId) subscribedLiveId = null;
+        if (runtimeReadyLiveId === liveId) runtimeReadyLiveId = null;
+      }
+    };
 
   const livesCh = supabase
     .channel(`host-lives-${liveId}`)
@@ -506,7 +566,7 @@ async function subscribeLiveChannels(liveId: string) {
       { event: "*", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
       refetchLive,
     )
-    .subscribe(onSubscribeStatus);
+    .subscribe(onChannelStatus("lives"));
 
   const participantsCh = supabase
     .channel(`host-participants-${liveId}`)
@@ -515,7 +575,7 @@ async function subscribeLiveChannels(liveId: string) {
       { event: "*", schema: "public", table: "participants", filter: `live_id=eq.${liveId}` },
       refetchChildren,
     )
-    .subscribe(onSubscribeStatus);
+    .subscribe(onChannelStatus("participants"));
 
   const turnsCh = supabase
     .channel(`host-turns-${liveId}`)
@@ -524,42 +584,75 @@ async function subscribeLiveChannels(liveId: string) {
       { event: "*", schema: "public", table: "turns", filter: `live_id=eq.${liveId}` },
       refetchChildren,
     )
-    .subscribe(onSubscribeStatus);
+    .subscribe(onChannelStatus("turns"));
 
   const answersCh = supabase
     .channel(`host-answers-${liveId}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "answers", filter: `live_id=eq.${liveId}` },
-      async () => {
+      () => {
+        if (!isCurrentGen()) return;
         const { live } = useLiveHostStore.getState();
         if (!live?.current_turn_id) return;
-        await refreshAnswersForTurn(live.current_turn_id);
+        void refreshAnswersForTurn(live.current_turn_id);
       },
     )
-    .subscribe(onSubscribeStatus);
+    .subscribe(onChannelStatus("answers"));
 
   // scoresにはlive_idが無いため、絞り込まず購読し現在の回答分だけ都度取り直す
-  // （リハ規模の件数なので問題にならない）。2026-09-12（再レビュー対応・P1-2）：
-  // scoresGate越しに取り直し、古いR1が新しいR2の後に完了して古い一覧で
-  // 上書きするのを防ぐ。回答が切り替わっていればその結果は破棄する。
+  // （リハ規模の件数なので問題にならない）。2026-09-12（P1-2）：scoresGate越しに
+  // 取り直し、古いR1が新しいR2の後に完了して古い一覧で上書きするのを防ぐ。
   const scoresCh = supabase
     .channel(`host-scores-${liveId}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, () => {
+      if (!isCurrentGen()) return;
       void refreshScoresForActiveAnswer();
     })
-    .subscribe(onSubscribeStatus);
+    .subscribe(onChannelStatus("scores"));
 
-  // ボット観客のツッコミ/爆笑/拍手を送るための送信専用チャンネル
-  // （useLiveFollowerStore.tsと同じチャンネル名。ここでは受信は不要）。
+  // ボット観客のツッコミ/爆笑/拍手を送るための送信専用チャンネル。
+  // これは賑やかし用のブロードキャストで、接続できなくても進行に支障が無いため
+  // 必須チャンネル（SUBSCRIBEDを待つ対象）には含めない。
   tsukkomiChannel = supabase
     .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
     .subscribe();
 
   channels = [livesCh, participantsCh, turnsCh, answersCh, scoresCh, tsukkomiChannel];
-  // 「このliveIdについてRealtime購読を作成済み」を記録する（isHostRuntimeEstablished
-  // が完全復旧済み判定に使う。cleanupChannels でクリアされる）。
-  subscribedLiveId = liveId;
+}
+
+// hydrateAfterLive の subscribeAndWait 実装。必須チャンネルが実際に SUBSCRIBED に
+// なるまで待つ。既に同じliveId向けのチャンネルがあり異常が無ければ張り直さず待つ
+// （タイムアウトしたら一度だけ張り直す）。abortedFn は stop / 進行世代変更 /
+// 対象liveId変更 / 購読世代の入れ替わり を検知する。
+async function subscribeAndWaitForLive(
+  targetLiveId: string,
+  abortedFn: (channelGen: number) => boolean,
+): Promise<ChannelSubscribeOutcome> {
+  const waitOn = (tracker: ChannelSubscriptionTracker, chGen: number) =>
+    awaitChannelsSubscribed({
+      tracker,
+      aborted: () => channelGeneration !== chGen || abortedFn(chGen),
+      timeoutMs: CHANNEL_SUBSCRIBE_TIMEOUT_MS,
+      pollMs: CHANNEL_SUBSCRIBE_POLL_MS,
+      now: () => Date.now(),
+      sleep: channelSleep,
+    });
+
+  if (
+    currentChannelLiveId === targetLiveId &&
+    currentChannelTracker !== null &&
+    !currentChannelTracker.hasFailure()
+  ) {
+    // 既にこのliveId向けのチャンネルがあり、接続待ち or 接続済み → 張り直さず待つ。
+    const outcome = await waitOn(currentChannelTracker, channelGeneration);
+    if (outcome !== "timeout") return outcome;
+    // タイムアウト → 一度だけ張り直して再待機する（stuck した接続の作り直し）。
+  }
+  subscribeLiveChannels(targetLiveId);
+  const tracker = currentChannelTracker;
+  if (!tracker) return "aborted";
+  return waitOn(tracker, channelGeneration);
 }
 
 // current_turn_idが切り替わった直後は、Realtimeイベントを待たずに即座に
@@ -1251,7 +1344,9 @@ async function hydrateHostForActiveLive(
     const liveOutcome = await loadSnapshotSlice<LiveRow | null>({
       gate: liveGate,
       fetch: () => fetchActiveLive(),
-      stillCurrent: () => true,
+      // fetchActiveLive は「今この瞬間の進行中ライブ」を発見する取得なので、対象liveIdは
+      // 事前に決まっていない。ただし取得完了時に stop / 所有権喪失していたら反映しない。
+      stillCurrent: () => !stopped(),
       markPending: () => set({ liveSnapshotConfirmed: false }),
       applyFresh: (row) => set({ live: row ?? null, liveSnapshotConfirmed: true }),
       markUnconfirmed: () => set({ liveSnapshotConfirmed: false }),
@@ -1359,14 +1454,18 @@ async function hydrateHostForActiveLive(
             ? "一部の情報を取得できませんでした。しばらくすると自動的に再試行します。"
             : null,
         }),
-      subscribe: () => {
-        // hydrateAfterLive 内で「progressGeneration一致・所有権あり・
-        // currentLiveId === targetLiveId」を確認した直後に同期呼び出しされる。
-        // 古いliveIdでは絶対に呼ばれない。subscribeLiveChannels は await を挟まず
-        // 同期的に channel を作る（subscribedLiveId も更新する）。
-        void subscribeLiveChannels(targetLiveId);
-      },
+      subscribeAndWait: () =>
+        // 必須チャンネルが実際に SUBSCRIBED になるまで待つ。待機中の stop /
+        // 進行世代変更 / 対象liveId変更 / 購読世代の入れ替わり を検知して中断する。
+        subscribeAndWaitForLive(
+          targetLiveId,
+          () =>
+            generation !== progressGeneration ||
+            !recovery.owns(recoveryToken) ||
+            get().live?.id !== targetLiveId,
+        ),
       markRuntimeReady: () => {
+        // 全必須チャンネル SUBSCRIBED 確認後にだけ hydrateAfterLive から呼ばれる。
         runtimeReadyLiveId = targetLiveId;
       },
     });
@@ -1399,10 +1498,14 @@ function mapHydrateToHydration(o: HydrateOutcome): HostHydrationOutcome {
 }
 
 // 司会進行環境が「現在のlive.idについて完全に確立済みか」。
-// liveSnapshotConfirmed（live行を取得できた）だけでは不十分で、購読・tickTimer・
-// （answeringなら）ローカル残り時間の復元まで揃って初めて true。手動refreshが
-// liveGateだけ進めて liveSnapshotConfirmed=true にしても、これが false の間は
-// advanceIfDue は完全復旧（ensureHostRecovery）へ合流する。
+// liveSnapshotConfirmed（live行を取得できた）だけでは不十分。
+// - tickTimer が動いている
+// - subscribedLiveId === live.id：進行に必要な全 Realtime チャンネルが実際に
+//   SUBSCRIBED になった（onChannelStatus が集約。CHANNEL_ERROR 等でクリアされる）
+// - runtimeReadyLiveId === live.id：hydrate が SUBSCRIBED 待ちまで完了して確立を記録
+// - answering なら ローカル残り時間を復元済み
+// のすべてが揃って初めて true。false の間、advanceIfDue は完全復旧
+// （ensureHostRecovery、2秒throttle）へ合流し、自動進行を凍結する。
 function isHostRuntimeEstablished(live: LiveRow): boolean {
   if (tickTimer === null) return false;
   if (subscribedLiveId !== live.id) return false;
@@ -2102,7 +2205,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         answersSnapshot: null,
         scoresSnapshot: null,
       });
-      await subscribeLiveChannels(existing.id);
+      // channel を用意しておく（onChannelStatus が全必須 SUBSCRIBED を確認したら
+      // subscribedLiveId を設定。runtimeReadyLiveId は完全復旧フローが確立する）。
+      subscribeLiveChannels(existing.id);
       return { ok: false, reason: "既に進行中のライブがあります" };
     }
     if (input.groupCount < 1) {
@@ -2198,10 +2303,11 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         ? null
         : "作成後の組・お題情報を取得できませんでした。しばらくすると自動的に再試行します。",
     });
-    await subscribeLiveChannels(live.id);
-    // children まで取得できた scheduled ライブは、この場で完全確立済みとして記録する
-    // （直後の advanceIfDue が不要な完全復旧を走らせないように）。取得失敗時は立てない。
-    runtimeReadyLiveId = childrenResult.ok ? live.id : null;
+    // channel を用意する。subscribedLiveId は onChannelStatus が全必須 SUBSCRIBED を
+    // 確認したときに、runtimeReadyLiveId は完全復旧フロー（SUBSCRIBED待ち込み）が
+    // 確立する。ここでは立てない（.subscribe() 直後＝接続完了ではないため）。
+    subscribeLiveChannels(live.id);
+    runtimeReadyLiveId = null;
     return { ok: true };
   },
 
