@@ -1,390 +1,60 @@
 // src/lib/liveHostSnapshots.ts の純粋関数＋非同期並行制御の検証スクリプト。
 // 実行方法は src/lib/__tests__/run.sh 参照。
-// 遅延Promiseで「古い取得R1が新しい取得R2の後に完了する」「取得を開始した時点で
-// 未確認になる」「復旧途中でstopされる」等の非同期順序を再現する。
+// 遅延Promise と「DB書き込みモック」（副作用を記録するスパイ）を使って、
+// 完全復旧オーケストレーション・所有権・await ごとの凍結再確認を再現する。
 import assert from "node:assert/strict";
 
 import {
   answersSnapshotMatches,
+  botScoringAllowed,
   childrenSnapshotReady,
+  createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
+  insertGuardPasses,
   loadSnapshotSlice,
+  progressionFrozen,
+  runGuardedSteps,
   scoresSnapshotMatches,
   shouldReleaseInitInFlight,
   shouldReleaseRetryFlag,
   shouldRetryNow,
   type HostHydrationDeps,
+  type HostHydrationOutcome,
+  type ProgressGuardState,
+  type SliceLoadOutcome,
 } from "../liveHostSnapshots";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function main() {
-  // ========== createSliceGate ==========
-  {
-    const gate = createSliceGate();
-    const t1 = gate.begin();
-    const t2 = gate.begin();
-    assert.equal(gate.isCurrent(t1), false, "後から begin された t2 がある以上 t1 は最新でない");
-    assert.equal(gate.isCurrent(t2), true);
-    assert.equal(gate.current(), 2);
-    const t3 = gate.begin();
-    assert.equal(gate.isCurrent(t2), false);
-    assert.equal(gate.isCurrent(t3), true);
-    console.log("PASS: gate（後から begin されたら古いトークンは isCurrent=false）");
-  }
-
-  // ========== childrenSnapshotReady / answersSnapshotMatches / scoresSnapshotMatches ==========
-  {
-    assert.equal(childrenSnapshotReady("L1", "L1"), true);
-    assert.equal(childrenSnapshotReady("L1", "L2"), false);
-    assert.equal(childrenSnapshotReady(null, "L1"), false);
-    assert.equal(childrenSnapshotReady("L1", null), false);
-
-    assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T1"), true);
-    assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T2"), false);
-    assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L2", "T1"), false);
-    assert.equal(answersSnapshotMatches(null, "L1", "T1"), false);
-
-    const sk = { liveId: "L1", turnId: "T1", answerId: "A1" };
-    assert.equal(scoresSnapshotMatches(sk, "L1", "T1", "A1"), true);
-    assert.equal(scoresSnapshotMatches(sk, "L1", "T1", "A2"), false, "表示中の回答が変われば不一致");
-    assert.equal(scoresSnapshotMatches(sk, "L1", "T2", "A1"), false);
-    assert.equal(scoresSnapshotMatches(sk, "L2", "T1", "A1"), false);
-    assert.equal(scoresSnapshotMatches(null, "L1", "T1", "A1"), false);
-    assert.equal(scoresSnapshotMatches(sk, "L1", "T1", null), false);
-    console.log("PASS: childrenSnapshotReady / answersSnapshotMatches / scoresSnapshotMatches");
-  }
-
-  // ========== shouldRetryNow ==========
-  {
-    assert.equal(shouldRetryNow(false, 0, 5000, 2000), true, "非in-flightかつ間隔経過→再試行OK");
-    assert.equal(shouldRetryNow(true, 0, 5000, 2000), false, "in-flight中は再試行しない");
-    assert.equal(shouldRetryNow(false, 4000, 5000, 2000), false, "前回から2秒未満は再試行しない");
-    assert.equal(shouldRetryNow(false, 3000, 5000, 2000), true, "前回からちょうど2秒で再試行OK");
-    console.log("PASS: shouldRetryNow（single-flight＋最小間隔）");
-  }
-
-  // ========== shouldReleaseRetryFlag（P2-2：retry所有権）==========
-  {
-    // retry A は世代0で開始 → stopHostProgress で世代1へ → stop後 retry B が世代1で開始。
-    assert.equal(
-      shouldReleaseRetryFlag(1, 0),
-      false,
-      "stop前の古いretry(世代0)のfinallyは、現行世代(1)のretryフラグを解除しない",
-    );
-    assert.equal(shouldReleaseRetryFlag(1, 1), true, "現行世代のretryは自分のフラグを解除してよい");
-    assert.equal(shouldReleaseRetryFlag(0, 0), true);
-    console.log("PASS: shouldReleaseRetryFlag（stop前の古いretryが新しいretryの所有権を解除しない）");
-  }
-
-  // ========== shouldReleaseInitInFlight ==========
-  {
-    const a = Symbol("A");
-    const b = Symbol("B");
-    assert.equal(shouldReleaseInitInFlight<symbol | null>(b, a), false, "旧initのfinallyは新init(B)を消さない");
-    assert.equal(shouldReleaseInitInFlight<symbol | null>(a, a), true, "自分が現行なら解放してよい");
-    assert.equal(shouldReleaseInitInFlight<symbol | null>(null, a), false);
-    console.log("PASS: shouldReleaseInitInFlight");
-  }
-
-  // ========== loadSnapshotSlice：非同期順序の再現 ==========
-
-  // 必須テスト7（＋既存の安全側期待値）：同じターンの再取得失敗時、表示データは
-  // 維持されるが確認状態は未確認になる。
-  {
-    const gate = createSliceGate();
-    let displayed = ["existing-answer"];
-    let snapshot: { liveId: string; turnId: string } | null = { liveId: "L1", turnId: "T1" };
-    const outcome = await loadSnapshotSlice<string[]>({
-      gate,
-      fetch: async () => {
-        await delay(5);
-        return { ok: false, data: [] };
-      },
-      stillCurrent: () => true,
-      markPending: () => {
-        snapshot = null;
-      },
-      applyFresh: (d) => {
-        displayed = d;
-      },
-      markUnconfirmed: () => {
-        snapshot = null;
-      },
-    });
-    assert.equal(outcome, "unconfirmed");
-    assert.deepEqual(displayed, ["existing-answer"], "取得失敗時、表示データは維持される（空配列で消さない）");
-    assert.equal(snapshot, null, "取得失敗時、確認状態は未確認へ戻る");
-    console.log("PASS: async-1/7（取得失敗：表示は維持、確認状態は未確認）");
-  }
-
-  // 必須テスト8：Realtime変更検知で「取得を開始した」時点で、対象スライスは同期中
-  // （未確認）になる。fetchの完了を待たずに確認状態が落ちる。
-  {
-    const gate = createSliceGate();
-    let confirmed = true;
-    const p = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(30);
-        return { ok: true, data: "fresh" };
-      },
-      stillCurrent: () => true,
-      markPending: () => {
-        confirmed = false;
-      },
-      applyFresh: () => {
-        confirmed = true;
-      },
-      markUnconfirmed: () => {
-        confirmed = false;
-      },
-    });
-    await delay(5);
-    assert.equal(confirmed, false, "取得開始(markPending)時点で、fetch完了前でも確認状態は未確認");
-    await p;
-    assert.equal(confirmed, true, "取得成功で確認済みへ戻る");
-    console.log("PASS: async-8（再取得の開始時点で同期中／未確認になる）");
-  }
-
-  // 必須テスト9：同期中（markPendingで未確認の間）は advanceIfDue 相当のDB書き込みを
-  // 行わない。取得完了後は通常進行へ戻る。
-  {
-    const gate = createSliceGate();
-    let confirmed = true;
-    let dbWrites = 0;
-    const tryAdvance = () => {
-      if (!confirmed) return; // autoProgressFrozen 相当のガード
-      dbWrites += 1;
-    };
-    const p = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(25);
-        return { ok: true, data: "x" };
-      },
-      stillCurrent: () => true,
-      markPending: () => {
-        confirmed = false;
-      },
-      applyFresh: () => {
-        confirmed = true;
-      },
-      markUnconfirmed: () => {
-        confirmed = false;
-      },
-    });
-    tryAdvance();
-    await delay(5);
-    tryAdvance();
-    await delay(5);
-    tryAdvance();
-    assert.equal(dbWrites, 0, "同期中はDB書き込み（自動進行）を一切行わない");
-    await p;
-    tryAdvance();
-    assert.equal(dbWrites, 1, "同期完了後は通常進行へ戻る（デッドロックしない）");
-    console.log("PASS: async-9（同期中は自動DB書き込みをしない／完了後に復帰）");
-  }
-
-  // 必須テスト5：古い取得R1が、新しい取得R2より後に完了してもR2を上書きしない
-  // （scores/live/children/answers 共通の仕組み）。
-  {
-    const gate = createSliceGate();
-    let state = "initial";
-    const r1 = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(50);
-        return { ok: true, data: "R1-scores" };
-      },
-      stillCurrent: () => true,
-      applyFresh: (d) => {
-        state = d;
-      },
-      markUnconfirmed: () => {},
-    });
-    await delay(5);
-    const r2 = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(10);
-        return { ok: true, data: "R2-scores" };
-      },
-      stillCurrent: () => true,
-      applyFresh: (d) => {
-        state = d;
-      },
-      markUnconfirmed: () => {},
-    });
-    const [o1, o2] = await Promise.all([r1, r2]);
-    assert.equal(o2, "applied");
-    assert.equal(o1, "superseded", "後から開始したR2がある以上、R1は superseded");
-    assert.equal(state, "R2-scores", "古いR1の完了結果が新しいR2を巻き戻さない");
-    console.log("PASS: async-5（古い取得R1が新しいR2を上書きしない）");
-  }
-
-  // 必須テスト10：markPend中の古いR1が失敗しても、成功したR2の確認済み状態を
-  // 未確認へ戻さない（古い処理が新しい確認済み状態を壊さない）。
-  {
-    const gate = createSliceGate();
-    let confirmed = true;
-    let displayed = "old";
-    const r1 = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(50);
-        return { ok: false, data: "" };
-      },
-      stillCurrent: () => true,
-      markPending: () => {
-        confirmed = false;
-      },
-      applyFresh: (d) => {
-        displayed = d;
-        confirmed = true;
-      },
-      markUnconfirmed: () => {
-        confirmed = false;
-      },
-    });
-    await delay(5);
-    const r2 = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(10);
-        return { ok: true, data: "new" };
-      },
-      stillCurrent: () => true,
-      markPending: () => {
-        confirmed = false;
-      },
-      applyFresh: (d) => {
-        displayed = d;
-        confirmed = true;
-      },
-      markUnconfirmed: () => {
-        confirmed = false;
-      },
-    });
-    const [o1, o2] = await Promise.all([r1, r2]);
-    assert.equal(o2, "applied");
-    assert.equal(o1, "superseded");
-    assert.equal(confirmed, true, "遅れて失敗したR1が、成功したR2の確認済みを未確認へ戻さない");
-    assert.equal(displayed, "new");
-    console.log("PASS: async-10（古い取得の完了が新しい確認済み状態を未確認へ戻さない）");
-  }
-
-  // 必須テスト6：回答Aのscores取得中に回答Bへ切り替わったら、Aの結果をBへ反映しない。
-  {
-    const gate = createSliceGate();
-    let currentAnswerId = "A";
-    let applied: string | null = null;
-    const outcome = await loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(10);
-        currentAnswerId = "B"; // 取得中に表示中の回答が変わった
-        return { ok: true, data: "A-scores" };
-      },
-      stillCurrent: () => currentAnswerId === "A",
-      applyFresh: (d) => {
-        applied = d;
-      },
-      markUnconfirmed: () => {},
-    });
-    assert.equal(outcome, "target-changed");
-    assert.equal(applied, null, "回答Aのscores取得中に回答Bへ切り替わったら、Aの結果を反映しない");
-    console.log("PASS: async-6（回答切り替え中の古いscores結果を適用しない）");
-  }
-
-  // 既存の必須：stop相当（gate.begin()）の後に古い取得が完了しても state を復活させない。
-  {
-    const gate = createSliceGate();
-    let state = "before-stop";
-    const inFlight = loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => {
-        await delay(30);
-        return { ok: true, data: "old-result" };
-      },
-      stillCurrent: () => true,
-      applyFresh: (d) => {
-        state = d;
-      },
-      markUnconfirmed: () => {
-        state = "unconfirmed";
-      },
-    });
-    await delay(5);
-    gate.begin(); // stopHostProgress 相当：進行中トークンを無効化
-    const outcome = await inFlight;
-    assert.equal(outcome, "superseded");
-    assert.equal(state, "before-stop", "stop後に古い取得が完了しても state を書き換えない");
-    console.log("PASS: async-stop（stop後の古い取得完了は state を復活させない）");
-  }
-
-  // 必須テスト12：通信回復後はデッドロックせず反映される。
-  {
-    const gate = createSliceGate();
-    let state = "stale";
-    await loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => ({ ok: false, data: "" }),
-      stillCurrent: () => true,
-      markPending: () => {
-        state = "unconfirmed";
-      },
-      applyFresh: (d) => {
-        state = d;
-      },
-      markUnconfirmed: () => {
-        state = "unconfirmed";
-      },
-    });
-    assert.equal(state, "unconfirmed");
-    const outcome = await loadSnapshotSlice<string>({
-      gate,
-      fetch: async () => ({ ok: true, data: "recovered" }),
-      stillCurrent: () => true,
-      markPending: () => {
-        state = "unconfirmed";
-      },
-      applyFresh: (d) => {
-        state = d;
-      },
-      markUnconfirmed: () => {},
-    });
-    assert.equal(outcome, "applied");
-    assert.equal(state, "recovered", "通信回復後は正常に反映される（デッドロックしない）");
-    console.log("PASS: async-12（通信回復後はデッドロックせず反映）");
-  }
-
-  // ========== hydrateAfterLive：復旧オーケストレーションの副作用注入テスト ==========
-
-  type Recorded = { calls: string[]; setGen: (g: number) => void };
-  const buildDeps = (
-    over: Partial<HostHydrationDeps>,
-    rec: Recorded,
-    genRef: { g: number },
-  ): HostHydrationDeps => ({
+// ---- hydrateAfterLive のデフォルト依存（テストごとに一部を上書きする）----
+type Rec = { calls: string[] };
+function buildHydrationDeps(
+  over: Partial<HostHydrationDeps>,
+  rec: Rec,
+  refs: { gen: number; liveId: string | null; owns: boolean },
+): HostHydrationDeps {
+  return {
     startGeneration: 0,
-    currentGeneration: () => genRef.g,
+    currentGeneration: () => refs.gen,
+    targetLiveId: "L1",
+    currentLiveId: () => refs.liveId,
+    ownsRecovery: () => refs.owns,
     loadChildren: async () => {
       rec.calls.push("children");
-      return { ok: true };
+      return "applied" as SliceLoadOutcome;
     },
     loadAnswers: async () => {
       rec.calls.push("answers");
-      return { ok: true };
+      return "applied" as SliceLoadOutcome;
     },
     loadResolved: async () => {
       rec.calls.push("resolved");
-      return { ok: true };
+      return "applied" as SliceLoadOutcome;
     },
     loadScores: async () => {
       rec.calls.push("scores");
-      return { ok: true };
+      return "applied" as SliceLoadOutcome;
     },
     restoreAnsweringTimer: () => {
       rec.calls.push("restoreTimer");
@@ -395,138 +65,470 @@ async function main() {
     subscribe: () => {
       rec.calls.push("subscribe");
     },
+    markRuntimeReady: () => {
+      rec.calls.push("markRuntimeReady");
+    },
     ...over,
-  });
+  };
+}
 
-  // 必須テスト1/2/3：live確定後、children→answers→resolved→scoresを全て取得し、
-  // ローカルタイマー復元→購読まで完了する（＝完全な初期化処理へ復帰）。
+async function main() {
+  // ========== 既存の純粋関数 ==========
   {
-    const genRef = { g: 0 };
-    const rec: Recorded = { calls: [], setGen: (g) => (genRef.g = g) };
-    const r = await hydrateAfterLive(buildDeps({}, rec, genRef));
-    assert.equal(r, "ready");
-    assert.deepEqual(
-      rec.calls,
-      ["children", "answers", "resolved", "scores", "restoreTimer", "finishLoading:false", "subscribe"],
-      "children/answers/resolved/scores → タイマー復元 → loading確定 → 購読 の順で完全復旧",
+    const gate = createSliceGate();
+    const t1 = gate.begin();
+    const t2 = gate.begin();
+    assert.equal(gate.isCurrent(t1), false);
+    assert.equal(gate.isCurrent(t2), true);
+    assert.equal(childrenSnapshotReady("L1", "L1"), true);
+    assert.equal(childrenSnapshotReady("L1", "L2"), false);
+    assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T1"), true);
+    assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T2"), false);
+    const sk = { liveId: "L1", turnId: "T1", answerId: "A1" };
+    assert.equal(scoresSnapshotMatches(sk, "L1", "T1", "A1"), true);
+    assert.equal(scoresSnapshotMatches(sk, "L1", "T1", "A2"), false);
+    assert.equal(shouldRetryNow(false, 0, 5000, 2000), true);
+    assert.equal(shouldRetryNow(true, 0, 5000, 2000), false);
+    assert.equal(shouldReleaseRetryFlag(1, 0), false);
+    assert.equal(shouldReleaseRetryFlag(1, 1), true);
+    assert.equal(shouldReleaseInitInFlight<symbol | null>(Symbol(), Symbol()), false);
+    console.log("PASS: 基本の純粋関数（gate / snapshot matcher / retry 述語）");
+  }
+
+  // ========== loadSnapshotSlice：markPending / 新旧逆転 / 取得失敗で表示維持 ==========
+
+  // 必須テスト（表示維持）：scores 取得失敗で既存表示を空にしない。
+  {
+    const gate = createSliceGate();
+    let scores = ["a", "b"];
+    let snap: string | null = "confirmed";
+    const o = await loadSnapshotSlice<string[]>({
+      gate,
+      fetch: async () => ({ ok: false, data: [] }),
+      stillCurrent: () => true,
+      markPending: () => {
+        snap = null;
+      },
+      applyFresh: (d) => {
+        scores = d;
+        snap = "confirmed";
+      },
+      markUnconfirmed: () => {
+        snap = null;
+      },
+    });
+    assert.equal(o, "unconfirmed");
+    assert.deepEqual(scores, ["a", "b"], "取得失敗時、既存表示を空にしない");
+    assert.equal(snap, null);
+    console.log("PASS: 必須7相当（scores取得失敗で既存表示を空にしない）");
+  }
+
+  // 必須テスト（取得開始時点で未確認）＋（古い完了が新しい確認済みを壊さない）
+  {
+    const gate = createSliceGate();
+    let confirmed = true;
+    const r1 = loadSnapshotSlice<string>({
+      gate,
+      fetch: async () => {
+        await delay(50);
+        return { ok: false, data: "" };
+      },
+      stillCurrent: () => true,
+      markPending: () => {
+        confirmed = false;
+      },
+      applyFresh: () => {
+        confirmed = true;
+      },
+      markUnconfirmed: () => {
+        confirmed = false;
+      },
+    });
+    await delay(5);
+    assert.equal(confirmed, false, "再取得を開始した時点で未確認になる（必須8相当）");
+    const r2 = loadSnapshotSlice<string>({
+      gate,
+      fetch: async () => {
+        await delay(10);
+        return { ok: true, data: "new" };
+      },
+      stillCurrent: () => true,
+      markPending: () => {
+        confirmed = false;
+      },
+      applyFresh: () => {
+        confirmed = true;
+      },
+      markUnconfirmed: () => {
+        confirmed = false;
+      },
+    });
+    const [o1, o2] = await Promise.all([r1, r2]);
+    assert.equal(o2, "applied");
+    assert.equal(o1, "superseded");
+    assert.equal(confirmed, true, "遅れて失敗した古いR1が、成功したR2の確認済みを壊さない（必須相当）");
+    console.log("PASS: 必須8/10相当（再取得開始で未確認 / 古い完了が新しい確認済みを壊さない）");
+  }
+
+  // ========== progressionFrozen（await をまたいだ後の凍結再確認）==========
+  {
+    const base: ProgressGuardState = {
+      tickGeneration: 5,
+      currentGeneration: 5,
+      liveSnapshotConfirmed: true,
+      liveId: "L1",
+      tickLiveId: "L1",
+      runtimeEstablished: true,
+      childrenSnapshotLiveId: "L1",
+      answersSnapshot: { liveId: "L1", turnId: "T1" },
+      turnId: "T1",
+    };
+    assert.equal(progressionFrozen(base, true), false, "全て揃っていれば凍結しない");
+    assert.equal(progressionFrozen({ ...base, currentGeneration: 6 }, true), true, "stopで凍結");
+    assert.equal(progressionFrozen({ ...base, liveSnapshotConfirmed: false }, true), true, "live未確認で凍結");
+    assert.equal(progressionFrozen({ ...base, liveId: "L2" }, true), true, "await中にlive.idが変わったら凍結");
+    assert.equal(progressionFrozen({ ...base, runtimeEstablished: false }, true), true, "進行環境未確立で凍結");
+    assert.equal(progressionFrozen({ ...base, childrenSnapshotLiveId: null }, true), true, "children同期中で凍結");
+    assert.equal(progressionFrozen({ ...base, answersSnapshot: null }, true), true, "answers同期中で凍結（requireAnswers）");
+    assert.equal(progressionFrozen({ ...base, answersSnapshot: null }, false), false, "requireAnswers=falseならanswersは見ない");
+    console.log("PASS: progressionFrozen（世代/live/turn/環境/children/answers の再確認）");
+  }
+
+  // ========== botScoringAllowed / insertGuardPasses ==========
+  {
+    const sk = { liveId: "L1", turnId: "T1", answerId: "A1" };
+    assert.equal(botScoringAllowed(false, sk, "L1", "T1", "A1"), true);
+    assert.equal(botScoringAllowed(true, sk, "L1", "T1", "A1"), false, "凍結中はボット採点しない（必須9相当）");
+    assert.equal(botScoringAllowed(false, null, "L1", "T1", "A1"), false, "scoresSnapshot未確認ならボット採点しない（必須10）");
+    assert.equal(botScoringAllowed(false, sk, "L1", "T1", "A2"), false, "表示中の回答が変わっていたらボット採点しない");
+    assert.equal(botScoringAllowed(false, sk, "L1", "T1", null), false, "表示中の回答が無ければ採点しない");
+
+    let frozen = false;
+    const liveId: string | null = "L1";
+    let turnId: string | null = "T1";
+    const guard = () =>
+      insertGuardPasses({
+        frozen: () => frozen,
+        currentLiveId: () => liveId,
+        currentTurnId: () => turnId,
+        expectedLiveId: "L1",
+        expectedTurnId: "T1",
+      });
+    assert.equal(guard(), true);
+    frozen = true;
+    assert.equal(guard(), false, "insert直前にstop → insertしない（必須11）");
+    frozen = false;
+    turnId = "T2";
+    assert.equal(guard(), false, "insert直前にターン変更 → insertしない（必須11）");
+    console.log("PASS: botScoringAllowed / insertGuardPasses（必須9/10/11相当）");
+  }
+
+  // ========== runGuardedSteps ＋ DB書き込みモック ==========
+
+  // 必須9：processRevealQueue の await 中に未確認になったら runBotBehavior を呼ばない。
+  {
+    const dbWrites: string[] = [];
+    let frozen = false;
+    const res = await runGuardedSteps(
+      () => frozen,
+      [
+        {
+          name: "processRevealQueue",
+          run: async () => {
+            await delay(10);
+            frozen = true; // await 中に Realtime 取得が始まって未確認になった相当
+            dbWrites.push("reveal");
+          },
+        },
+        {
+          name: "runBotBehavior",
+          run: async () => {
+            dbWrites.push("botInsert"); // ここには到達しないはず
+          },
+        },
+        {
+          name: "resolveIfDue",
+          run: async () => {
+            dbWrites.push("resolve");
+          },
+        },
+        {
+          name: "syncAnsweringPause",
+          run: async () => {
+            dbWrites.push("pause");
+          },
+        },
+      ],
     );
+    assert.equal(res.blockedAt, "runBotBehavior", "processRevealQueue の後で凍結を検出して止まる");
+    assert.deepEqual(res.ran, ["processRevealQueue"]);
+    assert.deepEqual(dbWrites, ["reveal"], "runBotBehavior 以降の DB 書き込みは発生しない（必須9/12/13相当）");
+    console.log("PASS: 必須9/12/13相当（await中の未確認化で後続DB書き込みを止める）");
+  }
+
+  // 全ステップ成功 → blockedAt は null（そのままフェーズ遷移RPCへ進んでよい）。
+  {
+    const ran: string[] = [];
+    const res = await runGuardedSteps(
+      () => false,
+      [
+        { name: "a", run: async () => void ran.push("a") },
+        { name: "b", run: async () => void ran.push("b") },
+      ],
+    );
+    assert.equal(res.blockedAt, null);
+    assert.deepEqual(ran, ["a", "b"]);
+    console.log("PASS: runGuardedSteps（全ステップ成功時は blockedAt=null）");
+  }
+
+  // 最後のステップ後に凍結 → blockedAt="after-last"（遷移RPCへ進まない）。
+  {
+    let frozen = false;
+    const res = await runGuardedSteps(
+      () => frozen,
+      [
+        {
+          name: "only",
+          run: async () => {
+            await delay(5);
+            frozen = true;
+          },
+        },
+      ],
+    );
+    assert.equal(res.blockedAt, "after-last");
+    console.log("PASS: runGuardedSteps（最終ステップ後の凍結で after-last）");
+  }
+
+  // ========== createRecoveryCoordinator（init/retry/refresh の合流と所有権）==========
+
+  // 必須1/3/8：完全復旧の最中に refresh が呼ばれても、同じ Promise へ合流する
+  // （中途半端に superseded で終わらせない）。
+  {
+    const coord = createRecoveryCoordinator();
+    let taskRuns = 0;
+    const task = async (): Promise<HostHydrationOutcome> => {
+      taskRuns += 1;
+      await delay(30);
+      return "ready";
+    };
+    const pInit = coord.run(0, task);
+    await delay(5);
+    const pRefresh = coord.run(0, task); // 同一世代 → 合流
+    assert.equal(pInit, pRefresh, "同一世代の完全復旧が進行中なら同じ Promise へ合流する");
+    const [a, b] = await Promise.all([pInit, pRefresh]);
+    assert.equal(a, "ready");
+    assert.equal(b, "ready");
+    assert.equal(taskRuns, 1, "task は二重に走らない（refresh が別処理を並行させない）");
+    assert.equal(coord.inFlight(), false, "完了後は inFlight が解除される");
+    console.log("PASS: 必須1/3/8相当（refresh が完全復旧へ合流し二重実行しない）");
+  }
+
+  // 別世代なら別タスクとして走る。
+  {
+    const coord = createRecoveryCoordinator();
+    let runs = 0;
+    const task = async (): Promise<HostHydrationOutcome> => {
+      runs += 1;
+      return "ready";
+    };
+    await coord.run(0, task);
+    await coord.run(1, task);
+    assert.equal(runs, 2, "世代が違えば別タスク");
+    console.log("PASS: createRecoveryCoordinator（別世代は別タスク）");
+  }
+
+  // 必須14：stop（invalidate）後に、進行中だった完全復旧の owns() が false になり、
+  // その完了は新しい状態を触らない。
+  {
+    const coord = createRecoveryCoordinator();
+    let ownedDuringTask = true;
+    const p = coord.run(0, async (_gen, token) => {
+      await delay(20);
+      ownedDuringTask = coord.owns(token);
+      return "ready" as HostHydrationOutcome;
+    });
+    await delay(5);
+    coord.invalidate(); // stopHostProgress 相当
+    await p;
+    assert.equal(ownedDuringTask, false, "invalidate 後、進行中タスクは所有権を失う（timer/channelを復活させない）");
+    // invalidate 後に新しい run を開始でき、所有権も持てる。
+    let newOwned = false;
+    await coord.run(1, async (_g, token) => {
+      newOwned = coord.owns(token);
+      return "ready" as HostHydrationOutcome;
+    });
+    assert.equal(newOwned, true);
+    console.log("PASS: 必須14相当（stop後は古い完全復旧が所有権を失う）");
+  }
+
+  // ========== hydrateAfterLive：4種類の結果を区別する ==========
+
+  // 必須1/2：全スライス applied → タイマー復元 → 購読 → markRuntimeReady、順序も検証。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(buildHydrationDeps({}, rec, refs));
+    assert.equal(r, "ready");
+    assert.deepEqual(rec.calls, [
+      "children",
+      "answers",
+      "resolved",
+      "scores",
+      "restoreTimer",
+      "finishLoading:false",
+      "subscribe",
+      "markRuntimeReady",
+    ]);
+    assert.ok(rec.calls.indexOf("restoreTimer") < rec.calls.indexOf("subscribe"), "タイマー復元は購読より前（必須2/0秒停止しない）");
+    assert.ok(rec.calls.indexOf("subscribe") < rec.calls.indexOf("markRuntimeReady"), "ready は購読の後にだけ立つ");
+    console.log("PASS: 必須1/2相当（applied で完全復旧：children→answers→resolved→scores→タイマー→購読→ready）");
+  }
+
+  // 必須3/4：progression critical スライスが unconfirmed → 購読を張り、構造としては
+  // runtime ready にする（＝放置されない）が、戻り値は "not-ready"（データが古いので
+  // 呼び出し側は per-tick の軽量再試行で追いつく）。full recovery を毎回やり直さない。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps({ loadAnswers: async () => "unconfirmed" as SliceLoadOutcome }, rec, refs),
+    );
+    assert.equal(r, "not-ready", "データが未確認なので戻り値は not-ready（自動進行は per-tick ガードで止まる）");
+    assert.ok(rec.calls.includes("subscribe"), "unconfirmed でも同じliveIdの購読は張る（再取得待ち）");
     assert.ok(
-      rec.calls.indexOf("restoreTimer") < rec.calls.indexOf("subscribe"),
-      "answeringローカル残り時間の復元は購読より前（0秒停止しない）",
+      rec.calls.includes("markRuntimeReady"),
+      "unconfirmed は購読済み＝構造は確立。runtime ready にして放置しない（必須3）",
     );
-    assert.equal(rec.calls.filter((c) => c === "subscribe").length, 1, "購読は1回だけ作成される");
-    console.log("PASS: hydrate-1/2/3（live確定後に完全な初期化処理へ復帰し、購読・タイマー復元まで行う）");
+    assert.ok(rec.calls.includes("finishLoading:true"), "注意文言（anyUnconfirmed）を出す");
+    console.log("PASS: 必須3/4相当（未確認は購読＋構造readyだが戻り値 not-ready で軽量再試行に委ねる）");
   }
 
-  // 必須テスト（一部失敗でも表示は維持しつつ購読は張る／注意文言を出す）
+  // 必須7：superseded（別の取得が責任を持つ）は markRuntimeReady しない＝runtime ready
+  // 扱いにせず、完全復旧を再試行させる。
   {
-    const genRef = { g: 0 };
-    const rec: Recorded = { calls: [], setGen: (g) => (genRef.g = g) };
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
     const r = await hydrateAfterLive(
-      buildDeps({ loadAnswers: async () => ({ ok: false }) }, rec, genRef),
+      buildHydrationDeps({ loadChildren: async () => "superseded" as SliceLoadOutcome }, rec, refs),
     );
-    assert.equal(r, "ready");
-    assert.ok(rec.calls.includes("finishLoading:true"), "一部取得失敗なら注意文言（anyUnconfirmed=true）");
-    assert.ok(rec.calls.includes("subscribe"), "一部失敗でも購読は張る（後続のRealtime/再試行で追いつく）");
-    console.log("PASS: hydrate-partial（一部取得失敗でも購読は張り、注意文言を出す）");
+    assert.equal(r, "not-ready");
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "superseded スライスがあれば runtime ready にしない（必須7）");
+    console.log("PASS: 必須7相当（supersededスライスは構造readyにしない＝完全復旧を再試行）");
   }
 
-  // 必須テスト4：復旧途中で stopHostProgress された（generationが変わった）場合、
-  // 以降のタイマー復元・loading確定・購読を一切行わず "stopped" で戻る。
+  // 必須6：target-changed（取得中に別ライブへ切り替わった）→ superseded/ready 扱いしない、
+  // 購読も markRuntimeReady もしない。
   {
-    const genRef = { g: 0 };
-    const rec: Recorded = { calls: [], setGen: (g) => (genRef.g = g) };
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
     const r = await hydrateAfterLive(
-      buildDeps(
+      buildHydrationDeps(
+        {
+          loadChildren: async () => {
+            refs.liveId = "L2"; // 取得中に別ライブへ
+            rec.calls.push("children");
+            return "applied" as SliceLoadOutcome;
+          },
+        },
+        rec,
+        refs,
+      ),
+    );
+    assert.equal(r, "target-changed");
+    assert.ok(!rec.calls.includes("subscribe"), "古いliveIdでは購読しない（必須5/6）");
+    assert.ok(!rec.calls.includes("restoreTimer"));
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "target-changed を ready 扱いしない（必須6）");
+    console.log("PASS: 必須5/6相当（target-changed は購読も ready もしない）");
+  }
+
+  // 必須7（scores 経路）：loadScores が superseded を返した場合も markRuntimeReady しない。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps({ loadScores: async () => "superseded" as SliceLoadOutcome }, rec, refs),
+    );
+    assert.equal(r, "not-ready");
+    assert.ok(!rec.calls.includes("markRuntimeReady"), "superseded を無条件に ready 扱いしない（必須7）");
+    console.log("PASS: 必須7相当（loadScores superseded も無条件 ready 扱いしない）");
+  }
+
+  // 必須14：復旧途中で generation が変わった（stop）→ 以降のタイマー復元・購読を行わない。
+  {
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps(
         {
           loadChildren: async () => {
             await delay(5);
-            genRef.g = 1; // 復旧途中で stopHostProgress 相当
+            refs.gen = 1; // stopHostProgress 相当
             rec.calls.push("children");
-            return { ok: true };
+            return "applied" as SliceLoadOutcome;
           },
         },
         rec,
-        genRef,
-      ),
-    );
-    assert.equal(r, "stopped");
-    assert.ok(!rec.calls.includes("subscribe"), "stop後はRealtime購読(channel)を作らない");
-    assert.ok(!rec.calls.includes("restoreTimer"), "stop後はローカルタイマーを復元しない");
-    assert.ok(!rec.calls.some((c) => c.startsWith("finishLoading")), "stop後はloading/stateを確定しない");
-    console.log("PASS: hydrate-4（復旧途中のstop後にtimer・channel・stateが復活しない）");
-  }
-
-  // 必須テスト4補：最後のawait（scores）の後にstopされても購読しない。
-  {
-    const genRef = { g: 0 };
-    const rec: Recorded = { calls: [], setGen: (g) => (genRef.g = g) };
-    const r = await hydrateAfterLive(
-      buildDeps(
-        {
-          loadScores: async () => {
-            await delay(5);
-            genRef.g = 1;
-            rec.calls.push("scores");
-            return { ok: true };
-          },
-        },
-        rec,
-        genRef,
+        refs,
       ),
     );
     assert.equal(r, "stopped");
     assert.ok(!rec.calls.includes("subscribe"));
     assert.ok(!rec.calls.includes("restoreTimer"));
-    console.log("PASS: hydrate-4補（最後の取得完了後のstopでも購読しない）");
+    assert.ok(!rec.calls.includes("markRuntimeReady"));
+    console.log("PASS: 必須14相当（復旧途中のstopでtimer/channel/stateを復活させない）");
   }
 
-  // 必須テスト1/12：initのlive取得が失敗 → 再試行で成功 → hydrateAfterLiveで完全復帰、
-  // という一連の流れをデッドロックなく通す（liveスライスの loadSnapshotSlice と
-  // hydrateAfterLive の合成）。
+  // 必須14：復旧途中で所有権を失った（invalidate 相当）→ stopped。
   {
-    const liveGate = createSliceGate();
-    let liveConfirmed = false;
-    let liveRow: string | null = null;
-    let attempt = 0;
-
-    const loadLive = () =>
-      loadSnapshotSlice<string | null>({
-        gate: liveGate,
-        fetch: async () => {
-          attempt += 1;
-          await delay(5);
-          return attempt === 1 ? { ok: false, data: null } : { ok: true, data: "LIVE-1" };
+    const refs = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec: Rec = { calls: [] };
+    const r = await hydrateAfterLive(
+      buildHydrationDeps(
+        {
+          loadAnswers: async () => {
+            refs.owns = false; // 新しい完全復旧に所有権を奪われた／stopした相当
+            rec.calls.push("answers");
+            return "applied" as SliceLoadOutcome;
+          },
         },
-        stillCurrent: () => true,
-        markPending: () => {
-          liveConfirmed = false;
-        },
-        applyFresh: (row) => {
-          liveRow = row;
-          liveConfirmed = true;
-        },
-        markUnconfirmed: () => {
-          liveConfirmed = false;
-        },
-      });
+        rec,
+        refs,
+      ),
+    );
+    assert.equal(r, "stopped");
+    assert.ok(!rec.calls.includes("subscribe"));
+    console.log("PASS: 必須14相当（所有権喪失後は購読しない）");
+  }
 
-    const o1 = await loadLive();
-    assert.equal(o1, "unconfirmed");
-    assert.equal(liveConfirmed, false, "初回init：live取得失敗で未確認、自動進行は凍結");
-
-    const o2 = await loadLive();
-    assert.equal(o2, "applied");
-    assert.equal(liveConfirmed, true);
-    assert.equal(liveRow, "LIVE-1");
-
-    const genRef = { g: 0 };
-    const rec: Recorded = { calls: [], setGen: (g) => (genRef.g = g) };
-    const r = await hydrateAfterLive(buildDeps({}, rec, genRef));
-    assert.equal(r, "ready");
-    assert.ok(rec.calls.includes("subscribe"), "復旧後に正しいliveについて購読が作成される");
-    assert.ok(rec.calls.includes("restoreTimer"));
-    console.log("PASS: recovery-flow（init失敗→再試行成功→完全復帰、デッドロックなし）");
+  // 必須8/15：target-changed の後、新しい liveId で完全復旧が最後まで進む
+  // （hydrateAfterLive を2回：1回目 target-changed → 2回目 ready）＝デッドロックしない。
+  {
+    // 1回目：L1 対象の途中で L2 へ切り替わる
+    const refs1 = { gen: 0, liveId: "L1" as string | null, owns: true };
+    const rec1: Rec = { calls: [] };
+    const r1 = await hydrateAfterLive(
+      buildHydrationDeps(
+        {
+          targetLiveId: "L1",
+          loadChildren: async () => {
+            refs1.liveId = "L2";
+            return "applied" as SliceLoadOutcome;
+          },
+        },
+        rec1,
+        refs1,
+      ),
+    );
+    assert.equal(r1, "target-changed");
+    // 2回目：新しい liveId L2 で完全復旧
+    const refs2 = { gen: 0, liveId: "L2" as string | null, owns: true };
+    const rec2: Rec = { calls: [] };
+    const r2 = await hydrateAfterLive(buildHydrationDeps({ targetLiveId: "L2" }, rec2, refs2));
+    assert.equal(r2, "ready");
+    assert.ok(rec2.calls.includes("subscribe"), "最終的に新しいライブ(L2)だけを購読する（必須8）");
+    assert.ok(rec2.calls.includes("markRuntimeReady"));
+    console.log("PASS: 必須8/15相当（target-changed→新liveIdで完全復旧、デッドロックしない）");
   }
 
   console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");

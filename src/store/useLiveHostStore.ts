@@ -17,15 +17,21 @@ import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
 import {
   answersSnapshotMatches,
+  botScoringAllowed,
   childrenSnapshotReady,
+  createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
+  insertGuardPasses,
   loadSnapshotSlice,
+  progressionFrozen,
+  runGuardedSteps,
   scoresSnapshotMatches,
   shouldReleaseInitInFlight,
   shouldReleaseRetryFlag,
   shouldRetryNow,
   type AnswersSnapshotKey,
+  type HostHydrationOutcome,
   type ScoresSnapshotKey,
   type SliceLoadOutcome,
 } from "@/lib/liveHostSnapshots";
@@ -219,6 +225,23 @@ let scoresRetryInFlight = false;
 let scoresRetryAt = 0;
 const SNAPSHOT_RETRY_INTERVAL_MS = 2_000;
 
+// 2026-09-13（再レビュー対応・P1-1）：司会進行環境が「どのliveIdについて完全に
+// 確立済みか」。liveSnapshotConfirmed（live行を取得できた）だけでは不十分で、
+// - subscribedLiveId：Realtimeを対象liveIdで購読済みか（subscribeLiveChannels/
+//   cleanupChannelsが管理）
+// - runtimeReadyLiveId：hydrate が children/answers/scores まで applied で
+//   完了し、購読・タイマー復元まで済んだliveId
+// の両方が現在のlive.idと一致して初めて「完全復旧済み」とみなす（isHostRuntimeEstablished）。
+// 手動refreshがliveGateだけ進めて liveSnapshotConfirmed=true にしても、これらが
+// 揃わない限り advanceIfDue は完全復旧（ensureHostRecovery）へ合流する。
+let subscribedLiveId: string | null = null;
+let runtimeReadyLiveId: string | null = null;
+
+// 完全復旧（init / 初回失敗後のretry / 未初期化状態の手動refresh）を1本化する
+// 所有権コーディネータ。同一世代の完全復旧が進行中なら、その Promise へ合流する
+// （新しく並行して走らせない＝中途半端な superseded 終了を防ぐ）。
+const recovery = createRecoveryCoordinator();
+
 // authoritative（DB書き込み結果やRPCの戻り値など、今この瞬間に確実に最新と分かる
 // live行）を反映する。ゲートを begin() して、進行中の古いlive読み取りを無効化する。
 function applyAuthoritativeLive(row: LiveRow) {
@@ -242,13 +265,17 @@ function cleanupChannels() {
   for (const ch of channels) supabase.removeChannel(ch);
   channels = [];
   tsukkomiChannel = null;
+  subscribedLiveId = null;
 }
 
 // 500msの進行tickタイマーを（重複なく）1本だけ確実に張る。指定世代が既に
-// 古い（stopHostProgressされた）場合は張らない。
+// 古い（stopHostProgressされた）場合は張らない。既に現在世代で1本動いていれば
+// そのまま使う（clear→再作成でtickを1回落とさない）。tickTimer が非nullになるのは
+// 現在世代のみ（stopHostProgress が clear ＋ 世代+1、ensureTickTimer は古い世代なら
+// 作らない）。
 function ensureTickTimer(generation: number) {
   if (generation !== progressGeneration) return;
-  if (tickTimer) clearInterval(tickTimer);
+  if (tickTimer) return;
   tickTimer = setInterval(() => {
     void advanceIfDue();
   }, 500);
@@ -530,6 +557,9 @@ async function subscribeLiveChannels(liveId: string) {
     .subscribe();
 
   channels = [livesCh, participantsCh, turnsCh, answersCh, scoresCh, tsukkomiChannel];
+  // 「このliveIdについてRealtime購読を作成済み」を記録する（isHostRuntimeEstablished
+  // が完全復旧済み判定に使う。cleanupChannels でクリアされる）。
+  subscribedLiveId = liveId;
 }
 
 // current_turn_idが切り替わった直後は、Realtimeイベントを待たずに即座に
@@ -707,12 +737,13 @@ async function updateLiveIfPhase(
 
 // 現在のターンの回答キューを処理する：表示中(revealed)の回答が無く、
 // 未表示の回答があれば、一呼吸(revealDelayMs)置いてから1件だけrevealする。
-async function processRevealQueue() {
+async function processRevealQueue(tickGeneration: number, tickLiveId: string | null) {
   const state = useLiveHostStore.getState();
   const { answers, live } = state;
-  // 2026-09-10（再レビュー対応）：現在ターンのanswersスナップショットが未確認
-  // （取得失敗直後など）なら、空/古いキューを見て誤って次を表示しない。
-  // advanceIfDue側でも同じガードをしているが、多層防御として明示する。
+  // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が今の対象に
+  // ついて確認済みで、進行環境も確立済みのときだけ reveal 更新へ進む（多層防御。
+  // advanceIfDue 側でも同じガードをしているが、await をまたいだ呼び出しにも効かせる）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
   if (!live || !answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) return;
   const active = answers.find((a) => a.revealed_at && !a.resolved);
   if (active) return; // 既に表示中の回答があるので何もしない
@@ -746,6 +777,8 @@ async function processRevealQueue() {
 
   const target = queued[0];
   const now = Date.now();
+  // reveal 更新の直前でもう一度凍結を確認する（P2：多層防御）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
   // 2026-09-09（複数管理画面タブ対策）：revealed_at is null AND resolved=false
   // の行だけを対象にする。複数タブが同時に同じ回答をrevealしようとしても、
   // 実際に更新できた1つのタブだけが0件でない結果(revealedRows)を受け取る
@@ -786,10 +819,11 @@ async function processRevealQueue() {
 }
 
 // 表示中の回答の採点が出揃った、または締切(judgeMs+judgeGraceMs)を過ぎていれば確定する。
-async function resolveIfDue() {
+async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
   const state = useLiveHostStore.getState();
-  // 2026-09-10（再レビュー対応）：現在ターンのanswersスナップショットが未確認なら、
-  // 古い/空のstate.answersで誤って確定処理をしない（多層防御）。
+  // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が確認済みで
+  // 進行環境も確立済みのときだけ確定処理へ進む（多層防御）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
   if (
     !state.live ||
     !answersSnapshotMatches(state.answersSnapshot, state.live.id, state.live.current_turn_id)
@@ -873,6 +907,8 @@ async function resolveIfDue() {
     // アプリ側でも多層防御として、集計前に必ず「現在のeligible judge ID集合」に
     // 含まれるscoresだけを対象にする（想定外の参加者IDのscoreが混ざっていても
     // 合計点・top_score_votes・満点判定には一切反映されないようにする）。
+    // fetchScoresForAnswer の await をまたいだ後の再確認（P2）。
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
     const eligibleJudgeIds = new Set(eligibleJudges.map((p) => p.id));
     const freshScores = freshScoresResult.data.filter((s) =>
       eligibleJudgeIds.has(s.judge_participant_id),
@@ -900,6 +936,8 @@ async function resolveIfDue() {
     const topScoreVotes = freshScores.filter((s) => s.points === 3).length;
     const laughTriggered = topScoreVotes > Math.floor(eligibleJudges.length / 2);
 
+    // 確定 UPDATE の直前でもう一度凍結を確認する（P2：多層防御）。
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
     // 2026-09-09（複数管理画面タブ対策）：resolved=falseの行だけを対象にする。
     // 複数タブが同時に同じ回答を確定しようとしても、実際に更新できた1つの
     // タブだけが0件でない結果(resolvedRows)を受け取り、演出締切の設定・
@@ -1015,15 +1053,15 @@ function isAnsweringBusy(answers: AnswerRow[], live: LiveRow | null): boolean {
 }
 
 // 審査サイクル中は持ち時間を一時停止し、サイクルが終わったら残り時間から再開する。
-async function syncAnsweringPause() {
+async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | null) {
   const state = useLiveHostStore.getState();
   const { live } = state;
   if (!live || live.current_phase !== "answering") return;
 
-  // 2026-09-10（再レビュー対応）：現在ターンのanswersスナップショットが未確認の間は、
-  // 空/古いstate.answersを見て「busyでない」と誤判定し、回答時間を再開してしまう
-  // 恐れがある。未確認の間はpause/resumeの判断そのものを行わない
-  // （advanceIfDue側でもガードしているが、多層防御として明示）。
+  // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が確認済みで
+  // 進行環境も確立済みのときだけ pause/resume 更新へ進む（未確認の間に空/古い
+  // state.answersを見て「busyでない」と誤判定して回答時間を再開しない。多層防御）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
   if (!answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) return;
 
   const busy = isAnsweringBusy(state.answers, live);
@@ -1032,6 +1070,8 @@ async function syncAnsweringPause() {
     const remaining = live.phase_deadline
       ? new Date(live.phase_deadline).getTime() - Date.now()
       : 0;
+    // pause UPDATE の直前でもう一度確認する（P2：多層防御）。
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
     await updateLive(live.id, {
       answering_paused: true,
       answering_remaining_ms: Math.max(0, remaining),
@@ -1042,6 +1082,8 @@ async function syncAnsweringPause() {
 
   if (!busy && live.answering_paused) {
     const remaining = live.answering_remaining_ms ?? 0;
+    // resume UPDATE の直前でもう一度確認する（P2：多層防御）。
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
     await updateLive(live.id, {
       answering_paused: false,
       phase_deadline: new Date(Date.now() + remaining).toISOString(),
@@ -1054,16 +1096,38 @@ async function syncAnsweringPause() {
 // 認証済みクライアントで行わせる（本人としての書き込みなので既存RLSにそのまま合致する）。
 // 事前に計算したスケジュールではなく、tickのたびに低確率で抽選する方式にすることで、
 // 60秒の間に自然にばらけて送信されるようにしている。
-async function runBotBehavior() {
+async function runBotBehavior(tickGeneration: number, tickLiveId: string | null) {
   const state = useLiveHostStore.getState();
   const { live, turns, participants, answers, scores } = state;
   if (!live || live.current_phase !== "answering" || !live.current_turn_id) return;
   const turn = turns.find((t) => t.id === live.current_turn_id);
   if (!turn) return;
 
+  // 2026-09-13（再レビュー対応・P2）：live/children/answers が同期中／進行環境が
+  // 未確立なら、ボット回答も採点も行わない（古いstateだけを根拠にDB書き込みを
+  // 開始しない）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
+
   const bots = useLiveBotStore.getState().bots;
   const now = Date.now();
   const activeAnswer = answers.find((a) => a.revealed_at && !a.resolved);
+  // scores同期中（表示中の回答のscoresSnapshotが未確認）は、古いscoresを根拠に
+  // ボット採点しない。active answerに一致するscoresSnapshotが確認済みのときだけ許可。
+  const botScoringOk = botScoringAllowed(
+    false,
+    state.scoresSnapshot,
+    live.id,
+    live.current_turn_id,
+    activeAnswer?.id ?? null,
+  );
+  const stillOnThisTurn = () =>
+    insertGuardPasses({
+      frozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      currentLiveId: () => useLiveHostStore.getState().live?.id ?? null,
+      currentTurnId: () => useLiveHostStore.getState().live?.current_turn_id ?? null,
+      expectedLiveId: live.id,
+      expectedTurnId: turn.id,
+    });
   // 持ち時間が切れた後は、新しく回答を送信させない（既に表示中の1件への採点は
   // 引き続き受け付ける＝現在進行中の演出を壊さず、時間切れ後の"新規差し込み"だけ止める）。
   const answeringTimeUp = answeringRemainingMsTrue !== null && answeringRemainingMsTrue <= 0;
@@ -1109,6 +1173,10 @@ async function runBotBehavior() {
         const myAnswerCount = answers.filter((a) => a.participant_id === bot.participantId).length;
         if (myAnswerCount >= 5) return;
         if (Math.random() >= 0.03) return;
+        // insert 直前に、凍結していない かつ await 前と同じ live.id / current_turn_id
+        // のままであることを再確認する（P2：Promise.all 内で stop / ターン変更が
+        // 起きたら insert しない）。
+        if (!stillOnThisTurn()) return;
         const { error } = await bot.client.from("answers").insert({
           turn_id: turn.id,
           participant_id: bot.participantId,
@@ -1118,7 +1186,7 @@ async function runBotBehavior() {
         if (!error) {
           botCooldownUntil.set(bot.participantId, now + randomDelay(3_000, 9_000));
         }
-      } else if (activeAnswer) {
+      } else if (activeAnswer && botScoringOk) {
         // 客席のボット：表示中の回答にまだ採点していなければ低確率で採点する。
         const alreadyScored = scores.some((s) => s.judge_participant_id === bot.participantId);
         if (alreadyScored) return;
@@ -1127,6 +1195,18 @@ async function runBotBehavior() {
           answerPerfectRoundIds.set(activeAnswer.id, Math.random() < 0.8);
         }
         const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
+        // insert 直前の再確認（P2）：凍結していない・同じ live/turn・表示中の回答が
+        // 今も activeAnswer のまま・その scoresSnapshot が確認済み。
+        if (!stillOnThisTurn()) return;
+        const sNow = useLiveHostStore.getState();
+        if (!sNow.answers.some((a) => a.id === activeAnswer.id && a.revealed_at && !a.resolved)) {
+          return;
+        }
+        if (
+          !scoresSnapshotMatches(sNow.scoresSnapshot, live.id, turn.id, activeAnswer.id)
+        ) {
+          return;
+        }
         const { error } = await bot.client.from("scores").insert({
           answer_id: activeAnswer.id,
           judge_participant_id: bot.participantId,
@@ -1140,141 +1220,195 @@ async function runBotBehavior() {
   );
 }
 
-type HydrateOutcome = "stopped" | "superseded" | "live-unconfirmed" | "no-live" | "live-ready";
+type HydrateOutcome =
+  | "stopped"
+  | "superseded"
+  | "live-unconfirmed"
+  | "partial"
+  | "no-live"
+  | "live-ready";
 
-// 2026-09-12（再レビュー対応・P1-1）：init()本体と、取得失敗からの自動復旧
-// (retryLiveSnapshot)で共通して使う「進行中ライブの取得 → 存在すれば
-// children/answers/resolved/scoresの取得・Realtime購読・answeringローカル
-// タイマーの復元まで」の一連の処理。liveの再取得成功だけを「完全復旧」と
-// 扱わず、通常のinit成功時と同じ後処理まで完了させる。復旧途中で
-// stopHostProgressされたら（progressGenerationが変わる）state/timer/channelを
-// 一切作らず即座に戻る。live確定後の順序は liveHostSnapshots.ts の
-// hydrateAfterLive へ分離し、遅延Promiseで順序をテストできるようにしている。
-async function hydrateHostForActiveLive(generation: number): Promise<HydrateOutcome> {
-  const stopped = () => generation !== progressGeneration;
+// 2026-09-12/13（再レビュー対応・P1-1）：init()本体・初回失敗後のretry・未初期化
+// 状態での手動refresh で共通して使う「進行中ライブの取得 → 存在すれば
+// children/answers/resolved/scoresの取得・Realtime購読・answeringローカルタイマーの
+// 復元まで」の一連の処理。liveの再取得成功だけを「完全復旧」と扱わず、通常のinit
+// 成功時と同じ後処理まで完了させ、完全readyを runtimeReadyLiveId に記録する。
+// 復旧途中でstopHostProgressされた（progressGeneration変化・所有権喪失）／別ライブへ
+// 切り替わった場合は state/timer/channel を一切作らず戻る。live確定後の順序と
+// 各awaitの後の再確認は liveHostSnapshots.ts の hydrateAfterLive へ分離している。
+// recoveryToken：createRecoveryCoordinator が発行する所有権トークン。
+async function hydrateHostForActiveLive(
+  generation: number,
+  recoveryToken: number,
+): Promise<HydrateOutcome> {
+  const stopped = () => generation !== progressGeneration || !recovery.owns(recoveryToken);
   const set = useLiveHostStore.setState;
   const get = useLiveHostStore.getState;
 
-  const liveOutcome = await loadSnapshotSlice<LiveRow | null>({
-    gate: liveGate,
-    fetch: () => fetchActiveLive(),
-    stillCurrent: () => true,
-    markPending: () => set({ liveSnapshotConfirmed: false }),
-    applyFresh: (row) => set({ live: row ?? null, liveSnapshotConfirmed: true }),
-    markUnconfirmed: () => set({ liveSnapshotConfirmed: false }),
-  });
-  if (stopped()) return "stopped";
-  // superseded/target-changed：より新しい取得（別のhydrate・Realtime起点）に任せる。
-  if (liveOutcome === "superseded" || liveOutcome === "target-changed") return "superseded";
-  if (liveOutcome === "unconfirmed") return "live-unconfirmed";
-
-  const live = get().live;
-  if (!live) {
-    // 進行中ライブが無いことを正常取得できた：ライブ無しの確認済み状態にする。
-    set({
-      live: null,
-      loading: false,
-      liveSnapshotConfirmed: true,
-      childrenSnapshotLiveId: null,
-      answersSnapshot: null,
-      scoresSnapshot: null,
-      lastRefreshedAt: new Date().toISOString(),
-      error: null,
+  // target-changed（取得中に別ライブへ切り替わった）ときは、新しいliveIdで
+  // やり直す。無限ループを避けるため回数を制限し、超えたら次tickのretryへ委ねる。
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const liveOutcome = await loadSnapshotSlice<LiveRow | null>({
+      gate: liveGate,
+      fetch: () => fetchActiveLive(),
+      stillCurrent: () => true,
+      markPending: () => set({ liveSnapshotConfirmed: false }),
+      applyFresh: (row) => set({ live: row ?? null, liveSnapshotConfirmed: true }),
+      markUnconfirmed: () => set({ liveSnapshotConfirmed: false }),
     });
-    return "no-live";
-  }
+    if (stopped()) return "stopped";
+    // superseded：別の取得（Realtime起点・別のcreateLivePreparation等）に責任を委ねる。
+    // 無条件にready扱いはしない（runtimeReadyLiveIdを立てない＝凍結して再試行）。
+    if (liveOutcome === "superseded" || liveOutcome === "target-changed") return "superseded";
+    if (liveOutcome === "unconfirmed") return "live-unconfirmed";
 
-  const liveId = live.id;
-  const turnId = live.current_turn_id;
+    const live = get().live;
+    if (!live) {
+      // 進行中ライブが無いことを正常取得できた：ライブ無しの確認済み状態にする。
+      runtimeReadyLiveId = null;
+      set({
+        live: null,
+        loading: false,
+        liveSnapshotConfirmed: true,
+        childrenSnapshotLiveId: null,
+        answersSnapshot: null,
+        scoresSnapshot: null,
+        lastRefreshedAt: new Date().toISOString(),
+        error: null,
+      });
+      return "no-live";
+    }
 
-  const sliceOk = (p: Promise<SliceLoadOutcome>) =>
-    p.then((o) => ({ ok: o !== "unconfirmed" }));
+    const targetLiveId = live.id;
+    const turnId = live.current_turn_id;
 
-  const result = await hydrateAfterLive({
-    startGeneration: generation,
-    currentGeneration: () => progressGeneration,
-    loadChildren: () =>
-      sliceOk(
+    const result = await hydrateAfterLive({
+      startGeneration: generation,
+      currentGeneration: () => progressGeneration,
+      targetLiveId,
+      currentLiveId: () => get().live?.id ?? null,
+      ownsRecovery: () => recovery.owns(recoveryToken),
+      loadChildren: () =>
         loadSnapshotSlice<ChildrenPayload>({
           gate: childrenGate,
-          fetch: () => fetchChildrenWithProfiles(liveId),
-          stillCurrent: () => get().live?.id === liveId,
+          fetch: () => fetchChildrenWithProfiles(targetLiveId),
+          stillCurrent: () => get().live?.id === targetLiveId,
           markPending: () => set({ childrenSnapshotLiveId: null }),
           applyFresh: ({ profiles, ...children }) =>
-            set({ ...children, profiles, childrenSnapshotLiveId: liveId }),
+            set({ ...children, profiles, childrenSnapshotLiveId: targetLiveId }),
           markUnconfirmed: () => set({ childrenSnapshotLiveId: null }),
         }),
-      ),
-    loadAnswers: () => {
-      if (!turnId) {
-        answersGate.begin();
-        scoresGate.begin();
-        set({ answers: [], scores: [], answersSnapshot: null, scoresSnapshot: null });
-        return Promise.resolve({ ok: true });
-      }
-      return sliceOk(
-        loadSnapshotSlice<AnswerRow[]>({
+      loadAnswers: () => {
+        if (!turnId) {
+          answersGate.begin();
+          scoresGate.begin();
+          set({ answers: [], scores: [], answersSnapshot: null, scoresSnapshot: null });
+          return Promise.resolve<SliceLoadOutcome>("applied");
+        }
+        return loadSnapshotSlice<AnswerRow[]>({
           gate: answersGate,
           fetch: () => fetchAnswersForTurn(turnId),
           stillCurrent: () => {
             const s = get();
-            return s.live?.id === liveId && s.live?.current_turn_id === turnId;
+            return s.live?.id === targetLiveId && s.live?.current_turn_id === turnId;
           },
           markPending: () => set({ answersSnapshot: null }),
           applyFresh: (data) => {
             scoresGate.begin();
-            set({ answers: data, scores: [], answersSnapshot: { liveId, turnId }, scoresSnapshot: null });
+            set({
+              answers: data,
+              scores: [],
+              answersSnapshot: { liveId: targetLiveId, turnId },
+              scoresSnapshot: null,
+            });
           },
           markUnconfirmed: () => set({ answersSnapshot: null }),
-        }),
-      );
-    },
-    loadResolved: () =>
-      sliceOk(
+        });
+      },
+      loadResolved: () =>
         loadSnapshotSlice<ResolvedPayload>({
           gate: resolvedGate,
-          fetch: () => fetchResolvedWithScores(liveId),
-          stillCurrent: () => get().live?.id === liveId,
+          fetch: () => fetchResolvedWithScores(targetLiveId),
+          stillCurrent: () => get().live?.id === targetLiveId,
           applyFresh: ({ resolvedAnswers, resolvedScoresByAnswer }) =>
             set({ resolvedAnswers, resolvedScoresByAnswer }),
           markUnconfirmed: () => {}, // 表示は維持。ログ用なので進行は止めない
         }),
-      ),
-    loadScores: async () => {
-      const o = await refreshScoresForActiveAnswer();
-      return { ok: o !== "unconfirmed" };
-    },
-    restoreAnsweringTimer: () => {
-      const l = get().live;
-      if (l && l.current_phase === "answering") {
-        answeringRemainingMsTrue = l.answering_paused
-          ? (l.answering_remaining_ms ?? 0)
-          : l.phase_deadline
-            ? Math.max(0, new Date(l.phase_deadline).getTime() - Date.now())
-            : null;
-        lastAnsweringTickAt = Date.now();
-      } else {
-        answeringRemainingMsTrue = null;
-        lastAnsweringTickAt = null;
-      }
-    },
-    finishLoading: (anyUnconfirmed) =>
-      set({
-        loading: false,
-        lastRefreshedAt: new Date().toISOString(),
-        error: anyUnconfirmed
-          ? "一部の情報を取得できませんでした。しばらくすると自動的に再試行します。"
-          : null,
-      }),
-    subscribe: () => {
-      // subscribeLiveChannels自体はawaitを挟まず同期的にchannelを作る。直前の
-      // stop確認（hydrateAfterLive内）を通過していれば、その間にstopHostProgressが
-      // 割り込む余地は無く、割り込んだ場合もstopHostProgress側のcleanupChannelsが
-      // 後から回収する（progressGenerationが変わるのはstopHostProgress()のときだけ）。
-      void subscribeLiveChannels(liveId);
-    },
-  });
-  return result === "stopped" ? "stopped" : "live-ready";
+      loadScores: () => refreshScoresForActiveAnswer(),
+      restoreAnsweringTimer: () => {
+        const l = get().live;
+        if (l && l.id === targetLiveId && l.current_phase === "answering") {
+          answeringRemainingMsTrue = l.answering_paused
+            ? (l.answering_remaining_ms ?? 0)
+            : l.phase_deadline
+              ? Math.max(0, new Date(l.phase_deadline).getTime() - Date.now())
+              : null;
+          lastAnsweringTickAt = Date.now();
+        } else if (l && l.id === targetLiveId) {
+          answeringRemainingMsTrue = null;
+          lastAnsweringTickAt = null;
+        }
+        // l が targetLiveId でない（別ライブへ切り替わった）ときは触らない
+        // ＝ hydrateAfterLive 側が target-changed で中断する。
+      },
+      finishLoading: (anyUnconfirmed) =>
+        set({
+          loading: false,
+          lastRefreshedAt: new Date().toISOString(),
+          error: anyUnconfirmed
+            ? "一部の情報を取得できませんでした。しばらくすると自動的に再試行します。"
+            : null,
+        }),
+      subscribe: () => {
+        // hydrateAfterLive 内で「progressGeneration一致・所有権あり・
+        // currentLiveId === targetLiveId」を確認した直後に同期呼び出しされる。
+        // 古いliveIdでは絶対に呼ばれない。subscribeLiveChannels は await を挟まず
+        // 同期的に channel を作る（subscribedLiveId も更新する）。
+        void subscribeLiveChannels(targetLiveId);
+      },
+      markRuntimeReady: () => {
+        runtimeReadyLiveId = targetLiveId;
+      },
+    });
+
+    if (result === "target-changed") {
+      if (stopped()) return "stopped";
+      continue; // 新しいliveIdで完全復旧をやり直す
+    }
+    if (result === "stopped") return "stopped";
+    return result === "ready" ? "live-ready" : "partial";
+  }
+  // 3回試しても対象が定まらない：次tickのretry/ensureHostRecoveryへ委ねる。
+  return "superseded";
+}
+
+// init / 初回失敗後のretry / 未初期化状態の手動refresh を1本化する入口。
+// 同一世代の完全復旧が進行中なら、その Promise へ合流する（中途半端に superseded で
+// 終わらせない）。
+function ensureHostRecovery(generation: number): Promise<HostHydrationOutcome> {
+  return recovery.run(generation, (gen, token) =>
+    hydrateHostForActiveLive(gen, token).then(mapHydrateToHydration),
+  );
+}
+
+// hydrateHostForActiveLive の詳細な結果を、コーディネータが扱う粗い結果へ写像する。
+function mapHydrateToHydration(o: HydrateOutcome): HostHydrationOutcome {
+  if (o === "stopped" || o === "superseded") return "stopped";
+  if (o === "live-ready" || o === "no-live") return "ready";
+  return "not-ready"; // live-unconfirmed / partial
+}
+
+// 司会進行環境が「現在のlive.idについて完全に確立済みか」。
+// liveSnapshotConfirmed（live行を取得できた）だけでは不十分で、購読・tickTimer・
+// （answeringなら）ローカル残り時間の復元まで揃って初めて true。手動refreshが
+// liveGateだけ進めて liveSnapshotConfirmed=true にしても、これが false の間は
+// advanceIfDue は完全復旧（ensureHostRecovery）へ合流する。
+function isHostRuntimeEstablished(live: LiveRow): boolean {
+  if (tickTimer === null) return false;
+  if (subscribedLiveId !== live.id) return false;
+  if (runtimeReadyLiveId !== live.id) return false;
+  if (live.current_phase === "answering" && lastAnsweringTickAt === null) return false;
+  return true;
 }
 
 // 2026-09-11/12（再レビュー対応）：未確認スライスの読み取り再試行。tickは500msだが
@@ -1287,12 +1421,38 @@ function retryLiveSnapshot() {
   if (initInFlight) return;
   if (!shouldRetryNow(liveRetryInFlight, liveRetryAt, Date.now(), SNAPSHOT_RETRY_INTERVAL_MS)) return;
   const myGeneration = progressGeneration;
+  const s = useLiveHostStore.getState();
+  const live = s.live;
+
+  // 司会進行環境が既に確立済み（購読・タイマー復元済み）で、単に lives 行が一時的に
+  // 未確認になっただけ（Realtime変更検知のmarkPending・0行更新後の再取得中など）
+  // なら、lives 行だけを軽量に取り直す（毎回 channel を張り直さない）。
+  if (live && subscribedLiveId === live.id && runtimeReadyLiveId === live.id) {
+    liveRetryInFlight = true;
+    liveRetryAt = Date.now();
+    void loadSnapshotSlice<LiveRow | null>({
+      gate: liveGate,
+      fetch: () => fetchLiveRow(live.id),
+      stillCurrent: () => useLiveHostStore.getState().live?.id === live.id,
+      markPending: () => {}, // 既に未確認
+      applyFresh: (row) => {
+        if (row) useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
+      },
+      markUnconfirmed: () => {},
+    })
+      .catch((e) => console.warn("[useLiveHostStore] ライブ状態の再取得に失敗", e))
+      .finally(() => {
+        if (shouldReleaseRetryFlag(progressGeneration, myGeneration)) liveRetryInFlight = false;
+      });
+    return;
+  }
+
+  // 未初期化 / 完全復旧が必要（購読やタイマー復元がまだ）→ 完全復旧オーケストレーション
+  // へ合流する（liveの再取得成功だけでは「完全復旧」と扱わない）。
   liveRetryInFlight = true;
   liveRetryAt = Date.now();
-  // liveの再取得成功だけを「完全復旧」と扱わず、通常のinit成功時と同じ後処理
-  // （children/answers/resolved/scores取得・Realtime購読・タイマー復元）まで行う。
-  void hydrateHostForActiveLive(myGeneration)
-    .catch((e) => console.warn("[useLiveHostStore] ライブ状態の再取得に失敗", e))
+  void ensureHostRecovery(myGeneration)
+    .catch((e) => console.warn("[useLiveHostStore] 司会進行環境の再確立に失敗", e))
     .finally(() => {
       if (shouldReleaseRetryFlag(progressGeneration, myGeneration)) liveRetryInFlight = false;
     });
@@ -1349,21 +1509,32 @@ function retryScoresSnapshot() {
     });
 }
 
-// 2026-09-12（再レビュー対応・P2-1）：advanceIfDue内でawaitをまたいだ後に、
-// 「途中でstopされた（progressGeneration変化）」「再取得が始まって同期中になった」
-// 「対象ライブが変わった」を検出し、古い前提のままDB書き込みを行わないための共通判定。
-function autoProgressFrozen(tickGeneration: number, requireAnswers: boolean): boolean {
-  if (tickGeneration !== progressGeneration) return true; // stopHostProgressされた
+// 2026-09-12/13（再レビュー対応・P2）：advanceIfDue内でawaitをまたいだ後・各自動DB
+// 書き込みの直前に、「途中でstopされた（progressGeneration変化）」「再取得が始まって
+// スライスが同期中になった」「await前と対象ライブ／ターンが変わった」「司会進行環境が
+// 未確立になった」を検出し、古い前提のままDB書き込みを行わないための共通判定。
+// tickLiveId：この tick に入った時点の live.id（await をまたいで変わっていないか）。
+function progressFrozenForTick(
+  tickGeneration: number,
+  tickLiveId: string | null,
+  requireAnswers: boolean,
+): boolean {
   const s = useLiveHostStore.getState();
-  if (!s.liveSnapshotConfirmed || !s.live) return true; // live同期中/未確認
-  if (!childrenSnapshotReady(s.childrenSnapshotLiveId, s.live.id)) return true; // children同期中
-  if (
-    requireAnswers &&
-    !answersSnapshotMatches(s.answersSnapshot, s.live.id, s.live.current_turn_id)
-  ) {
-    return true; // 現在ターンのanswers同期中/未確認
-  }
-  return false;
+  const live = s.live;
+  return progressionFrozen(
+    {
+      tickGeneration,
+      currentGeneration: progressGeneration,
+      liveSnapshotConfirmed: s.liveSnapshotConfirmed,
+      liveId: live?.id ?? null,
+      tickLiveId,
+      runtimeEstablished: live ? isHostRuntimeEstablished(live) : false,
+      childrenSnapshotLiveId: s.childrenSnapshotLiveId,
+      answersSnapshot: s.answersSnapshot,
+      turnId: live?.current_turn_id ?? null,
+    },
+    requireAnswers,
+  );
 }
 
 // フェーズ・ターンの自動進行。
@@ -1378,6 +1549,20 @@ async function advanceIfDue() {
   }
   const { live } = state;
   if (!live) return;
+  const tickLiveId = live.id;
+
+  // 2026-09-13（再レビュー対応・P1-1）：lives行はあるが司会進行環境が未確立
+  // （Realtime未購読 / answeringタイマー未復元 / runtimeReadyLiveId不一致）なら、
+  // 完全復旧オーケストレーションへ合流する。手動refreshが liveGate だけ進めて
+  // liveSnapshotConfirmed=true にしただけの状態も、ここで拾って完全復旧させる。
+  // retryLiveSnapshot() 経由なので single-flight ＋ 最小間隔2秒で throttle される
+  // （毎tickで channel を張り直さない。retryLiveSnapshot 内で
+  //  「runtime確立済み＝軽量 fetchLiveRow / 未確立＝ensureHostRecovery」を判定）。
+  if (!isHostRuntimeEstablished(live)) {
+    retryLiveSnapshot();
+    return;
+  }
+
   // 2026-09-09/11（再レビュー対応）：participants/groups/topics/turnsが今のライブに
   // ついて未確認の間は、自動進行を一切行わず読み取り再試行だけを行う。
   // 特にgroup_result→次ターンの判定はturns/groupsを見て「次のターンがあるか」を
@@ -1410,15 +1595,19 @@ async function advanceIfDue() {
       answeringRemainingMsTrue = Math.max(0, answeringRemainingMsTrue - dt);
     }
 
-    await processRevealQueue();
-    await runBotBehavior();
-    await resolveIfDue();
-    await syncAnsweringPause();
-
-    // 2026-09-12（再レビュー対応・P2-1）：上のawaitの間に、再取得が始まって
-    // いずれかのスライスが同期中になった／stopされた／対象ライブが変わった
-    // 可能性がある。古い前提のまま持ち時間判定・フェーズ遷移へ進まない。
-    if (autoProgressFrozen(tickGeneration, true)) return;
+    // 2026-09-13（再レビュー対応・P2）：各awaitの「前」に凍結を再確認しながら順に
+    // 実行する。processRevealQueueのawait中にRealtime取得が始まってスライスが
+    // 未確認になった場合、runBotBehavior以降は実行しない。
+    const guarded = await runGuardedSteps(
+      () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      [
+        { name: "processRevealQueue", run: () => processRevealQueue(tickGeneration, tickLiveId) },
+        { name: "runBotBehavior", run: () => runBotBehavior(tickGeneration, tickLiveId) },
+        { name: "resolveIfDue", run: () => resolveIfDue(tickGeneration, tickLiveId) },
+        { name: "syncAnsweringPause", run: () => syncAnsweringPause(tickGeneration, tickLiveId) },
+      ],
+    );
+    if (guarded.blockedAt !== null) return;
 
     if (answeringRemainingMsTrue === null || answeringRemainingMsTrue > 0) return;
     const freshState = useLiveHostStore.getState();
@@ -1468,7 +1657,7 @@ async function advanceIfDue() {
       return; // 現在表示中の1件・演出シーケンス・未表示の回答が残っている間は待つ
     }
     // fetchAnswersForTurnのawaitをまたいだ後の最終確認（P2-1）。
-    if (autoProgressFrozen(tickGeneration, true)) return;
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
     // 2026-09-09（再レビュー対応）：以前はここでanswringRemainingMsTrue/
     // lastAnsweringTickAtを両方nullへ戻してからDB更新を試みていたが、その後の
     // 更新が通信エラーで失敗すると、次のtickの時点でanswringRemainingMsTrueが
@@ -1480,7 +1669,7 @@ async function advanceIfDue() {
 
     // RPC直前の最終確認（P2-1）：ここまでのawaitの間に同期中/stop/対象変更に
     // なっていたら遷移RPCを撃たない（answeringRemainingMsTrueは0のまま＝次tick再試行）。
-    if (autoProgressFrozen(tickGeneration, true)) return;
+    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
 
     // reveal_sequence_untilは意図的にここに含めない：もしDBにこの列がまだ無い環境
     // （マイグレーション未適用）だと、存在しない列を含むUPDATEはPostgreSQL側で
@@ -1537,7 +1726,7 @@ async function advanceIfDue() {
   if (Date.now() < new Date(latest.phase_deadline).getTime()) return;
 
   if (live.current_phase === "group_result") {
-    if (autoProgressFrozen(tickGeneration, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
     // 2026-09-09（再レビュー対応・0065）：以前は次ターンの特定(JS側でturns/groups
     // から計算)・turnsのstatus更新・lives更新が別々の呼び出しに分かれており、
     // turns更新のエラーを確認していなかった。次ターンの特定・active化・lives更新を
@@ -1577,7 +1766,7 @@ async function advanceIfDue() {
   }
 
   if (live.current_phase === "topic_reveal") {
-    if (autoProgressFrozen(tickGeneration, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
     const answerMs = PHASE_DURATIONS_MS.answering!;
     // ローカルの残り時間トラッキングは、このタブがDB更新に勝ったかどうかに
     // 関わらず初期化する（後続のadvanceIfDueの「answering」分岐がこの
@@ -1595,7 +1784,7 @@ async function advanceIfDue() {
   }
 
   if (live.current_phase === "interlude") {
-    if (autoProgressFrozen(tickGeneration, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
     await updateLive(live.id, {
       current_phase: "opening",
       phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.opening!).toISOString(),
@@ -1649,30 +1838,39 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       set({ loading: true, error: null });
       void get().loadTopicBank();
 
-      // 2026-09-12（再レビュー対応・P1-1）：live取得〜children/answers/resolved/
-      // scores取得・Realtime購読・answeringローカルタイマー復元までを、
-      // 取得失敗からの自動復旧(retryLiveSnapshot)と共通の hydrateHostForActiveLive
-      // に集約した。init最後の一括setは無くし、各スライスをゲート越しに個別反映する
-      // （init実行中にRealtimeが新しい状態を反映しても巻き戻らない）。
-      const outcome = await hydrateHostForActiveLive(myGeneration);
-      if (stopped() || outcome === "stopped" || outcome === "superseded") {
-        // 2026-09-10（再レビュー対応）：stopされた／別の取得に追い越された。
-        // ここでcleanupChannels()は呼ばない。progressGenerationが変わるのは
-        // stopHostProgress()のときだけで、そこで必ずcleanupChannels()が呼ばれて
-        // いる（このinitがsubscribeLiveChannelsでchannelを作っていた場合も回収済み）。
+      // 2026-09-12/13（再レビュー対応・P1-1）：live取得〜children/answers/resolved/
+      // scores取得・Realtime購読・answeringローカルタイマー復元までを、初回失敗後の
+      // retry・未初期化状態の手動refresh と共通の完全復旧オーケストレーション
+      // （ensureHostRecovery＝所有権コーディネータ経由の hydrateHostForActiveLive）
+      // に合流させる。進行中の完全復旧があればそれを待つだけ（中途半端に superseded で
+      // 終わらせない）。init最後の一括setは無く、各スライスをゲート越しに個別反映する。
+      const outcome = await ensureHostRecovery(myGeneration);
+      if (stopped() || outcome === "stopped") {
+        // stopされた／別の取得に追い越された。ここでcleanupChannels()は呼ばない。
+        // progressGenerationが変わるのはstopHostProgress()のときだけで、そこで必ず
+        // cleanupChannels()が呼ばれている（このinitがsubscribeLiveChannelsで
+        // channelを作っていた場合も回収済み）。
         return;
       }
-      if (outcome === "live-unconfirmed") {
-        // ライブ本体の最新状態を確認できない：表示用の古いliveは残し、
-        // advanceIfDueは liveSnapshotConfirmed=false を見て自動進行を凍結。
-        // tickTimerは動かし続け、advanceIfDueが一定間隔で retryLiveSnapshot で
-        // 完全復旧（children/answers/resolved/scores・購読・タイマー）を試みる。
-        set({ loading: false, error: "ライブの状態を取得できませんでした。しばらくすると自動的に再試行します。" });
+      if (outcome === "not-ready") {
+        // ライブ本体を確認できない／一部スライスが未確認：表示用の古いデータは残し、
+        // advanceIfDue が isHostRuntimeEstablished=false を見て自動進行を凍結する。
+        // tickTimerは動かし続け、advanceIfDueが一定間隔で ensureHostRecovery を
+        // 再実行して完全復旧を試みる（hydrate側で error 文言は設定済みのことも
+        // あるが、live取得そのものに失敗した場合はここで明示的に文言を出す）。
+        if (!get().live || !get().liveSnapshotConfirmed) {
+          set({
+            loading: false,
+            error: "ライブの状態を取得できませんでした。しばらくすると自動的に再試行します。",
+          });
+        } else {
+          set({ loading: false });
+        }
         ensureTickTimer(myGeneration);
         return;
       }
-      // "no-live" / "live-ready"：hydrate側で loading:false・error・lastRefreshedAt・
-      // （ライブありなら）購読・タイマー復元まで完了済み。tickタイマーを重複なく張る。
+      // "ready"：hydrate側で loading:false・error・lastRefreshedAt・
+      // （ライブありなら）購読・タイマー復元・runtimeReadyLiveId まで完了済み。
       ensureTickTimer(myGeneration);
     };
     const promise = run().finally(() => {
@@ -1701,6 +1899,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     answersGate.begin();
     resolvedGate.begin();
     scoresGate.begin();
+    // 2026-09-13（再レビュー対応・P1-1）：完全復旧の所有権トークンを進める。
+    // stop 前に開始した完全復旧の ownsRecovery() は false になり、途中で
+    // subscribe / タイマー復元 / runtimeReadyLiveId 記録を行わずに戻る。
+    recovery.invalidate();
+    subscribedLiveId = null;
+    runtimeReadyLiveId = null;
     if (tickTimer) {
       clearInterval(tickTimer);
       tickTimer = null;
@@ -1742,7 +1946,25 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 動いているので触らない。
   refresh: async () => {
     const live0 = get().live;
-    if (!live0) return { ok: true };
+    // 2026-09-13（再レビュー対応・P1-1）：未初期化 / 司会進行環境が未確立
+    // （購読・タイマー復元がまだ）の状態で「最新状態を取得」が押された場合、
+    // ここで liveGate だけ進めて hydrate を superseded で中途終了させると、
+    // 購読もタイマー復元もされないまま liveSnapshotConfirmed=true になり放置される。
+    // その場合は完全復旧オーケストレーションへ「合流」する（進行中があればその
+    // Promise を待つ。無ければ開始する）。
+    if (!live0 || !get().liveSnapshotConfirmed || !isHostRuntimeEstablished(live0)) {
+      const outcome = await ensureHostRecovery(progressGeneration);
+      ensureTickTimer(progressGeneration);
+      if (outcome === "ready") return { ok: true };
+      if (outcome === "not-ready") {
+        return {
+          ok: false,
+          reason: "最新状態の取得に失敗しました。しばらくすると自動的に再試行します。",
+        };
+      }
+      // "stopped"：別セッション／stop に委譲済み。次tickのretryが追いつく。
+      return { ok: false, reason: "最新状態を再取得しています。しばらくお待ちください。" };
+    }
     const liveId = live0.id;
     try {
       // --- live スライス ---
@@ -1870,6 +2092,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       childrenGate.begin();
       answersGate.begin();
       scoresGate.begin();
+      // children はまだ取得していない＝runtimeReadyLiveId は立てない
+      // （advanceIfDue が isHostRuntimeEstablished=false を見て完全復旧へ合流する）。
+      runtimeReadyLiveId = null;
       set({
         live: existing,
         liveSnapshotConfirmed: true,
@@ -1936,6 +2161,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     childrenGate.begin();
     answersGate.begin();
     scoresGate.begin();
+    runtimeReadyLiveId = null;
     set({
       childrenSnapshotLiveId: null,
       answersSnapshot: null,
@@ -1973,6 +2199,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         : "作成後の組・お題情報を取得できませんでした。しばらくすると自動的に再試行します。",
     });
     await subscribeLiveChannels(live.id);
+    // children まで取得できた scheduled ライブは、この場で完全確立済みとして記録する
+    // （直後の advanceIfDue が不要な完全復旧を走らせないように）。取得失敗時は立てない。
+    runtimeReadyLiveId = childrenResult.ok ? live.id : null;
     return { ok: true };
   },
 
@@ -2427,6 +2656,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       childrenGate.begin();
       answersGate.begin();
       scoresGate.begin();
+      runtimeReadyLiveId = null;
       set({
         live: null,
         participants: [],
@@ -2461,6 +2691,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     childrenGate.begin();
     answersGate.begin();
     scoresGate.begin();
+    runtimeReadyLiveId = null;
     // closed状態の行を持ち続けると画面が「開始前」に戻らない(!liveでのみ判定しているため)。
     // ライブそのものを無かった状態に戻す（errorは上で立てていれば維持する）。
     set((s) => ({

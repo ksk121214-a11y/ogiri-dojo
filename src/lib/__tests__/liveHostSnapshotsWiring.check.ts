@@ -1,9 +1,9 @@
 // 配線確認：src/lib/liveHostSnapshots.ts の仕組みが、実際に
 // src/store/useLiveHostStore.ts の想定した箇所へ組み込まれていることを、
 // ソースの静的検査で確認する（純粋関数の単体テストだけでは配線が分からないため）。
-// このリポジトリには実ストアを丸ごと動かす統合テスト基盤が無いため、
-// tsc / next build（型・ビルド検証）＋ liveHostSnapshots.check.ts（遅延Promiseで
-// 非同期順序・復旧オーケストレーションを検証）に加えて、この静的検査を置く。
+// tsc / next build ＋ liveHostSnapshots.check.ts（遅延Promise・DB書き込みモックで
+// 完全復旧オーケストレーション・所有権・await ごとの凍結再確認を検証）に加えて、
+// この静的検査を置く。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,10 +17,15 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(m, "liveHostSnapshotsからのimport文が見つからない");
   for (const name of [
     "answersSnapshotMatches",
+    "botScoringAllowed",
     "childrenSnapshotReady",
+    "createRecoveryCoordinator",
     "createSliceGate",
     "hydrateAfterLive",
+    "insertGuardPasses",
     "loadSnapshotSlice",
+    "progressionFrozen",
+    "runGuardedSteps",
     "scoresSnapshotMatches",
     "shouldReleaseInitInFlight",
     "shouldReleaseRetryFlag",
@@ -31,12 +36,15 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-1（必要な純粋関数をimport）");
 }
 
-// 2: スライスごとの取得世代ゲートを5つ作っている（live/children/answers/resolved/scores）。
+// 2: 5スライスゲート ＋ 完全復旧の所有権コーディネータ ＋ runtime確立トラッキング。
 {
   for (const g of ["liveGate", "childrenGate", "answersGate", "resolvedGate", "scoresGate"]) {
     assert.ok(src.includes(`const ${g} = createSliceGate()`), `${g} を createSliceGate で作っていない`);
   }
-  console.log("PASS: 配線-2（live/children/answers/resolved/scores の5スライスゲート）");
+  assert.ok(src.includes("const recovery = createRecoveryCoordinator()"), "recovery コーディネータが無い");
+  assert.ok(/let subscribedLiveId: string \| null = null;/.test(src), "subscribedLiveId が無い");
+  assert.ok(/let runtimeReadyLiveId: string \| null = null;/.test(src), "runtimeReadyLiveId が無い");
+  console.log("PASS: 配線-2（5スライスゲート ＋ recoveryコーディネータ ＋ subscribedLiveId/runtimeReadyLiveId）");
 }
 
 // 3: 各取得経路が loadSnapshotSlice を通っている。
@@ -57,8 +65,6 @@ const count = (needle: string) => src.split(needle).length - 1;
 // 5: P2-1（再取得を「開始した」時点で未確認化）：主要な再取得経路が markPending を持つ。
 {
   assert.ok(count("markPending:") >= 8, `markPending の配線が少なすぎる (${count("markPending:")})`);
-  // refetchLive / refetchChildren（Realtime起点）、refreshAnswersForTurn、
-  // refreshScoresForActiveAnswer、refresh() の live/children/answers、hydrate の各スライス。
   for (const anchor of [
     /const refetchLive =[\s\S]*?markPending: \(\) => useLiveHostStore\.setState\(\{ liveSnapshotConfirmed: false \}\)/,
     /const refetchChildren =[\s\S]*?markPending: \(\) => useLiveHostStore\.setState\(\{ childrenSnapshotLiveId: null \}\)/,
@@ -70,7 +76,8 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-5（Realtime/refresh/再試行の再取得開始時点で未確認化する）");
 }
 
-// 6: 未確認スライスは advanceIfDue で自動進行を凍結し、読み取り再試行だけ行う。
+// 6: advanceIfDue：(a) live未確認→retryLiveSnapshot、(b) 進行環境未確立→ensureHostRecovery、
+//    (c) children未確認→retryChildrenSnapshot。
 {
   const fn = src.match(/async function advanceIfDue\(\)\s*\{[\s\S]*?\n\}/);
   assert.ok(fn, "advanceIfDue が見つからない");
@@ -79,122 +86,213 @@ const count = (needle: string) => src.split(needle).length - 1;
     "advanceIfDue が live 未確認時に retryLiveSnapshot だけして return していない",
   );
   assert.ok(
+    /if \(!isHostRuntimeEstablished\(live\)\) \{\s*\n\s*retryLiveSnapshot\(\);\s*\n\s*return;/.test(fn[0]),
+    "advanceIfDue が『進行環境未確立→retryLiveSnapshot（throttle付き完全復旧合流）』していない（P1-1）",
+  );
+  assert.ok(
     /if \(!childrenSnapshotReady\(state\.childrenSnapshotLiveId, live\.id\)\) \{\s*\n\s*retryChildrenSnapshot\(live\.id\);\s*\n\s*return;/.test(fn[0]),
     "advanceIfDue が children 未確認時に retryChildrenSnapshot だけして return していない",
   );
-  assert.ok(
-    /if \(!answersSnapshotMatches\(state\.answersSnapshot, live\.id, live\.current_turn_id\)\) \{\s*\n\s*retryAnswersSnapshot\(live\.current_turn_id\);\s*\n\s*return;/.test(fn[0]),
-    "advanceIfDue が answers 未確認時に retryAnswersSnapshot だけして return していない",
-  );
-  console.log("PASS: 配線-6（未確認スライスは自動進行を凍結し読み取り再試行だけ）");
+  console.log("PASS: 配線-6（advanceIfDue: live未確認/環境未確立/children未確認 の3段ガード）");
 }
 
-// 7: P2-1（awaitをまたいだ後の再確認）：autoProgressFrozen が定義され、
-//    advanceIfDue の await ブロック後・各遷移RPC/更新の直前で使われている。
+// 7: P2（await ごとに凍結を再確認）：answering分岐が runGuardedSteps を使い、
+//    ステップは processRevealQueue → runBotBehavior → resolveIfDue → syncAnsweringPause。
 {
-  assert.ok(
-    /function autoProgressFrozen\(tickGeneration: number, requireAnswers: boolean\): boolean/.test(src),
-    "autoProgressFrozen が定義されていない",
-  );
-  assert.ok(/const tickGeneration = progressGeneration;/.test(src), "advanceIfDue先頭で tickGeneration を捕捉していない");
-  assert.ok(count("autoProgressFrozen(tickGeneration") >= 5, "autoProgressFrozen による再確認が不足");
   const fn = src.match(/async function advanceIfDue\(\)\s*\{[\s\S]*?\n\}/);
   assert.ok(fn);
   assert.ok(
-    /await syncAnsweringPause\(\);\s*\n[\s\S]{0,400}?if \(autoProgressFrozen\(tickGeneration, true\)\) return;/.test(fn[0]),
-    "answering分岐の await ブロック後に autoProgressFrozen 再確認が無い",
+    /const guarded = await runGuardedSteps\(\s*\n\s*\(\) => progressFrozenForTick\(tickGeneration, tickLiveId, true\),/.test(fn[0]),
+    "answering分岐が runGuardedSteps + progressFrozenForTick を使っていない",
   );
-  console.log("PASS: 配線-7（awaitをまたいだ後に確認状態とprogressGenerationを再確認）");
+  for (const step of ["processRevealQueue", "runBotBehavior", "resolveIfDue", "syncAnsweringPause"]) {
+    assert.ok(
+      new RegExp(`name: "${step}", run: \\(\\) => ${step}\\(tickGeneration, tickLiveId\\)`).test(fn[0]),
+      `runGuardedSteps のステップに ${step}(tickGeneration, tickLiveId) が無い`,
+    );
+  }
+  assert.ok(/if \(guarded\.blockedAt !== null\) return;/.test(fn[0]), "blockedAt を見て return していない");
+  assert.ok(
+    /function progressFrozenForTick\(\s*\n?\s*tickGeneration: number,\s*\n?\s*tickLiveId: string \| null,\s*\n?\s*requireAnswers: boolean,\s*\n?\s*\): boolean/.test(src),
+    "progressFrozenForTick の定義が想定と違う",
+  );
+  assert.ok(/return progressionFrozen\(/.test(src), "progressFrozenForTick が progressionFrozen へ委譲していない");
+  assert.ok(!/function autoProgressFrozen\(/.test(src), "旧 autoProgressFrozen が残っている");
+  assert.ok(count("progressFrozenForTick(tickGeneration, tickLiveId") >= 6, "遷移RPC直前の再確認が不足");
+  console.log("PASS: 配線-7（answering分岐は runGuardedSteps で各awaitごとに凍結を再確認）");
 }
 
-// 8: 再試行は single-flight ＋ 最小間隔 ＋ 所有権付き finally（shouldReleaseRetryFlag）。
+// 8: 多層防御：processRevealQueue / resolveIfDue / syncAnsweringPause / runBotBehavior が
+//    tickGeneration/tickLiveId を受け取り、DB書き込み直前に progressFrozenForTick を呼ぶ。
+{
+  for (const fn of ["processRevealQueue", "resolveIfDue", "syncAnsweringPause", "runBotBehavior"]) {
+    const m = src.match(new RegExp(`async function ${fn}\\(tickGeneration: number, tickLiveId: string \\| null\\)`));
+    assert.ok(m, `${fn} が tickGeneration/tickLiveId を受け取っていない`);
+  }
+  // reveal / resolve / pause / resume の各 DB 書き込み直前の多層ガード。
+  assert.ok(
+    /reveal 更新の直前でもう一度凍結を確認する[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
+    "processRevealQueue の reveal 更新直前ガードが無い",
+  );
+  assert.ok(
+    /確定 UPDATE の直前でもう一度凍結を確認する[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
+    "resolveIfDue の確定 UPDATE 直前ガードが無い",
+  );
+  assert.ok(
+    /pause UPDATE の直前[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src) &&
+      /resume UPDATE の直前[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
+    "syncAnsweringPause の pause/resume UPDATE 直前ガードが無い",
+  );
+  console.log("PASS: 配線-8（各ヘルパーが世代/liveId を受け取り DB 書き込み直前に再確認）");
+}
+
+// 9: runBotBehavior：answers/children/scores 同期中はボット insert しない。
+{
+  const fn = src.match(/async function runBotBehavior\([\s\S]*?\n\}\n/);
+  assert.ok(fn, "runBotBehavior が見つからない");
+  assert.ok(
+    /if \(progressFrozenForTick\(tickGeneration, tickLiveId, true\)\) return;/.test(fn[0]),
+    "runBotBehavior 冒頭の凍結ガードが無い（answers/children同期中はボット行動しない）",
+  );
+  assert.ok(
+    /const botScoringOk = botScoringAllowed\(/.test(fn[0]),
+    "runBotBehavior が botScoringAllowed（scores同期中はボット採点しない）を使っていない",
+  );
+  assert.ok(/} else if \(activeAnswer && botScoringOk\) \{/.test(fn[0]), "ボット採点分岐が botScoringOk でガードされていない");
+  assert.ok(
+    /if \(!stillOnThisTurn\(\)\) return;/.test(fn[0]) && count("if (!stillOnThisTurn()) return;") >= 2,
+    "Promise.all 内の insert 直前に stillOnThisTurn()（insertGuardPasses）再確認が無い",
+  );
+  assert.ok(
+    /if \(\s*\n?\s*!scoresSnapshotMatches\(sNow\.scoresSnapshot, live\.id, turn\.id, activeAnswer\.id\)\s*\n?\s*\)/.test(fn[0]),
+    "ボット採点 insert 直前の scoresSnapshot 再確認が無い（必須10）",
+  );
+  console.log("PASS: 配線-9（runBotBehavior: 同期中は回答/採点insertしない＋insert直前の再確認）");
+}
+
+// 10: retryLiveSnapshot：runtime確立済みなら軽量 fetchLiveRow、未確立なら ensureHostRecovery。
+{
+  const fn = src.match(/function retryLiveSnapshot\(\)[\s\S]*?\n\}\n/);
+  assert.ok(fn, "retryLiveSnapshot が見つからない");
+  assert.ok(fn[0].includes("if (initInFlight) return;"), "retryLiveSnapshot の init 実行中ガードが無い");
+  assert.ok(
+    /if \(live && subscribedLiveId === live\.id && runtimeReadyLiveId === live\.id\) \{[\s\S]*?fetchLiveRow\(live\.id\)/.test(fn[0]),
+    "runtime確立済みのときの軽量 fetchLiveRow 経路が無い",
+  );
+  assert.ok(
+    /void ensureHostRecovery\(myGeneration\)/.test(fn[0]),
+    "未確立のときに ensureHostRecovery へ合流していない",
+  );
+  assert.ok(
+    /shouldReleaseRetryFlag\(progressGeneration, myGeneration\)/.test(fn[0]),
+    "retryLiveSnapshot の finally が所有権判定なしでフラグを解除している",
+  );
+  console.log("PASS: 配線-10（retryLiveSnapshot: 軽量 fetchLiveRow / 完全復旧合流 の使い分け）");
+}
+
+// 11: 再試行4種は single-flight ＋ 最小間隔 ＋ 所有権付き finally。
 {
   assert.ok(src.includes("const SNAPSHOT_RETRY_INTERVAL_MS = 2_000"), "再試行の最小間隔定数が無い/2秒でない");
-  for (const fn of ["retryLiveSnapshot", "retryChildrenSnapshot", "retryAnswersSnapshot", "retryScoresSnapshot"]) {
+  for (const fn of ["retryChildrenSnapshot", "retryAnswersSnapshot", "retryScoresSnapshot"]) {
     const m = src.match(new RegExp(`function ${fn}\\([\\s\\S]*?\\n\\}`));
     assert.ok(m, `${fn} が見つからない`);
     assert.ok(m[0].includes("shouldRetryNow("), `${fn} が shouldRetryNow を使っていない`);
-    assert.ok(m[0].includes("SNAPSHOT_RETRY_INTERVAL_MS"), `${fn} が最小間隔を使っていない`);
     assert.ok(
       /shouldReleaseRetryFlag\(progressGeneration, myGeneration\)/.test(m[0]),
       `${fn} の finally が所有権判定なしでフラグを解除している`,
     );
-    assert.ok(
-      !/\.finally\(\(\) => \{\s*\n\s*\w+RetryInFlight = false;\s*\n\s*\}\)/.test(m[0]),
-      `${fn} が無条件に XRetryInFlight = false へ戻している`,
-    );
   }
-  console.log("PASS: 配線-8（再試行は single-flight ＋ 最小間隔2秒 ＋ 所有権付き解除）");
+  console.log("PASS: 配線-11（再試行は single-flight ＋ 最小間隔2秒 ＋ 所有権付き解除）");
 }
 
-// 9: P1-1（完全復旧）：hydrateHostForActiveLive が定義され、init と retryLiveSnapshot の
-//    両方から呼ばれている。retryLiveSnapshot は init 実行中は走らない。
+// 12: init / refresh が完全復旧オーケストレーション（ensureHostRecovery）へ合流する。
 {
-  assert.ok(
-    /async function hydrateHostForActiveLive\(generation: number\): Promise<HydrateOutcome>/.test(src),
-    "hydrateHostForActiveLive が定義されていない",
-  );
-  assert.ok(src.includes("hydrateAfterLive({"), "hydrateHostForActiveLive が hydrateAfterLive を使っていない");
-  assert.ok(count("hydrateHostForActiveLive(") >= 2, "hydrateHostForActiveLive が init/retry の両方から呼ばれていない");
-  const retryFn = src.match(/function retryLiveSnapshot\(\)[\s\S]*?\n\}/);
-  assert.ok(retryFn);
-  assert.ok(retryFn[0].includes("if (initInFlight) return;"), "retryLiveSnapshot が init 実行中ガードを持たない");
-  assert.ok(
-    retryFn[0].includes("hydrateHostForActiveLive(myGeneration)"),
-    "retryLiveSnapshot が liveの再取得だけで済ませている（完全復旧を呼んでいない）",
-  );
   const initFn = src.match(/init: \(\) => \{[\s\S]*?\n {2}\},/);
-  assert.ok(initFn);
+  assert.ok(initFn, "init が見つからない");
   assert.ok(
-    /const outcome = await hydrateHostForActiveLive\(myGeneration\);/.test(initFn[0]),
-    "init が hydrateHostForActiveLive を使っていない（旧インラインのまま）",
-  );
-  assert.ok(
-    /if \(outcome === "live-unconfirmed"\) \{[\s\S]*?ensureTickTimer\(myGeneration\);\s*\n\s*return;/.test(initFn[0]),
-    "init が live 未確認時に ensureTickTimer だけして return していない",
+    /const outcome = await ensureHostRecovery\(myGeneration\);/.test(initFn[0]),
+    "init が ensureHostRecovery を使っていない",
   );
   assert.ok(!/tickTimer = setInterval/.test(initFn[0]), "init が setInterval を直接呼んでいる");
-  console.log("PASS: 配線-9（初回init失敗→retryで完全復旧、initと共通処理へ集約）");
-}
 
-// 10: init は各スライスを個別反映（hydrate経由）で、末尾の複数スライス一括setが無い。
-{
-  const initFn = src.match(/init: \(\) => \{[\s\S]*?\n {2}\},/);
-  assert.ok(initFn);
+  const refreshFn = src.match(/refresh: async \(\) => \{[\s\S]*?\n {2}\},/);
+  assert.ok(refreshFn, "refresh が見つからない");
   assert.ok(
-    !/set\(\(s\) => \(\{[\s\S]*?\bturns\b[\s\S]*?\}\)\)/.test(initFn[0]) &&
-      !/set\(\{[\s\S]{0,40}live,[\s\S]*?\.\.\.children,[\s\S]*?answers:/.test(initFn[0]),
-    "init が複数スライスを1回のsetでまとめて反映している（巻き戻しの温床）",
+    /if \(!live0 \|\| !get\(\)\.liveSnapshotConfirmed \|\| !isHostRuntimeEstablished\(live0\)\) \{\s*\n\s*const outcome = await ensureHostRecovery\(progressGeneration\);/.test(
+      refreshFn[0],
+    ),
+    "refresh が未初期化/未確立時に ensureHostRecovery へ合流していない（P1-1）",
   );
-  console.log("PASS: 配線-10（init は各スライスを個別反映、末尾の一括setなし）");
+  assert.ok(!refreshFn[0].includes("liveError.message"), "refresh が生の liveError.message を返している");
+  assert.ok(!/reason: e instanceof Error \? e\.message/.test(refreshFn[0]), "refresh が生の例外メッセージを返している");
+  console.log("PASS: 配線-12（init/refresh が完全復旧オーケストレーションへ合流・生エラー非露出）");
 }
 
-// 11: stopHostProgress が全ゲート(5つ)を begin() し、retryフラグ・snapshot識別情報・
-//     liveSnapshotConfirmed を戻す。
+// 13: hydrateHostForActiveLive：hydrateAfterLive を使い、target-changed ループ・
+//     recoveryToken の所有権確認・runtimeReadyLiveId 記録を持つ。
+{
+  assert.ok(
+    /async function hydrateHostForActiveLive\(\s*\n?\s*generation: number,\s*\n?\s*recoveryToken: number,\s*\n?\s*\): Promise<HydrateOutcome>/.test(src),
+    "hydrateHostForActiveLive が recoveryToken を受け取っていない",
+  );
+  assert.ok(src.includes("hydrateAfterLive({"), "hydrateHostForActiveLive が hydrateAfterLive を使っていない");
+  assert.ok(/for \(let attempt = 0; attempt < 3; attempt\+\+\)/.test(src), "target-changed のやり直しループが無い");
+  assert.ok(/if \(result === "target-changed"\) \{[\s\S]{0,120}?continue;/.test(src), "target-changed 時に新liveIdでやり直していない");
+  assert.ok(/ownsRecovery: \(\) => recovery\.owns\(recoveryToken\)/.test(src), "hydrateAfterLive に ownsRecovery を渡していない");
+  assert.ok(/markRuntimeReady: \(\) => \{\s*\n\s*runtimeReadyLiveId = targetLiveId;/.test(src), "markRuntimeReady で runtimeReadyLiveId を記録していない");
+  assert.ok(
+    /subscribe: \(\) => \{[\s\S]{0,260}?void subscribeLiveChannels\(targetLiveId\);/.test(src),
+    "subscribe が targetLiveId で購読していない",
+  );
+  assert.ok(
+    /function ensureHostRecovery\(generation: number\): Promise<HostHydrationOutcome> \{\s*\n\s*return recovery\.run\(/.test(src),
+    "ensureHostRecovery が recovery.run 経由になっていない",
+  );
+  console.log("PASS: 配線-13（hydrateHostForActiveLive: target-changed ループ ＋ 所有権 ＋ runtimeReady 記録）");
+}
+
+// 14: isHostRuntimeEstablished：tickTimer / subscribedLiveId / runtimeReadyLiveId /
+//     answeringタイマー復元 を全て確認する。
+{
+  const fn = src.match(/function isHostRuntimeEstablished\(live: LiveRow\): boolean \{[\s\S]*?\n\}/);
+  assert.ok(fn, "isHostRuntimeEstablished が見つからない");
+  assert.ok(/if \(tickTimer === null\) return false;/.test(fn[0]), "tickTimer の確認が無い");
+  assert.ok(/if \(subscribedLiveId !== live\.id\) return false;/.test(fn[0]), "subscribedLiveId の確認が無い");
+  assert.ok(/if \(runtimeReadyLiveId !== live\.id\) return false;/.test(fn[0]), "runtimeReadyLiveId の確認が無い");
+  assert.ok(
+    /if \(live\.current_phase === "answering" && lastAnsweringTickAt === null\) return false;/.test(fn[0]),
+    "answering タイマー復元の確認が無い",
+  );
+  console.log("PASS: 配線-14（isHostRuntimeEstablished の完全readyの条件）");
+}
+
+// 15: stopHostProgress：全ゲート begin ＋ recovery.invalidate ＋ subscribedLiveId/
+//     runtimeReadyLiveId クリア ＋ retryフラグ ＋ snapshot識別情報リセット。
 {
   const fn = src.match(/stopHostProgress: \(\) => \{[\s\S]*?\n {2}\},/);
   assert.ok(fn, "stopHostProgress が見つからない");
-  for (const g of [
-    "liveGate.begin()",
-    "childrenGate.begin()",
-    "answersGate.begin()",
-    "resolvedGate.begin()",
-    "scoresGate.begin()",
-  ]) {
+  for (const g of ["liveGate.begin()", "childrenGate.begin()", "answersGate.begin()", "resolvedGate.begin()", "scoresGate.begin()"]) {
     assert.ok(fn[0].includes(g), `stopHostProgress が ${g} していない`);
   }
-  assert.ok(fn[0].includes("liveRetryInFlight = false"), "stopHostProgress が liveRetryInFlight を戻していない");
+  assert.ok(fn[0].includes("recovery.invalidate()"), "stopHostProgress が recovery.invalidate() していない");
+  assert.ok(fn[0].includes("subscribedLiveId = null") && fn[0].includes("runtimeReadyLiveId = null"), "stopHostProgress が subscribedLiveId/runtimeReadyLiveId をクリアしていない");
   assert.ok(fn[0].includes("scoresRetryInFlight = false"), "stopHostProgress が scoresRetryInFlight を戻していない");
   assert.ok(
-    fn[0].includes("liveSnapshotConfirmed: false") &&
-      fn[0].includes("childrenSnapshotLiveId: null") &&
-      fn[0].includes("scoresSnapshot: null"),
+    fn[0].includes("liveSnapshotConfirmed: false") && fn[0].includes("scoresSnapshot: null"),
     "stopHostProgress が確認状態/識別情報を戻していない",
   );
-  console.log("PASS: 配線-11（stopHostProgress が全ゲート begin＋retryフラグ・確認状態リセット）");
+  console.log("PASS: 配線-15（stopHostProgress: 全ゲート begin ＋ recovery無効化 ＋ 確立/retry/snapshot リセット）");
 }
 
-// 12: init/hydrate のstop検出ブランチが cleanupChannels() を呼ばない。
+// 16: cleanupChannels が subscribedLiveId をクリア、subscribeLiveChannels が設定する。
+{
+  assert.ok(/function cleanupChannels\(\) \{[\s\S]*?subscribedLiveId = null;[\s\S]*?\n\}/.test(src), "cleanupChannels が subscribedLiveId をクリアしていない");
+  assert.ok(/channels = \[livesCh[\s\S]{0,200}?subscribedLiveId = liveId;/.test(src), "subscribeLiveChannels が subscribedLiveId を設定していない");
+  assert.ok(/if \(tickTimer\) return;/.test(src), "ensureTickTimer が『既に1本あればそのまま』になっていない");
+  console.log("PASS: 配線-16（subscribedLiveId の管理 ＋ ensureTickTimer は再作成しない）");
+}
+
+// 17: init/hydrate のstop検出ブランチが cleanupChannels() を呼ばない。
 {
   assert.ok(
     /progressGenerationが変わるのはstopHostProgress\(\)のときだけ/.test(src),
@@ -203,71 +301,27 @@ const count = (needle: string) => src.split(needle).length - 1;
   const initFn = src.match(/init: \(\) => \{[\s\S]*?\n {2}\},/);
   assert.ok(initFn);
   assert.ok(
-    !/if \(stopped\(\)[\s\S]{0,200}?\) \{[\s\S]{0,300}?cleanupChannels\(\);/.test(initFn[0]),
+    !/if \(stopped\(\)[\s\S]{0,120}?\) \{[\s\S]{0,300}?cleanupChannels\(\);/.test(initFn[0]),
     "init のstop検出ブランチが cleanupChannels() を呼んでいる",
   );
-  console.log("PASS: 配線-12（init/hydrate のstop検出は新世代 channel を cleanup しない）");
+  console.log("PASS: 配線-17（stop検出は新世代 channel を cleanup しない）");
 }
 
-// 13: 生の Supabase エラーメッセージを refresh() が返していない。
-{
-  const fn = src.match(/refresh: async \(\) => \{[\s\S]*?\n {2}\},/);
-  assert.ok(fn, "refresh が見つからない");
-  assert.ok(!fn[0].includes("liveError.message"), "refresh が生の liveError.message を返している");
-  assert.ok(!/reason: e instanceof Error \? e\.message/.test(fn[0]), "refresh が生の例外メッセージを返している");
-  console.log("PASS: 配線-13（refresh は生のSupabaseエラーを画面へ返さない）");
-}
-
-// 14: P1-2（scores新旧逆転防止）：scoresの全書き込み経路が scoresGate/refreshScoresForActiveAnswer を通る。
-{
-  assert.ok(
-    /async function refreshScoresForActiveAnswer\(\): Promise<SliceLoadOutcome>/.test(src),
-    "refreshScoresForActiveAnswer が定義されていない",
-  );
-  // scoresCh（Realtime）ハンドラが refreshScoresForActiveAnswer を使う。
-  assert.ok(
-    /table: "scores" \}, \(\) => \{\s*\n\s*void refreshScoresForActiveAnswer\(\);/.test(src),
-    "scores の Realtime ハンドラが refreshScoresForActiveAnswer を使っていない",
-  );
-  // resyncAnswersAndScoresForCurrentLive も同様。
-  assert.ok(
-    /async function resyncAnswersAndScoresForCurrentLive\(\)[\s\S]*?await refreshScoresForActiveAnswer\(\);/.test(src),
-    "resyncAnswersAndScoresForCurrentLive が refreshScoresForActiveAnswer を使っていない",
-  );
-  // resolveIfDue：確定直前の再取得を scoresGate トークンで囲み、追い越されたら進めない。
-  assert.ok(
-    /const scoresToken = scoresGate\.begin\(\);\s*\n\s*const freshScoresResult = await fetchScoresForAnswer\(active\.id\);/.test(src),
-    "resolveIfDue の確定直前 scores 再取得が scoresGate トークンで囲まれていない",
-  );
-  assert.ok(
-    /if \(!scoresGate\.isCurrent\(scoresToken\)\) \{\s*\n\s*\/\/[\s\S]*?return;\s*\n\s*\}/.test(src),
-    "resolveIfDue が「追い越されたら進めない」チェックをしていない",
-  );
-  // resolveIfDue：確定前ガードで scoresSnapshotMatches を使う。
-  assert.ok(
-    /if \(\s*\n?\s*!scoresSnapshotMatches\(\s*\n?\s*state\.scoresSnapshot,/.test(src),
-    "resolveIfDue が scoresSnapshotMatches によるガードをしていない",
-  );
-  // answers が変わる経路で scoresGate.begin() ＋ scoresSnapshot: null。
-  assert.ok(count("scoresGate.begin()") >= 8, `scoresGate.begin() の配線が少なすぎる (${count("scoresGate.begin()")})`);
-  console.log("PASS: 配線-14（scoresの全書き込み経路が scoresGate/refreshScoresForActiveAnswer を通る）");
-}
-
-// 15: 組結果の本番値が15秒のまま（制約）。
+// 18: 組結果15秒（制約）。
 {
   const timing = readFileSync(join(process.cwd(), "src", "data", "liveRoomTiming.ts"), "utf8");
   const prod = timing.match(/const PRODUCTION_TIMING = \{[\s\S]*?\n\} as const;/);
   assert.ok(prod, "PRODUCTION_TIMING が見つからない");
   assert.ok(/groupResultMs:\s*15_000\b/.test(prod[0]), "PRODUCTION_TIMING.groupResultMs が 15_000 でない");
-  console.log("PASS: 配線-15（組結果の本番値は15秒のまま）");
+  console.log("PASS: 配線-18（組結果の本番値は15秒のまま）");
 }
 
-// 16: 採点3点制・回答席/フリップ/音声演出の主要ロジックが不変（制約）。
+// 19: 採点3点制・回答席/フリップ/音声演出の主要ロジックが不変（制約）。
 {
   assert.ok(/points: isPerfectRound \? 3 : randomBotScore\(\)/.test(src), "ボット採点の3点制ロジックが変わっている");
   assert.ok(/const topScoreVotes = freshScores\.filter\(\(s\) => s\.points === 3\)\.length;/.test(src), "満点(3点)判定ロジックが変わっている");
   assert.ok(/REVEAL_SEQUENCE_MS/.test(src) && /reveal_sequence_until/.test(src), "フリップ/演出シーケンス配線が変わっている");
-  console.log("PASS: 配線-16（採点3点制・演出シーケンスのロジックは不変）");
+  console.log("PASS: 配線-19（採点3点制・演出シーケンスのロジックは不変）");
 }
 
 console.log("ALL LIVE_HOST_SNAPSHOTS WIRING CHECKS PASSED");

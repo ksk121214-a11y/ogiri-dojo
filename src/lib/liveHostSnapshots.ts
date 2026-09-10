@@ -165,52 +165,238 @@ export function shouldReleaseRetryFlag(currentGeneration: number, myGeneration: 
 // 「live行を反映するだけ」では不十分で、children/answers/resolved/scoresの再取得・
 // Realtime購読・answeringローカルタイマーの復元まで済ませないと、回答フェーズが
 // 0秒で止まる／その後の回答・採点イベントを受信できない、という状態になる。
-// init()本体とこの復旧処理で同じ順序を二重実装しないよう、live確定後の一連の
-// 手順（各awaitの後のstop確認を含む）だけをここへ分離し、副作用は注入する。
-// テストでは遅延Promiseを注入して「途中でstopされたらsubscribe/タイマー復元を
-// 行わない」「復旧後は正しいliveIdでsubscribeする」等の順序を検証する。
+// init()本体・retry・未初期化状態での手動refresh でこの順序を二重実装しないよう、
+// live確定後の一連の手順（各awaitの後の再確認を含む）だけをここへ分離し、副作用は
+// 注入する。テストでは遅延Promiseを注入して「途中でstop／別ライブへ切り替わったら
+// subscribe/タイマー復元を行わない」「applied以外を ready 扱いしない」等を検証する。
 export interface HostHydrationDeps {
   /** 開始時の進行世代。以後 currentGeneration() と一致しなければ stop 扱いで即中断。 */
   startGeneration: number;
   currentGeneration: () => number;
-  /** children（participants/groups/topics/turns/profiles）の取得・反映。 */
-  loadChildren: () => Promise<{ ok: boolean }>;
-  /** 現在ターンの answers（＋scoresクリア）の取得・反映。 */
-  loadAnswers: () => Promise<{ ok: boolean }>;
-  /** 確定ログ resolvedAnswers/resolvedScoresByAnswer の取得・反映（表示専用）。 */
-  loadResolved: () => Promise<{ ok: boolean }>;
-  /** 現在表示中の回答があれば、その scores を取得・反映。 */
-  loadScores: () => Promise<{ ok: boolean }>;
+  /** hydrate を開始したときの対象 liveId。 */
+  targetLiveId: string;
+  /** 現在 state に入っている live.id（取得中に別ライブへ変わったら不一致になる）。 */
+  currentLiveId: () => string | null;
+  /** この hydrate が今も完全復旧の所有者か（stop や新しい復旧開始で false へ）。 */
+  ownsRecovery: () => boolean;
+  /** 各スライスの取得。SliceLoadOutcome をそのまま返す（applied のみ正常完了）。 */
+  loadChildren: () => Promise<SliceLoadOutcome>;
+  loadAnswers: () => Promise<SliceLoadOutcome>;
+  /** 確定ログ（表示専用。ready 判定には含めない）。 */
+  loadResolved: () => Promise<SliceLoadOutcome>;
+  loadScores: () => Promise<SliceLoadOutcome>;
   /** answeringフェーズならローカル残り時間を復元、それ以外は破棄する。 */
   restoreAnsweringTimer: () => void;
   /** loading/error/lastRefreshedAt を確定させる。anyUnconfirmed=true なら注意文言。 */
   finishLoading: (anyUnconfirmed: boolean) => void;
   /** Realtime を対象 liveId で購読する（同期的に channel を作る前提）。 */
   subscribe: () => void;
+  /** 進行critical なスライスが全て applied で、購読も済んだ＝完全 ready を記録する。 */
+  markRuntimeReady: () => void;
 }
 
-export type HostHydrationOutcome = "stopped" | "ready";
+// stopped        : 世代が変わった／所有権を失った（何も作らない）
+// target-changed : 取得中に別ライブへ切り替わった（古いliveIdでは購読しない）
+// not-ready      : 購読はしたが進行critical スライスが未確認／追い越された（凍結して再試行）
+// ready          : 全て applied ＋ 購読済み ＋ タイマー復元済み
+export type HostHydrationOutcome = "stopped" | "target-changed" | "not-ready" | "ready";
 
 export async function hydrateAfterLive(deps: HostHydrationDeps): Promise<HostHydrationOutcome> {
-  const stopped = () => deps.currentGeneration() !== deps.startGeneration;
+  // 各awaitの直後・副作用の直前に呼ぶ共通の中断判定。
+  const abort = (): HostHydrationOutcome | null => {
+    if (deps.currentGeneration() !== deps.startGeneration) return "stopped";
+    if (!deps.ownsRecovery()) return "stopped";
+    if (deps.currentLiveId() !== deps.targetLiveId) return "target-changed";
+    return null;
+  };
 
+  let a = abort();
+  if (a) return a;
   const children = await deps.loadChildren();
-  if (stopped()) return "stopped";
+  a = abort();
+  if (a) return a;
   const answers = await deps.loadAnswers();
-  if (stopped()) return "stopped";
+  a = abort();
+  if (a) return a;
   const resolved = await deps.loadResolved();
-  if (stopped()) return "stopped";
+  a = abort();
+  if (a) return a;
   const scores = await deps.loadScores();
-  if (stopped()) return "stopped";
+  a = abort();
+  if (a) return a;
 
   // タイマー復元・loading確定は、購読の前に済ませる（購読直後にRealtimeの
   // SUBSCRIBEDで再取得が走っても、ローカルタイマーの初期値がある状態にする）。
   deps.restoreAnsweringTimer();
-  deps.finishLoading(!children.ok || !answers.ok || !resolved.ok || !scores.ok);
+  a = abort();
+  if (a) return a;
 
-  // subscribe直前に最後のstop確認。ここを通過したら subscribe は同期実行され、
-  // その間に stopHostProgress が割り込む余地は無い（JSは単一スレッド）。
-  if (stopped()) return "stopped";
+  const anyUnconfirmed =
+    children === "unconfirmed" ||
+    answers === "unconfirmed" ||
+    resolved === "unconfirmed" ||
+    scores === "unconfirmed";
+  deps.finishLoading(anyUnconfirmed);
+
+  // subscribe直前に最後の再確認（progressGeneration・所有権・currentLiveId===targetLiveId）。
+  // ここを通過したら subscribe は同期実行され、その間に stopHostProgress が割り込む
+  // 余地は無い（JSは単一スレッド）。古いliveIdでは絶対に購読しない。
+  a = abort();
+  if (a) return a;
   deps.subscribe();
-  return "ready";
+
+  // markRuntimeReady（＝司会進行環境の「構造」が確立できた）は、進行critical の
+  // children/answers/scores が applied または unconfirmed のときに行う。
+  // - applied     ：この hydrate が最新データを反映した
+  // - unconfirmed ：取得失敗だが購読は張った。以降は per-tick の軽量再試行
+  //                 （retryChildrenSnapshot 等）で追いつく＝毎回 full recovery を
+  //                 走らせ直す必要はない。
+  // superseded / target-changed（別の取得が責任を持つ）が混じっていたら markReady
+  // せず「not-ready」で戻す（呼び出し側は凍結を続け、完全復旧を再試行する）。
+  const settled = (o: SliceLoadOutcome) => o === "applied" || o === "unconfirmed";
+  const structureOk = settled(children) && settled(answers) && settled(scores);
+  const progressionReady =
+    children === "applied" && answers === "applied" && scores === "applied";
+  if (structureOk) deps.markRuntimeReady();
+  return progressionReady ? "ready" : "not-ready";
+}
+
+// ===== 完全復旧の所有権コーディネータ（init / retry / 未初期化refresh を1本化）=====
+//
+// 完全復旧の最中に別経路（手動refresh 等）が走ると、liveGate だけ進めて hydrate を
+// 中途半端に superseded で終わらせ、しかし liveSnapshotConfirmed=true にしてしまい、
+// 購読もタイマー復元もされないまま放置される、という穴があった。
+// このコーディネータは「同じ世代の完全復旧が進行中なら、その Promise へ合流する」
+// ことを保証する（新しく並行して走らせない）。stop 時は invalidate() で所有権
+// トークンを進め、進行中の hydrate の ownsRecovery() を false にする。
+export interface RecoveryCoordinator {
+  /** 完全復旧を（必要なら開始して）返す。同一世代の進行中があればそれへ合流する。 */
+  run: (
+    generation: number,
+    task: (generation: number, token: number) => Promise<HostHydrationOutcome>,
+  ) => Promise<HostHydrationOutcome>;
+  /** 進行中トークンを無効化する（stopHostProgress から呼ぶ）。 */
+  invalidate: () => void;
+  /** そのトークンが今も所有者か（hydrate 内の再確認用）。 */
+  owns: (token: number) => boolean;
+  /** 現在進行中か（診断・テスト用）。 */
+  inFlight: () => boolean;
+}
+
+export function createRecoveryCoordinator(): RecoveryCoordinator {
+  let inFlight: Promise<HostHydrationOutcome> | null = null;
+  let inFlightGeneration = Number.NaN;
+  let token = 0;
+  return {
+    run(generation, task) {
+      if (inFlight && inFlightGeneration === generation) return inFlight;
+      const myToken = ++token;
+      inFlightGeneration = generation;
+      const p = task(generation, myToken).finally(() => {
+        // 自分がまだ現行トークンのときだけ後始末する（invalidate や新しい run に
+        // 追い越されていたら触らない）。
+        if (token === myToken) {
+          inFlight = null;
+          inFlightGeneration = Number.NaN;
+        }
+      });
+      inFlight = p;
+      return p;
+    },
+    invalidate() {
+      token += 1;
+      inFlight = null;
+      inFlightGeneration = Number.NaN;
+    },
+    owns(t) {
+      return t === token;
+    },
+    inFlight() {
+      return inFlight !== null;
+    },
+  };
+}
+
+// ===== 自動進行の凍結判定（await をまたいだ後の再確認に使う純粋述語）=====
+
+export interface ProgressGuardState {
+  /** advanceIfDue に入った時点で捕捉した世代。 */
+  tickGeneration: number;
+  /** 現在の進行世代（stopHostProgress で +1）。 */
+  currentGeneration: number;
+  liveSnapshotConfirmed: boolean;
+  /** 現在 state の live.id。 */
+  liveId: string | null;
+  /** この tick が対象としている live.id（await をまたいで変わっていないか）。 */
+  tickLiveId: string | null;
+  /** 司会進行環境（購読・tickTimer・answeringタイマー）が確立済みか。 */
+  runtimeEstablished: boolean;
+  /** children のスナップショット対象 liveId。 */
+  childrenSnapshotLiveId: string | null;
+  answersSnapshot: AnswersSnapshotKey | null;
+  /** 現在 state の live.current_turn_id。 */
+  turnId: string | null;
+}
+
+export function progressionFrozen(s: ProgressGuardState, requireAnswers: boolean): boolean {
+  if (s.tickGeneration !== s.currentGeneration) return true; // stopHostProgressされた
+  if (!s.liveSnapshotConfirmed) return true; // live同期中／未確認
+  if (!s.liveId || s.liveId !== s.tickLiveId) return true; // await中に対象ライブが変わった
+  if (!s.runtimeEstablished) return true; // 購読／タイマー未確立
+  if (!childrenSnapshotReady(s.childrenSnapshotLiveId, s.liveId)) return true; // children同期中
+  if (requireAnswers && !answersSnapshotMatches(s.answersSnapshot, s.liveId, s.turnId)) return true;
+  return false;
+}
+
+// ボット採点insertの可否：凍結していない かつ 表示中の回答がある かつ その回答の
+// scoresSnapshot が確認済み（古いscoresで採点しない）のときだけ true。
+export function botScoringAllowed(
+  frozen: boolean,
+  scoresSnapshot: ScoresSnapshotKey | null,
+  liveId: string | null,
+  turnId: string | null,
+  activeAnswerId: string | null,
+): boolean {
+  if (frozen) return false;
+  if (!activeAnswerId) return false;
+  return scoresSnapshotMatches(scoresSnapshot, liveId, turnId, activeAnswerId);
+}
+
+// Promise.all 内の各ボットが insert する直前の最終確認：凍結していない かつ
+// await 前と同じ live.id / current_turn_id のまま のときだけ true。
+export function insertGuardPasses(deps: {
+  frozen: () => boolean;
+  currentLiveId: () => string | null;
+  currentTurnId: () => string | null;
+  expectedLiveId: string;
+  expectedTurnId: string;
+}): boolean {
+  if (deps.frozen()) return false;
+  if (deps.currentLiveId() !== deps.expectedLiveId) return false;
+  if (deps.currentTurnId() !== deps.expectedTurnId) return false;
+  return true;
+}
+
+// ===== advanceIfDue の「await ごとに凍結を再確認しながら順に実行」する共通フロー =====
+//
+// 各ステップの実行「前」に frozen() を確認し、凍結していれば以降のステップを実行
+// しない（processRevealQueue の await 中に未確認になったら runBotBehavior を呼ばない、
+// など）。最後のステップの後にも確認し、そのまま次（フェーズ遷移RPC）へ進んでよいかを返す。
+export interface GuardedStep {
+  name: string;
+  run: () => Promise<void>;
+}
+
+export async function runGuardedSteps(
+  frozen: () => boolean,
+  steps: GuardedStep[],
+): Promise<{ ran: string[]; blockedAt: string | null }> {
+  const ran: string[] = [];
+  for (const step of steps) {
+    if (frozen()) return { ran, blockedAt: step.name };
+    await step.run();
+    ran.push(step.name);
+  }
+  if (frozen()) return { ran, blockedAt: "after-last" };
+  return { ran, blockedAt: null };
 }
