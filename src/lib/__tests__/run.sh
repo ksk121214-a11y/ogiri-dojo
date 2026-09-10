@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# src/lib/内の純粋関数（answeringCue.ts・liveHostChildrenSnapshot.ts等）の
+# src/lib/内の純粋関数（answeringCue.ts・liveHostSnapshots.ts等）の
 # 検証スクリプトをまとめて実行するワンコマンドランナー。
 #
 # このリポジトリには自動テストランナー(vitest/jest等)が導入されていないため、
@@ -33,7 +33,7 @@ cd "$REPO_ROOT"
 # 検証スクリプトが依存するsrc/lib/内の純粋関数ソース。
 SOURCE_FILES=(
   "$SCRIPT_DIR/../answeringCue.ts"
-  "$SCRIPT_DIR/../liveHostChildrenSnapshot.ts"
+  "$SCRIPT_DIR/../liveHostSnapshots.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
