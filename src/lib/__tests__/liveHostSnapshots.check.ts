@@ -1,187 +1,252 @@
-// src/lib/liveHostSnapshots.ts の純粋関数の検証スクリプト。
+// src/lib/liveHostSnapshots.ts の純粋関数＋非同期並行制御の検証スクリプト。
 // 実行方法は src/lib/__tests__/run.sh 参照。
+// 遅延Promiseで「古い取得R1が新しい取得R2の後に完了する」等の非同期順序を再現する。
 import assert from "node:assert/strict";
 
 import {
   answersSnapshotMatches,
   childrenSnapshotReady,
-  resolveAnswersSnapshot,
-  resolveChildrenSnapshot,
+  createSliceGate,
+  loadSnapshotSlice,
   shouldReleaseInitInFlight,
+  shouldRetryNow,
 } from "../liveHostSnapshots";
 
-interface Children {
-  turns: string[];
-  groups: string[];
-}
-const EMPTY: Children = { turns: [], groups: [] };
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// ========== resolveChildrenSnapshot ==========
+async function main() {
 
-// 1: 取得成功 → 新データを採用し、そのliveIdについてready。
+// ========== createSliceGate ==========
 {
-  const r = resolveChildrenSnapshot<Children>({
-    fetchOk: true,
-    freshChildren: { turns: ["t1"], groups: ["g1"] },
-    targetLiveId: "L1",
-    prevChildren: { turns: ["old"], groups: [] },
-    prevSnapshotLiveId: "L1",
-    emptyChildren: EMPTY,
-  });
-  assert.deepEqual(r.children, { turns: ["t1"], groups: ["g1"] });
-  assert.equal(r.snapshotLiveId, "L1");
-  console.log("PASS: children-1（取得成功で新データ採用・ready）");
+  const gate = createSliceGate();
+  const t1 = gate.begin();
+  const t2 = gate.begin();
+  assert.equal(gate.isCurrent(t1), false, "後から begin された t2 がある以上 t1 は最新でない");
+  assert.equal(gate.isCurrent(t2), true);
+  assert.equal(gate.current(), 2);
+  const t3 = gate.begin();
+  assert.equal(gate.isCurrent(t2), false);
+  assert.equal(gate.isCurrent(t3), true);
+  console.log("PASS: gate（後から begin されたら古いトークンは isCurrent=false）");
 }
 
-// 2（必須テスト1相当）: 同じライブで取得失敗 → 既存turns/groupsを空にしない。
-{
-  const r = resolveChildrenSnapshot<Children>({
-    fetchOk: false,
-    freshChildren: EMPTY,
-    targetLiveId: "L1",
-    prevChildren: { turns: ["t1", "t2"], groups: ["g1"] },
-    prevSnapshotLiveId: "L1",
-    emptyChildren: EMPTY,
-  });
-  assert.deepEqual(r.children, { turns: ["t1", "t2"], groups: ["g1"] });
-  assert.equal(r.snapshotLiveId, "L1");
-  console.log("PASS: children-2（同じライブの取得失敗は既存turns/groupsを維持）");
-}
-
-// 3（必須テスト8・9相当）: 別ライブで取得失敗 → 前ライブのデータを流用せず空・未確認。
-{
-  const r = resolveChildrenSnapshot<Children>({
-    fetchOk: false,
-    freshChildren: EMPTY,
-    targetLiveId: "L2",
-    prevChildren: { turns: ["from-L1"], groups: ["g-L1"] },
-    prevSnapshotLiveId: "L1",
-    emptyChildren: EMPTY,
-  });
-  assert.deepEqual(r.children, EMPTY);
-  assert.equal(r.snapshotLiveId, null);
-  console.log("PASS: children-3（別ライブの取得失敗は前ライブのデータを流用しない）");
-}
-
-// 4: 一度も確認できていない（prevSnapshotLiveId=null）まま取得失敗 → 未確認のまま。
-{
-  const r = resolveChildrenSnapshot<Children>({
-    fetchOk: false,
-    freshChildren: EMPTY,
-    targetLiveId: "L1",
-    prevChildren: EMPTY,
-    prevSnapshotLiveId: null,
-    emptyChildren: EMPTY,
-  });
-  assert.equal(r.snapshotLiveId, null);
-  console.log("PASS: children-4（初回取得失敗中は未確認のまま＝自動進行しない）");
-}
-
-// childrenSnapshotReady
+// ========== childrenSnapshotReady / answersSnapshotMatches ==========
 {
   assert.equal(childrenSnapshotReady("L1", "L1"), true);
   assert.equal(childrenSnapshotReady("L1", "L2"), false);
   assert.equal(childrenSnapshotReady(null, "L1"), false);
   assert.equal(childrenSnapshotReady("L1", null), false);
-  assert.equal(childrenSnapshotReady("L1", undefined), false);
-  console.log("PASS: childrenSnapshotReady（liveId一致時のみtrue）");
-}
-
-// ========== resolveAnswersSnapshot ==========
-type Answers = string[];
-
-// 5: 取得成功 → 新データを書き込み、(liveId,turnId)について確認済み。
-{
-  const r = resolveAnswersSnapshot<Answers>({
-    fetchOk: true,
-    freshAnswers: ["a1", "a2"],
-    targetLiveId: "L1",
-    targetTurnId: "T1",
-    prevAnswers: ["old"],
-    prevSnapshot: null,
-    emptyAnswers: [],
-  });
-  assert.equal(r.writeAnswers, true);
-  assert.deepEqual(r.answers, ["a1", "a2"]);
-  assert.deepEqual(r.snapshot, { liveId: "L1", turnId: "T1" });
-  console.log("PASS: answers-5（取得成功で新データ書き込み・確認済み）");
-}
-
-// 6（必須テスト1の核心）: 同じ(liveId,turnId)で取得失敗 → answersを書き込まない
-// （＝既存の未確定回答を空で潰さない）、確認済みは維持。
-{
-  const r = resolveAnswersSnapshot<Answers>({
-    fetchOk: false,
-    freshAnswers: [],
-    targetLiveId: "L1",
-    targetTurnId: "T1",
-    prevAnswers: ["unresolved-answer"],
-    prevSnapshot: { liveId: "L1", turnId: "T1" },
-    emptyAnswers: [],
-  });
-  assert.equal(r.writeAnswers, false);
-  assert.deepEqual(r.snapshot, { liveId: "L1", turnId: "T1" });
-  console.log("PASS: answers-6（同じターンの取得失敗はanswersを書き込まない・確認済み維持）");
-}
-
-// 7（必須テスト4の核心）: 別ターンで取得失敗 → answersを書き込まず、未確認に戻す。
-{
-  const r = resolveAnswersSnapshot<Answers>({
-    fetchOk: false,
-    freshAnswers: [],
-    targetLiveId: "L1",
-    targetTurnId: "T2",
-    prevAnswers: ["answers-of-T1"],
-    prevSnapshot: { liveId: "L1", turnId: "T1" },
-    emptyAnswers: [],
-  });
-  assert.equal(r.writeAnswers, false);
-  assert.equal(r.snapshot, null);
-  console.log("PASS: answers-7（別ターンの取得失敗は未確認に戻す＝古いターンで進行しない）");
-}
-
-// 8: 別ライブで取得失敗 → 未確認に戻す。
-{
-  const r = resolveAnswersSnapshot<Answers>({
-    fetchOk: false,
-    freshAnswers: [],
-    targetLiveId: "L2",
-    targetTurnId: "T1",
-    prevAnswers: ["answers-of-L1"],
-    prevSnapshot: { liveId: "L1", turnId: "T1" },
-    emptyAnswers: [],
-  });
-  assert.equal(r.writeAnswers, false);
-  assert.equal(r.snapshot, null);
-  console.log("PASS: answers-8（別ライブの取得失敗は未確認に戻す）");
-}
-
-// answersSnapshotMatches
-{
   assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T1"), true);
   assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", "T2"), false);
   assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L2", "T1"), false);
   assert.equal(answersSnapshotMatches(null, "L1", "T1"), false);
-  assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, "L1", null), false);
-  assert.equal(answersSnapshotMatches({ liveId: "L1", turnId: "T1" }, null, "T1"), false);
-  console.log("PASS: answersSnapshotMatches（liveId・turnId両方一致時のみtrue）");
+  console.log("PASS: childrenSnapshotReady / answersSnapshotMatches");
+}
+
+// ========== shouldRetryNow ==========
+{
+  assert.equal(shouldRetryNow(false, 0, 5000, 2000), true, "非in-flightかつ間隔経過→再試行OK");
+  assert.equal(shouldRetryNow(true, 0, 5000, 2000), false, "in-flight中は再試行しない");
+  assert.equal(shouldRetryNow(false, 4000, 5000, 2000), false, "前回から2秒未満は再試行しない");
+  assert.equal(shouldRetryNow(false, 3000, 5000, 2000), true, "前回からちょうど2秒で再試行OK");
+  console.log("PASS: shouldRetryNow（single-flight＋最小間隔）");
+}
+
+// ========== loadSnapshotSlice：非同期順序の再現 ==========
+
+// 必須テスト1：同じターンのanswers再取得失敗時、表示データは維持されるが確認状態は未確認になる。
+{
+  const gate = createSliceGate();
+  let displayed = ["existing-answer"]; // 画面表示用（空にしてはいけない）
+  let snapshot: { liveId: string; turnId: string } | null = { liveId: "L1", turnId: "T1" };
+  const outcome = await loadSnapshotSlice<string[]>({
+    gate,
+    fetch: async () => {
+      await delay(5);
+      return { ok: false, data: [] }; // 取得失敗
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      displayed = d;
+    },
+    markUnconfirmed: () => {
+      snapshot = null;
+    },
+  });
+  assert.equal(outcome, "unconfirmed");
+  assert.deepEqual(displayed, ["existing-answer"], "取得失敗時、表示データは維持される");
+  assert.equal(snapshot, null, "取得失敗時、確認状態は未確認へ戻る");
+  console.log("PASS: async-1（同じターンの取得失敗：表示は維持、確認状態は未確認）");
+}
+
+// 必須テスト6：古いanswers取得R1が、新しい取得R2より後に完了してもR2を上書きしない。
+{
+  const gate = createSliceGate();
+  let state = "initial";
+  // R1（遅い・50ms）
+  const r1 = loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(50);
+      return { ok: true, data: "R1-value" };
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      state = d;
+    },
+    markUnconfirmed: () => {},
+  });
+  await delay(5);
+  // R2（速い・10ms、R1の後に開始）
+  const r2 = loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(10);
+      return { ok: true, data: "R2-value" };
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      state = d;
+    },
+    markUnconfirmed: () => {},
+  });
+  const [o1, o2] = await Promise.all([r1, r2]);
+  assert.equal(o2, "applied");
+  assert.equal(o1, "superseded", "後から開始したR2がある以上、R1は superseded");
+  assert.equal(state, "R2-value", "古いR1の完了結果が新しいR2を巻き戻さない");
+  console.log("PASS: async-6（古い取得R1が新しいR2を上書きしない）");
+}
+
+// 必須テスト6b：R1が失敗、R2が成功。R1完了時に markUnconfirmed してはいけない（superseded）。
+{
+  const gate = createSliceGate();
+  let snapshot: string | null = "confirmed";
+  const r1 = loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(50);
+      return { ok: false, data: "" };
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      snapshot = d;
+    },
+    markUnconfirmed: () => {
+      snapshot = null;
+    },
+  });
+  await delay(5);
+  const r2 = loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(10);
+      return { ok: true, data: "R2-confirmed" };
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      snapshot = d;
+    },
+    markUnconfirmed: () => {
+      snapshot = null;
+    },
+  });
+  await Promise.all([r1, r2]);
+  assert.equal(snapshot, "R2-confirmed", "遅れて失敗したR1が、成功したR2の確認済み状態を未確認へ戻さない");
+  console.log("PASS: async-6b（遅れて失敗した古い取得は、新しい成功結果を未確認化しない）");
+}
+
+// 必須テスト9：取得中に対象（ターン）が切り替わったら、その結果は今の対象に適用しない。
+{
+  const gate = createSliceGate();
+  let currentTurn = "T1";
+  let applied: string | null = null;
+  const outcome = await loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(10);
+      currentTurn = "T2"; // 取得中にターンが進んだ
+      return { ok: true, data: "T1-answers" };
+    },
+    stillCurrent: () => currentTurn === "T1",
+    applyFresh: (d) => {
+      applied = d;
+    },
+    markUnconfirmed: () => {},
+  });
+  assert.equal(outcome, "target-changed");
+  assert.equal(applied, null, "取得中にターンが変わったら、その結果を今のターンへ適用しない");
+  console.log("PASS: async-9（取得中の対象切り替え：古い対象の結果を適用しない）");
+}
+
+// 必須テスト10：stop相当（gate.begin()）の後に古い取得が完了しても state を復活させない。
+{
+  const gate = createSliceGate();
+  let state = "before-stop";
+  const inFlight = loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => {
+      await delay(30);
+      return { ok: true, data: "old-result" };
+    },
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      state = d;
+    },
+    markUnconfirmed: () => {
+      state = "unconfirmed";
+    },
+  });
+  await delay(5);
+  gate.begin(); // stopHostProgress 相当：進行中トークンを無効化
+  const outcome = await inFlight;
+  assert.equal(outcome, "superseded");
+  assert.equal(state, "before-stop", "stop後に古い取得が完了しても state を書き換えない");
+  console.log("PASS: async-10（stop後の古い取得完了は state を復活させない）");
+}
+
+// 必須テスト11：通信回復後はデッドロックせず反映される（超えていないトークンなら applied）。
+{
+  const gate = createSliceGate();
+  let state = "stale";
+  // 1回目：失敗
+  await loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => ({ ok: false, data: "" }),
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      state = d;
+    },
+    markUnconfirmed: () => {
+      state = "unconfirmed";
+    },
+  });
+  assert.equal(state, "unconfirmed");
+  // 2回目：回復
+  const outcome = await loadSnapshotSlice<string>({
+    gate,
+    fetch: async () => ({ ok: true, data: "recovered" }),
+    stillCurrent: () => true,
+    applyFresh: (d) => {
+      state = d;
+    },
+    markUnconfirmed: () => {},
+  });
+  assert.equal(outcome, "applied");
+  assert.equal(state, "recovered", "通信回復後は正常に反映される（デッドロックしない）");
+  console.log("PASS: async-11（通信回復後はデッドロックせず反映）");
 }
 
 // ========== shouldReleaseInitInFlight ==========
-// 必須テスト10: stop中の旧init Aが終了しても、新init BのinitInFlightをnullにしない。
 {
-  const promiseA = Symbol("A");
-  const promiseB = Symbol("B");
-  // Aが実行中→stopでinitInFlight=null→Bが開始しinitInFlight=B、の後にAのfinallyが走る想定。
-  assert.equal(shouldReleaseInitInFlight<symbol | null>(promiseB, promiseA), false);
-  console.log("PASS: initInFlight-10（旧initのfinallyは新initのinitInFlightを消さない）");
-}
-// 自分が今もinitInFlightなら片付けてよい。
-{
-  const promiseA = Symbol("A");
-  assert.equal(shouldReleaseInitInFlight<symbol | null>(promiseA, promiseA), true);
-  assert.equal(shouldReleaseInitInFlight<symbol | null>(null, promiseA), false);
-  console.log("PASS: initInFlight（自分が現行のときだけ解放）");
+  const a = Symbol("A");
+  const b = Symbol("B");
+  assert.equal(shouldReleaseInitInFlight<symbol | null>(b, a), false, "旧initのfinallyは新init(B)を消さない");
+  assert.equal(shouldReleaseInitInFlight<symbol | null>(a, a), true, "自分が現行なら解放してよい");
+  assert.equal(shouldReleaseInitInFlight<symbol | null>(null, a), false);
+  console.log("PASS: shouldReleaseInitInFlight");
 }
 
-console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");
+  console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");
+}
+
+void main();

@@ -18,10 +18,12 @@ import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemo
 import {
   answersSnapshotMatches,
   childrenSnapshotReady,
-  resolveAnswersSnapshot,
-  resolveChildrenSnapshot,
+  createSliceGate,
+  loadSnapshotSlice,
   shouldReleaseInitInFlight,
+  shouldRetryNow,
   type AnswersSnapshotKey,
+  type SliceLoadOutcome,
 } from "@/lib/liveHostSnapshots";
 import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { supabase } from "@/lib/supabase";
@@ -92,6 +94,11 @@ interface LiveHostState {
   // processRevealQueue・resolveIfDue・syncAnsweringPauseの再開・
   // answering→group_result遷移を一切行わず、一定間隔で再取得だけ試みる。
   answersSnapshot: AnswersSnapshotKey | null;
+  // 2026-09-11（再レビュー対応・問題3）：ライブ本体(lives行)の最新状態を
+  // 確認できているか。fetchActiveLive/fetchLiveRowの取得失敗中はfalseにし、
+  // 表示用の古いliveは残しつつ、advanceIfDueの自動進行を凍結する
+  // （読み取り再試行だけを一定間隔で行い、取得成功でtrueへ戻す）。
+  liveSnapshotConfirmed: boolean;
   // 事故防止・操作性改善：最後に正常に最新状態を取得できた時刻（refresh()・init()で更新）。
   lastRefreshedAt: string | null;
 
@@ -173,9 +180,33 @@ let pendingRevealAt: number | null = null; // 次の回答をrevealする予定�
 // 実際の経過時間(dt)を使って自前で減算し、busy中は減らさない。
 let answeringRemainingMsTrue: number | null = null;
 let lastAnsweringTickAt: number | null = null; // 上のdt計算用
-// 2026-09-10（再レビュー対応）：現在ターンのanswersスナップショットが未確認の間、
-// advanceIfDueが毎tick（500ms）再取得を試みる際の二重実行防止フラグ。
+
+// 2026-09-11（再レビュー対応）：スライスごとの取得世代ゲート。
+// 同じ対象（live/children/answers/resolved）に対する取得が並行した場合、
+// より新しい取得が始まった後は、古い取得の完了結果を一切反映しない
+// （liveId/turnIdの一致だけでは、古いR1が新しいR2の後に完了してR2を巻き戻せる）。
+// stopHostProgress()でも begin() して、進行中の全取得のトークンを無効化する。
+const liveGate = createSliceGate();
+const childrenGate = createSliceGate();
+const answersGate = createSliceGate();
+const resolvedGate = createSliceGate();
+
+// 2026-09-11（再レビュー対応）：未確認スライスの読み取り再試行の
+// single-flight フラグと最小間隔（tickは500msだが再取得は最短2秒間隔に絞る）。
+let liveRetryInFlight = false;
+let liveRetryAt = 0;
+let childrenRetryInFlight = false;
+let childrenRetryAt = 0;
 let answersRetryInFlight = false;
+let answersRetryAt = 0;
+const SNAPSHOT_RETRY_INTERVAL_MS = 2_000;
+
+// authoritative（DB書き込み結果やRPCの戻り値など、今この瞬間に確実に最新と分かる
+// live行）を反映する。ゲートを begin() して、進行中の古いlive読み取りを無効化する。
+function applyAuthoritativeLive(row: LiveRow) {
+  liveGate.begin();
+  useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
+}
 const botCooldownUntil = new Map<string, number>(); // 参加者ID(ボット) → 次の行動を許可する時刻
 // 回答ID → その回答をボット審査員全員が満点(3点)にする「パーフェクト回」かどうか。
 // ボットは1tickごとに低確率で個別に採点するため、抽選を毎回独立にすると全員一致で
@@ -193,6 +224,16 @@ function cleanupChannels() {
   for (const ch of channels) supabase.removeChannel(ch);
   channels = [];
   tsukkomiChannel = null;
+}
+
+// 500msの進行tickタイマーを（重複なく）1本だけ確実に張る。指定世代が既に
+// 古い（stopHostProgressされた）場合は張らない。
+function ensureTickTimer(generation: number) {
+  if (generation !== progressGeneration) return;
+  if (tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(() => {
+    void advanceIfDue();
+  }, 500);
 }
 
 // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
@@ -326,18 +367,59 @@ async function fetchScoresForAnswers(
   return { ok: true, data: map };
 }
 
+// children（participants/groups/topics/turns）と表示名解決用profilesを、
+// 1スライスとしてまとめて取得する。loadSnapshotSliceのfetchに渡す形。
+type ChildrenPayload = {
+  participants: ParticipantRow[];
+  groups: GroupRow[];
+  topics: TopicRow[];
+  turns: TurnRow[];
+  profiles: ProfileRow[];
+};
+async function fetchChildrenWithProfiles(
+  liveId: string,
+): Promise<{ ok: boolean; data: ChildrenPayload }> {
+  const result = await fetchLiveChildren(liveId);
+  if (!result.ok) {
+    return { ok: false, data: { participants: [], groups: [], topics: [], turns: [], profiles: [] } };
+  }
+  const profiles = await fetchProfilesFor(result.data.participants);
+  return { ok: true, data: { ...result.data, profiles } };
+}
+
+// 確定済み回答ログ（resolvedAnswers＋その採点内訳）を1スライスとしてまとめて取得する。
+type ResolvedPayload = {
+  resolvedAnswers: AnswerRow[];
+  resolvedScoresByAnswer: Record<string, ScoreRow[]>;
+};
+async function fetchResolvedWithScores(
+  liveId: string,
+): Promise<{ ok: boolean; data: ResolvedPayload }> {
+  const ra = await fetchResolvedAnswersForLive(liveId);
+  if (!ra.ok) return { ok: false, data: { resolvedAnswers: [], resolvedScoresByAnswer: {} } };
+  const rs = await fetchScoresForAnswers(ra.data.map((a) => a.id));
+  if (!rs.ok) {
+    return { ok: false, data: { resolvedAnswers: ra.data, resolvedScoresByAnswer: {} } };
+  }
+  return { ok: true, data: { resolvedAnswers: ra.data, resolvedScoresByAnswer: rs.data } };
+}
+
 async function subscribeLiveChannels(liveId: string) {
   cleanupChannels();
 
-  const refetchChildren = async () => {
-    const result = await fetchLiveChildren(liveId);
-    if (!result.ok) return; // 取得失敗時は既存stateを維持する（次のRealtimeイベント/再接続で再試行される）
-    // このライブがまだstateのliveと一致している場合だけ反映する（購読解除〜再購読の
-    // 間に別ライブへ切り替わっていたら古い結果は捨てる）。
-    if (useLiveHostStore.getState().live?.id !== liveId) return;
-    const profiles = await fetchProfilesFor(result.data.participants);
-    useLiveHostStore.setState({ ...result.data, childrenSnapshotLiveId: liveId, profiles });
-  };
+  // 2026-09-11（再レビュー対応）：Realtime起点の再取得も、initやrefreshや別の
+  // Realtimeイベントの取得と並行しうる。スライスゲート（childrenGate/liveGate）で
+  // 新旧を判定し、古い結果が新しい状態を巻き戻さないようにする。取得失敗時は
+  // 表示データは維持しつつ確認状態だけ未確認へ戻す（loadSnapshotSlice参照）。
+  const refetchChildren = () =>
+    loadSnapshotSlice<ChildrenPayload>({
+      gate: childrenGate,
+      fetch: () => fetchChildrenWithProfiles(liveId),
+      stillCurrent: () => useLiveHostStore.getState().live?.id === liveId,
+      applyFresh: ({ profiles, ...children }) =>
+        useLiveHostStore.setState({ ...children, profiles, childrenSnapshotLiveId: liveId }),
+      markUnconfirmed: () => useLiveHostStore.setState({ childrenSnapshotLiveId: null }),
+    });
 
   const refetchAnswersAndScores = resyncAnswersAndScoresForCurrentLive;
 
@@ -345,11 +427,15 @@ async function subscribeLiveChannels(liveId: string) {
   // RPC（begin_game等）や別タブからのlives行の更新は、この購読が無いとRealtimeに
   // 気づけず、司会ブラウザが手動の「最新状態を取得」を押されるまでstate.liveが
   // 古いまま(advanceIfDueがそれを見て自動進行を判断する)になってしまう。
-  const refetchLive = async () => {
-    const result = await fetchLiveRow(liveId);
-    if (!result.ok || !result.data) return; // 取得失敗時は既存stateを維持する
-    useLiveHostStore.setState({ live: result.data });
-  };
+  const refetchLive = () =>
+    loadSnapshotSlice<LiveRow | null>({
+      gate: liveGate,
+      fetch: () => fetchLiveRow(liveId),
+      stillCurrent: () => true, // id=eq.${liveId} で絞っているので常に対象一致
+      applyFresh: (row) =>
+        useLiveHostStore.setState({ live: row ?? null, liveSnapshotConfirmed: true }),
+      markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
+    });
 
   // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す
   // （Realtimeは切断中に起きた変更を後から届けてくれないため）。
@@ -427,39 +513,32 @@ async function subscribeLiveChannels(liveId: string) {
 // current_turn_idが切り替わった直後は、Realtimeイベントを待たずに即座に
 // そのターンぶんのanswers/scoresへ入れ替える（前のターンの古いデータが
 // 一時的にでも残っていると、stillBusy判定を誤らせるため）。
-async function refreshAnswersForTurn(turnId: string | null) {
+async function refreshAnswersForTurn(turnId: string | null): Promise<SliceLoadOutcome> {
   if (!turnId) {
     // 「現在ターンが無い」という確定した状態：answers/scoresを空にし、
-    // answersSnapshotも「該当ターン無し」として無効化する。
+    // answersSnapshotも「該当ターン無し」として無効化する。ここもゲートを
+    // 通し、進行中の古いanswers取得の結果が後から書き戻さないようにする。
+    answersGate.begin();
     useLiveHostStore.setState({ answers: [], scores: [], answersSnapshot: null });
-    return;
+    return "applied";
   }
   const liveId = useLiveHostStore.getState().live?.id ?? null;
-  const result = await fetchAnswersForTurn(turnId);
-  // 2026-09-09/10（再レビュー対応）：この取得は非同期のため、完了する頃には既に
-  // 別のライブ・別のターンへ進んでいる可能性がある。取得を開始したliveId/turnIdが、
-  // 今のlive.id/current_turn_idと一致する場合だけ反映する（一致しなければ古い
-  // 取得結果なので捨てる。次のRealtime/tickでの取得に委ねる）。
-  const after = useLiveHostStore.getState();
-  if (!liveId || after.live?.id !== liveId || after.live?.current_turn_id !== turnId) return;
-  // 取得失敗時はanswers/scoresを空で上書きしない（「回答0件」と誤認して
-  // processRevealQueue/resolveIfDue/syncAnsweringPauseが誤動作しうる）。
-  // answersSnapshotだけを更新し、同じ(liveId,turnId)についての既存の
-  // 正常取得結果があればそれを「確認済み」として維持、無ければnull（未確認）に戻す。
-  const resolved = resolveAnswersSnapshot({
-    fetchOk: result.ok,
-    freshAnswers: result.data,
-    targetLiveId: liveId,
-    targetTurnId: turnId,
-    prevAnswers: after.answers,
-    prevSnapshot: after.answersSnapshot,
-    emptyAnswers: [] as AnswerRow[],
+  if (!liveId) return "target-changed";
+  // 2026-09-11（再レビュー対応）：スライスゲートで新旧を判定。より新しいanswers
+  // 取得が始まっていれば、この（古い）結果は一切反映しない（superseded）。
+  // 取得成功時のみ answers を差し替えて確認済みにし、取得失敗時は表示中の
+  // answersは維持しつつ answersSnapshot だけ null（未確認）へ戻す。
+  return loadSnapshotSlice<AnswerRow[]>({
+    gate: answersGate,
+    fetch: () => fetchAnswersForTurn(turnId),
+    stillCurrent: () => {
+      const s = useLiveHostStore.getState();
+      return s.live?.id === liveId && s.live?.current_turn_id === turnId;
+    },
+    applyFresh: (data) =>
+      useLiveHostStore.setState({ answers: data, scores: [], answersSnapshot: { liveId, turnId } }),
+    markUnconfirmed: () => useLiveHostStore.setState({ answersSnapshot: null }),
   });
-  if (resolved.writeAnswers) {
-    useLiveHostStore.setState({ answers: resolved.answers, scores: [], answersSnapshot: resolved.snapshot });
-  } else {
-    useLiveHostStore.setState({ answersSnapshot: resolved.snapshot });
-  }
 }
 
 // 2026-09-09（再レビュー対応）：processRevealQueue/resolveIfDueが「条件付き
@@ -491,7 +570,9 @@ async function updateLive(id: string, patch: Partial<LiveRow>) {
     .select()
     .single();
   if (!error && data) {
-    useLiveHostStore.setState({ live: data as LiveRow });
+    // 直前に自分が書き込んだ authoritative な行。進行中の古いlive読み取りを
+    // 無効化しつつ反映し、liveSnapshotConfirmed も true に戻す。
+    applyAuthoritativeLive(data as LiveRow);
   } else if (error) {
     // ここが失敗すると進行そのものが止まってしまう（例：フェーズ遷移とマイグレーション
     // 未適用の列を同じ更新に混ぜてしまい、UPDATE全体が失敗する等）。エラーが黙って
@@ -535,15 +616,20 @@ async function updateLiveIfPhase(
     // 0行更新：別の管理画面タブが既にこの遷移を行った後の可能性が高いが、
     // Realtimeイベントは切断や通信状況によって取り逃すことがあるため、
     // 「別タブが更新済みのはず」と決めつけてstateを古いまま放置しない。
-    // 必ずDBから対象ライブを再取得し、stateへ反映する（Realtimeの到着だけに
-    // 依存しない）。取得自体に失敗した場合は次のtickで再試行される。
-    const latest = await fetchLiveRow(id);
-    if (latest.ok && latest.data) {
-      useLiveHostStore.setState({ live: latest.data });
-    }
+    // スライスゲート越しに対象ライブを再取得し、より新しい取得に追い越されて
+    // いなければ反映する（Realtimeの到着だけに依存しない）。
+    await loadSnapshotSlice<LiveRow | null>({
+      gate: liveGate,
+      fetch: () => fetchLiveRow(id),
+      stillCurrent: () => useLiveHostStore.getState().live?.id === id,
+      applyFresh: (row) => {
+        if (row) useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
+      },
+      markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
+    });
     return { ok: true, updated: false, error: null };
   }
-  useLiveHostStore.setState({ live: rows[0] });
+  applyAuthoritativeLive(rows[0]);
   return { ok: true, updated: true, error: null };
 }
 
@@ -725,10 +811,16 @@ async function resolveIfDue() {
       // 取り直してローカルstateを追いつかせる（Realtimeの到着だけに依存しない）。
       await resyncAnswersAndScoresForCurrentLive();
       if (state.live) {
-        const latestLive = await fetchLiveRow(state.live.id);
-        if (latestLive.ok && latestLive.data) {
-          useLiveHostStore.setState({ live: latestLive.data });
-        }
+        const liveId = state.live.id;
+        await loadSnapshotSlice<LiveRow | null>({
+          gate: liveGate,
+          fetch: () => fetchLiveRow(liveId),
+          stillCurrent: () => useLiveHostStore.getState().live?.id === liveId,
+          applyFresh: (row) => {
+            if (row) useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
+          },
+          markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
+        });
       }
       return;
     }
@@ -746,6 +838,7 @@ async function resolveIfDue() {
     if (state.live?.current_turn_id) {
       const resolveLiveId = state.live.id;
       const resolveTurnId = state.live.current_turn_id;
+      const answersToken = answersGate.begin();
       const answersResult = await fetchAnswersForTurn(resolveTurnId);
       const resolvedEntry: AnswerRow = {
         ...active,
@@ -755,14 +848,20 @@ async function resolveIfDue() {
         judge_count: eligibleJudges.length,
         laugh_triggered: laughTriggered,
       };
+      // resolvedAnswers（確定ログ）への追記は、この確定処理を実際に行った
+      // 証拠なので常に反映する。answers本体の差し替えは、より新しいanswers取得に
+      // 追い越されておらず、かつ同じ(liveId,turnId)のままの場合だけ行う。
+      const sAfter = useLiveHostStore.getState();
+      const answersStillCurrent =
+        answersGate.isCurrent(answersToken) &&
+        sAfter.live?.id === resolveLiveId &&
+        sAfter.live?.current_turn_id === resolveTurnId;
       useLiveHostStore.setState((s) => ({
-        // 取得に失敗した場合は前のanswers一覧を維持する（[]で上書きしない）。
-        // 確定自体は既にDB更新済みなので、次の再取得で正しい一覧に追いつく。
-        answers: answersResult.ok ? answersResult.data : s.answers,
-        // 取得成功時はこの(liveId,turnId)についてのスナップショットを確認済みに更新する。
-        answersSnapshot: answersResult.ok
-          ? { liveId: resolveLiveId, turnId: resolveTurnId }
-          : s.answersSnapshot,
+        answers: answersStillCurrent && answersResult.ok ? answersResult.data : s.answers,
+        answersSnapshot:
+          answersStillCurrent && answersResult.ok
+            ? { liveId: resolveLiveId, turnId: resolveTurnId }
+            : s.answersSnapshot,
         scores: [],
         // 何らかの理由で既に同じIDが入っていたら追加しない(念のための二重防止)。
         resolvedAnswers: s.resolvedAnswers.some((a) => a.id === resolvedEntry.id)
@@ -918,33 +1017,92 @@ async function runBotBehavior() {
   );
 }
 
+// 2026-09-11（再レビュー対応）：未確認スライスの読み取り再試行。tickは500msだが
+// single-flight＋最小間隔(SNAPSHOT_RETRY_INTERVAL_MS)で過剰アクセスを防ぐ。
+// いずれも取得成功時のみ確認済みへ戻し、失敗中はstateを一切書き換えない。
+function retryLiveSnapshot() {
+  if (!shouldRetryNow(liveRetryInFlight, liveRetryAt, Date.now(), SNAPSHOT_RETRY_INTERVAL_MS)) return;
+  liveRetryInFlight = true;
+  liveRetryAt = Date.now();
+  // 「今この瞬間の進行中(closed以外)ライブ」を再発見する。取得中に別ライブへ
+  // 切り替わっていたら、その新しいライブについて children/answers 側が
+  // 未確認のまま自動進行が凍結され、それぞれの再試行で追いつく。
+  void loadSnapshotSlice<LiveRow | null>({
+    gate: liveGate,
+    fetch: () => fetchActiveLive(),
+    stillCurrent: () => true,
+    applyFresh: (row) => useLiveHostStore.setState({ live: row ?? null, liveSnapshotConfirmed: true }),
+    markUnconfirmed: () => {}, // 既に未確認。次の間隔で再試行する
+  })
+    .catch((e) => console.warn("[useLiveHostStore] ライブ状態の再取得に失敗", e))
+    .finally(() => {
+      liveRetryInFlight = false;
+    });
+}
+
+function retryChildrenSnapshot(liveId: string) {
+  if (!shouldRetryNow(childrenRetryInFlight, childrenRetryAt, Date.now(), SNAPSHOT_RETRY_INTERVAL_MS)) {
+    return;
+  }
+  childrenRetryInFlight = true;
+  childrenRetryAt = Date.now();
+  void loadSnapshotSlice<ChildrenPayload>({
+    gate: childrenGate,
+    fetch: () => fetchChildrenWithProfiles(liveId),
+    stillCurrent: () => useLiveHostStore.getState().live?.id === liveId,
+    applyFresh: ({ profiles, ...children }) =>
+      useLiveHostStore.setState({ ...children, profiles, childrenSnapshotLiveId: liveId }),
+    markUnconfirmed: () => {},
+  })
+    .catch((e) => console.warn("[useLiveHostStore] 組・ターン情報の再取得に失敗", e))
+    .finally(() => {
+      childrenRetryInFlight = false;
+    });
+}
+
+function retryAnswersSnapshot(turnId: string | null) {
+  if (!turnId) return;
+  if (!shouldRetryNow(answersRetryInFlight, answersRetryAt, Date.now(), SNAPSHOT_RETRY_INTERVAL_MS)) {
+    return;
+  }
+  answersRetryInFlight = true;
+  answersRetryAt = Date.now();
+  void refreshAnswersForTurn(turnId)
+    .catch((e) => console.warn("[useLiveHostStore] 現在ターンのanswers再取得に失敗", e))
+    .finally(() => {
+      answersRetryInFlight = false;
+    });
+}
+
 // フェーズ・ターンの自動進行。
 async function advanceIfDue() {
   const state = useLiveHostStore.getState();
+  // 2026-09-11（再レビュー対応・問題3）：lives行の最新状態を確認できない間は
+  // 自動進行を凍結し、読み取り再試行だけを行う（表示用の古いliveは残す）。
+  if (!state.liveSnapshotConfirmed) {
+    retryLiveSnapshot();
+    return;
+  }
   const { live } = state;
   if (!live) return;
-  // 2026-09-09（再レビュー対応）：participants/groups/topics/turnsの有効な
-  // スナップショットを一度も取得できていない間は、自動進行を一切行わない。
+  // 2026-09-09/11（再レビュー対応）：participants/groups/topics/turnsが今のライブに
+  // ついて未確認の間は、自動進行を一切行わず読み取り再試行だけを行う。
   // 特にgroup_result→次ターンの判定はturns/groupsを見て「次のターンがあるか」を
-  // 決めるため、一時的な取得失敗でturns/groupsが空のまま進行してしまうと、
-  // 残りの組を飛ばしてfinal_resultへ誤って進む恐れがある（詳細はinit()参照）。
-  if (!childrenSnapshotReady(state.childrenSnapshotLiveId, live.id)) return;
+  // 決めるため、一時的な取得失敗でturns/groupsが空のまま進行すると、残りの組を
+  // 飛ばしてfinal_resultへ誤って進む恐れがある。
+  if (!childrenSnapshotReady(state.childrenSnapshotLiveId, live.id)) {
+    retryChildrenSnapshot(live.id);
+    return;
+  }
 
   if (live.current_phase === "answering") {
-    // 2026-09-10（再レビュー対応）：現在ターンのanswersが「取得失敗による空」なのか
+    // 2026-09-10/11（再レビュー対応）：現在ターンのanswersが「取得失敗による空」なのか
     // 「本当に0件」なのか区別できない状態（answersSnapshotが今のlive/turnと不一致）
     // では、回答時間の減算・processRevealQueue・resolveIfDue・syncAnsweringPause・
-    // group_result遷移を一切行わない。代わりに一定間隔（毎tick＝最大500ms）で
-    // 再取得だけ試み、確認できたら次tickから通常処理へ戻る。
+    // group_result遷移を一切行わない。single-flight＋最小間隔で再取得だけ試み、
+    // 確認できたら次tickから通常処理へ戻る。
     if (!answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) {
-      if (live.current_turn_id && !answersRetryInFlight) {
-        answersRetryInFlight = true;
-        void refreshAnswersForTurn(live.current_turn_id)
-          .catch((e) => console.warn("[useLiveHostStore] 現在ターンのanswers再取得に失敗", e))
-          .finally(() => {
-            answersRetryInFlight = false;
-          });
-      }
+      retryAnswersSnapshot(live.current_turn_id);
       return;
     }
 
@@ -975,24 +1133,38 @@ async function advanceIfDue() {
     // 進める直前は必ずDBから直接最新の回答一覧を取得して確認し、state.answersの
     // キャッシュだけに頼らないようにする（ギリギリの回答も必ず表示・評価されてから
     // 次のフェーズに進むようにする）。
+    const dbAnswersToken = latest.current_turn_id ? answersGate.begin() : null;
     const dbAnswersResult = latest.current_turn_id
       ? await fetchAnswersForTurn(latest.current_turn_id)
       : { ok: true as const, data: freshState.answers };
     if (!dbAnswersResult.ok) {
       // 2026-09-03:「回答一覧取得失敗時に『未処理回答なし』と誤認して次フェーズへ
       // 進まない」対応。取得に失敗した場合は「未確認」であって「無い」わけではない
-      // ため、busy扱いにして進行を止め、次のtickで再取得を試みる。
+      // ため、進行を止めて次のtickで再取得を試みる。確認状態も未確認へ戻す。
+      if (latest.current_turn_id && dbAnswersToken !== null && answersGate.isCurrent(dbAnswersToken)) {
+        useLiveHostStore.setState({ answersSnapshot: null });
+      }
       return;
     }
     const dbAnswers = dbAnswersResult.data;
+    // より新しいanswers取得に追い越されておらず、かつ同じlive/turnのままなら、
     // 取得し直した最新の回答をstateへ反映し、この(liveId,turnId)についての
-    // answersSnapshotを確認済みに更新しておく（次tickのガード・processRevealQueue等が
-    // 追いついた状態から続けられるように）。
-    if (latest.current_turn_id) {
+    // answersSnapshotを確認済みに更新する（次tickのガード・processRevealQueue等が
+    // 追いついた状態から続けられるように）。追い越されていれば新しい取得結果に任せる。
+    const dbAnswersFresh =
+      latest.current_turn_id !== null &&
+      dbAnswersToken !== null &&
+      answersGate.isCurrent(dbAnswersToken) &&
+      useLiveHostStore.getState().live?.id === latest.id &&
+      useLiveHostStore.getState().live?.current_turn_id === latest.current_turn_id;
+    if (dbAnswersFresh && latest.current_turn_id) {
       useLiveHostStore.setState({
         answers: dbAnswers,
         answersSnapshot: { liveId: latest.id, turnId: latest.current_turn_id },
       });
+    } else if (latest.current_turn_id) {
+      // 追い越された／対象が変わった：このtickでは遷移まで進めず、次tickに委ねる。
+      return;
     }
     if (isAnsweringBusy(dbAnswers, latest)) {
       return; // 現在表示中の1件・演出シーケンス・未表示の回答が残っている間は待つ
@@ -1034,7 +1206,7 @@ async function advanceIfDue() {
 
     const advanceResult = advanceData as { updated: boolean; live: LiveRow | null };
     if (advanceResult.live) {
-      useLiveHostStore.setState({ live: advanceResult.live });
+      applyAuthoritativeLive(advanceResult.live);
     }
 
     if (advanceResult.updated) {
@@ -1087,7 +1259,7 @@ async function advanceIfDue() {
       live: LiveRow | null;
     };
     if (advanceResult.live) {
-      useLiveHostStore.setState({ live: advanceResult.live });
+      applyAuthoritativeLive(advanceResult.live);
     }
     if (
       advanceResult.updated &&
@@ -1142,6 +1314,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   error: null,
   childrenSnapshotLiveId: null,
   answersSnapshot: null,
+  liveSnapshotConfirmed: false,
   lastRefreshedAt: null,
 
   loadTopicBank: async () => {
@@ -1163,101 +1336,89 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     // 後から（stopされた後に）続きを実行しようとした際、要所でこの値を比較して
     // 中断する（stop後にtickTimer/Realtime channelが復活しないようにするため）。
     const myGeneration = progressGeneration;
+    const stopped = () => myGeneration !== progressGeneration;
     const run = async () => {
-      const prevState = get();
       set({ loading: true, error: null });
       void get().loadTopicBank();
-      const activeLiveResult = await fetchActiveLive();
-      if (myGeneration !== progressGeneration) return; // stopされた
-      if (!activeLiveResult.ok) {
-        // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
-        // 取得失敗を「ライブが無い」と誤認して準備画面に進めると、実際には進行中の
-        // ライブがあるのに気づかず二重に作成しようとする事故につながる。
-        set({
-          loading: false,
-          error: "ライブの状態を取得できませんでした。再読み込みしてください。",
-        });
-        if (tickTimer) clearInterval(tickTimer);
-        tickTimer = setInterval(() => advanceIfDue(), 500);
+
+      // --- live スライス ---
+      // 2026-09-11（再レビュー対応）：各スライスを loadSnapshotSlice で個別に
+      // ゲート越しに反映する。init実行中にRealtimeが新しい状態を反映しても、
+      // init最後の一括setで巻き戻ることがない（古いスライスはゲートで弾かれる）。
+      const liveOutcome = await loadSnapshotSlice<LiveRow | null>({
+        gate: liveGate,
+        fetch: () => fetchActiveLive(),
+        stillCurrent: () => true,
+        applyFresh: (row) => set({ live: row ?? null, liveSnapshotConfirmed: true }),
+        markUnconfirmed: () => set({ liveSnapshotConfirmed: false }),
+      });
+      if (stopped()) return;
+      if (liveOutcome === "unconfirmed") {
+        // ライブ本体の最新状態を確認できない：表示用の古いliveは残し、
+        // advanceIfDueは liveSnapshotConfirmed=false を見て自動進行を凍結。
+        // tickTimerは動かし続け、advanceIfDueが一定間隔で読み取り再試行する。
+        set({ loading: false, error: "ライブの状態を取得できませんでした。しばらくすると自動的に再試行します。" });
+        ensureTickTimer(myGeneration);
         return;
       }
-      const live = activeLiveResult.data;
+
+      const live = get().live;
       if (live) {
-        // 2026-09-09/10（再レビュー対応）：children/answers取得失敗時に無条件に
-        // 空配列で上書きすると、HostProgressControllerがfocus/visibilitychange等の
-        // たびに呼ぶinit()が一時的な通信失敗のたびにturns/groups/answersを空にし、
-        // advanceIfDueが「次のターンが無い」「回答0件」と誤判定してしまう。
-        // どのliveId/turnIdについての正常取得か（snapshot識別情報）で判断する。
-        const childrenResult = await fetchLiveChildren(live.id);
-        const { children, snapshotLiveId: childrenSnapshotLiveId } = resolveChildrenSnapshot({
-          fetchOk: childrenResult.ok,
-          freshChildren: childrenResult.data,
-          targetLiveId: live.id,
-          prevChildren: {
-            participants: prevState.participants,
-            groups: prevState.groups,
-            topics: prevState.topics,
-            turns: prevState.turns,
-          },
-          prevSnapshotLiveId: prevState.childrenSnapshotLiveId,
-          emptyChildren: { participants: [], groups: [], topics: [], turns: [] },
+        const liveId = live.id;
+        // --- children スライス ---
+        const childrenOutcome = await loadSnapshotSlice<ChildrenPayload>({
+          gate: childrenGate,
+          fetch: () => fetchChildrenWithProfiles(liveId),
+          stillCurrent: () => get().live?.id === liveId,
+          applyFresh: ({ profiles, ...children }) =>
+            set({ ...children, profiles, childrenSnapshotLiveId: liveId }),
+          markUnconfirmed: () => set({ childrenSnapshotLiveId: null }),
         });
-        const sameLiveAsBefore = prevState.live?.id === live.id;
-        const profiles = childrenResult.ok
-          ? await fetchProfilesFor(children.participants)
-          : sameLiveAsBefore
-            ? prevState.profiles
-            : [];
-        const answersResult = live.current_turn_id
-          ? await fetchAnswersForTurn(live.current_turn_id)
-          : { ok: true as const, data: [] as AnswerRow[] };
-        const answersResolved = live.current_turn_id
-          ? resolveAnswersSnapshot({
-              fetchOk: answersResult.ok,
-              freshAnswers: answersResult.data,
-              targetLiveId: live.id,
-              targetTurnId: live.current_turn_id,
-              prevAnswers: prevState.answers,
-              prevSnapshot: prevState.answersSnapshot,
-              emptyAnswers: [] as AnswerRow[],
-            })
-          : { answers: [] as AnswerRow[], writeAnswers: true as const, snapshot: null };
-        const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
-        // resolvedAnswers/resolvedScoresByAnswerも、取得失敗時に同じライブについての
-        // 正常な既存値があるなら空へ戻さない。
-        const resolvedAnswers = resolvedAnswersResult.ok
-          ? resolvedAnswersResult.data
-          : sameLiveAsBefore
-            ? prevState.resolvedAnswers
-            : [];
-        const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
-          resolvedAnswers.map((a) => a.id),
-        );
-        if (myGeneration !== progressGeneration) return; // stopされた
-        const anyFailed =
-          !childrenResult.ok ||
-          !answersResult.ok ||
-          !resolvedAnswersResult.ok ||
-          !resolvedScoresByAnswerResult.ok;
-        set((s) => ({
-          live,
-          ...children,
-          childrenSnapshotLiveId,
-          profiles,
-          answers: answersResolved.writeAnswers ? answersResolved.answers : s.answers,
-          answersSnapshot: answersResolved.snapshot,
-          resolvedAnswers,
-          resolvedScoresByAnswer: resolvedScoresByAnswerResult.ok
-            ? resolvedScoresByAnswerResult.data
-            : sameLiveAsBefore
-              ? s.resolvedScoresByAnswer
-              : {},
+        if (stopped()) return;
+
+        // --- answers スライス ---
+        let answersOutcome: SliceLoadOutcome = "applied";
+        const turnId = live.current_turn_id;
+        if (turnId) {
+          answersOutcome = await loadSnapshotSlice<AnswerRow[]>({
+            gate: answersGate,
+            fetch: () => fetchAnswersForTurn(turnId),
+            stillCurrent: () => {
+              const s = get();
+              return s.live?.id === liveId && s.live?.current_turn_id === turnId;
+            },
+            applyFresh: (data) =>
+              set({ answers: data, scores: [], answersSnapshot: { liveId, turnId } }),
+            markUnconfirmed: () => set({ answersSnapshot: null }),
+          });
+        } else {
+          answersGate.begin();
+          set({ answers: [], scores: [], answersSnapshot: null });
+        }
+        if (stopped()) return;
+
+        // --- resolved（確定ログ）スライス ---
+        const resolvedOutcome = await loadSnapshotSlice<ResolvedPayload>({
+          gate: resolvedGate,
+          fetch: () => fetchResolvedWithScores(liveId),
+          stillCurrent: () => get().live?.id === liveId,
+          applyFresh: ({ resolvedAnswers, resolvedScoresByAnswer }) =>
+            set({ resolvedAnswers, resolvedScoresByAnswer }),
+          markUnconfirmed: () => {}, // 表示は維持。ログ用なので確認状態は持たない
+        });
+        if (stopped()) return;
+
+        const anyUnconfirmed =
+          childrenOutcome === "unconfirmed" ||
+          answersOutcome === "unconfirmed" ||
+          resolvedOutcome === "unconfirmed";
+        set({
           loading: false,
           lastRefreshedAt: new Date().toISOString(),
-          error: anyFailed
-            ? "一部の情報の取得に失敗しました。「最新状態を取得」で再試行してください。"
+          error: anyUnconfirmed
+            ? "一部の情報を取得できませんでした。しばらくすると自動的に再試行します。"
             : null,
-        }));
+        });
         // 司会画面を開き直した時、answeringフェーズの途中であればanswerRemainingMsTrue
         // （ホスト内メモリのみ）を最善努力で復元する。これが無いと再読込のたびに
         // 強制終了の判定が効かなくなる（pendingRevealAt等と同じ既知の制約：司会ブラウザの
@@ -1274,18 +1435,24 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
           answeringRemainingMsTrue = null;
           lastAnsweringTickAt = null;
         }
-        if (myGeneration !== progressGeneration) return; // stopされた（channelを作らない）
+        if (stopped()) return; // stopされた（channelを作らない）
         await subscribeLiveChannels(live.id);
       } else {
+        // active liveが存在しないことを確認できた（liveスライスは applied）。
+        // 「ライブ無し」は確定状態なので liveSnapshotConfirmed=true、
+        // children/answers の snapshot識別情報は無効化する。
         set({
           live: null,
           loading: false,
+          liveSnapshotConfirmed: true,
           childrenSnapshotLiveId: null,
           answersSnapshot: null,
+          lastRefreshedAt: new Date().toISOString(),
+          error: null,
         });
       }
 
-      if (myGeneration !== progressGeneration) {
+      if (stopped()) {
         // 2026-09-10（再レビュー対応）：stopされた。ここでcleanupChannels()を呼ぶと、
         // stop後に開始した「新しい世代のinit」が既に作ったchannelまで消してしまう。
         // progressGenerationが変わるのはstopHostProgress()のときだけで、そこで
@@ -1294,10 +1461,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         // それを回収している）ため、ここでは何もせず終える。
         return;
       }
-      if (tickTimer) clearInterval(tickTimer);
-      tickTimer = setInterval(() => {
-        advanceIfDue();
-      }, 500);
+      ensureTickTimer(myGeneration);
     };
     const promise = run().finally(() => {
       // 2026-09-10（再レビュー対応）：自分のPromiseが今もinitInFlightのときだけ
@@ -1317,6 +1481,13 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // した上で、tickTimer・Realtime channels・進行用のモジュール変数一式を片付ける。
   stopHostProgress: () => {
     progressGeneration += 1;
+    // 2026-09-11（再レビュー対応）：全スライスゲートを begin() して、stop時点で
+    // 進行中の全取得のトークンを無効化する（stop後に古い通信結果が完了しても
+    // loadSnapshotSliceの isCurrent() が false になり、state を書き換えない）。
+    liveGate.begin();
+    childrenGate.begin();
+    answersGate.begin();
+    resolvedGate.begin();
     if (tickTimer) {
       clearInterval(tickTimer);
       tickTimer = null;
@@ -1326,15 +1497,20 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     pendingRevealAt = null;
     answeringRemainingMsTrue = null;
     lastAnsweringTickAt = null;
+    liveRetryInFlight = false;
+    liveRetryAt = 0;
+    childrenRetryInFlight = false;
+    childrenRetryAt = 0;
     answersRetryInFlight = false;
+    answersRetryAt = 0;
     resolvingAnswerIds.clear();
     botCooldownUntil.clear();
     answerPerfectRoundIds.clear();
     lastBotTsukkomiAt = 0;
-    // 2026-09-10（再レビュー対応）：ログアウト→再ログイン時に、前セッションの
+    // 2026-09-10/11（再レビュー対応）：ログアウト→再ログイン時に、前セッションの
     // スナップショット識別情報を引き継がないよう無効化する（次のinit()が
-    // 取得成功して初めてreadyになる）。
-    set({ childrenSnapshotLiveId: null, answersSnapshot: null });
+    // 取得成功して初めて確認済みになる）。liveSnapshotConfirmedもfalseへ。
+    set({ childrenSnapshotLiveId: null, answersSnapshot: null, liveSnapshotConfirmed: false });
   },
 
   // 事故防止・操作性改善：ページ全体をリロードせず、現在表示中のライブ情報一式だけを
@@ -1342,96 +1518,95 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // （画面全体を「状態を確認中…」に戻さないため）。tickTimer自体はinit()で既に
   // 動いているので触らない。
   refresh: async () => {
-    const { live } = get();
-    if (!live) return { ok: true };
+    const live0 = get().live;
+    if (!live0) return { ok: true };
+    const liveId = live0.id;
     try {
-      const { data: freshLiveData, error: liveError } = await supabase
-        .from("lives")
-        .select("*")
-        .eq("id", live.id)
-        .maybeSingle();
-      if (liveError) return { ok: false, reason: liveError.message };
-      if (!freshLiveData) {
-        // ライブ行自体が無くなっている（通常は起こらないが念のため）。
-        set({
-          live: null,
-          childrenSnapshotLiveId: null,
-          answersSnapshot: null,
-          lastRefreshedAt: new Date().toISOString(),
-        });
+      // --- live スライス ---
+      const liveOutcome = await loadSnapshotSlice<LiveRow | null>({
+        gate: liveGate,
+        fetch: async () => {
+          const { data, error } = await supabase
+            .from("lives")
+            .select("*")
+            .eq("id", liveId)
+            .maybeSingle();
+          if (error) return { ok: false, data: null };
+          return { ok: true, data: (data as LiveRow | null) ?? null };
+        },
+        stillCurrent: () => {
+          const cur = get().live;
+          return cur == null || cur.id === liveId;
+        },
+        applyFresh: (row) => set({ live: row ?? null, liveSnapshotConfirmed: true }),
+        markUnconfirmed: () => set({ liveSnapshotConfirmed: false }),
+      });
+      if (liveOutcome === "unconfirmed") {
+        return {
+          ok: false,
+          reason: "最新状態の取得に失敗しました。しばらくすると自動的に再試行します。",
+        };
+      }
+      const freshLive = get().live;
+      if (!freshLive || freshLive.id !== liveId) {
+        // ライブ行が消えた / 別ライブへ切り替わった。snapshot識別情報は無効化。
+        set({ childrenSnapshotLiveId: null, answersSnapshot: null, lastRefreshedAt: new Date().toISOString() });
         return { ok: true };
       }
-      const freshLive = freshLiveData as LiveRow;
-      const prev = get();
-      // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
-      // 各取得が失敗した項目は、[]やnullで上書きせず直前のstateをそのまま維持する。
-      const childrenResult = await fetchLiveChildren(live.id);
-      // refresh()は常に同じライブ(live.id)に対してしか呼ばれない（init()と同じ
-      // 判断ロジックを共有する。詳細はsrc/lib/liveHostSnapshots.ts参照）。
-      const { children, snapshotLiveId: childrenSnapshotLiveId } = resolveChildrenSnapshot({
-        fetchOk: childrenResult.ok,
-        freshChildren: childrenResult.data,
-        targetLiveId: live.id,
-        prevChildren: {
-          participants: prev.participants,
-          groups: prev.groups,
-          topics: prev.topics,
-          turns: prev.turns,
-        },
-        prevSnapshotLiveId: prev.childrenSnapshotLiveId,
-        emptyChildren: { participants: [], groups: [], topics: [], turns: [] },
+
+      // --- children スライス ---
+      const childrenOutcome = await loadSnapshotSlice<ChildrenPayload>({
+        gate: childrenGate,
+        fetch: () => fetchChildrenWithProfiles(liveId),
+        stillCurrent: () => get().live?.id === liveId,
+        applyFresh: ({ profiles, ...children }) =>
+          set({ ...children, profiles, childrenSnapshotLiveId: liveId }),
+        markUnconfirmed: () => set({ childrenSnapshotLiveId: null }),
       });
-      const profiles = childrenResult.ok ? await fetchProfilesFor(children.participants) : prev.profiles;
-      const answersResult = freshLive.current_turn_id
-        ? await fetchAnswersForTurn(freshLive.current_turn_id)
-        : { ok: true as const, data: [] as AnswerRow[] };
-      const answersResolved = freshLive.current_turn_id
-        ? resolveAnswersSnapshot({
-            fetchOk: answersResult.ok,
-            freshAnswers: answersResult.data,
-            targetLiveId: live.id,
-            targetTurnId: freshLive.current_turn_id,
-            prevAnswers: prev.answers,
-            prevSnapshot: prev.answersSnapshot,
-            emptyAnswers: [] as AnswerRow[],
-          })
-        : { answers: [] as AnswerRow[], writeAnswers: true as const, snapshot: null };
-      const answers = answersResolved.writeAnswers ? answersResolved.answers : prev.answers;
-      const resolvedAnswersResult = await fetchResolvedAnswersForLive(live.id);
-      const resolvedAnswers = resolvedAnswersResult.ok ? resolvedAnswersResult.data : prev.resolvedAnswers;
-      const resolvedScoresByAnswerResult = await fetchScoresForAnswers(
-        resolvedAnswers.map((a) => a.id),
-      );
-      const resolvedScoresByAnswer = resolvedScoresByAnswerResult.ok
-        ? resolvedScoresByAnswerResult.data
-        : prev.resolvedScoresByAnswer;
-      const active = answers.find((a) => a.revealed_at && !a.resolved);
-      const scoresResult = active ? await fetchScoresForAnswer(active.id) : { ok: true as const, data: [] as ScoreRow[] };
-      const scores = scoresResult.ok ? scoresResult.data : prev.scores;
-      const anyFailed =
-        !childrenResult.ok || !answersResult.ok || !resolvedAnswersResult.ok ||
-        !resolvedScoresByAnswerResult.ok || !scoresResult.ok;
-      set({
-        live: freshLive,
-        participants: children.participants,
-        groups: children.groups,
-        topics: children.topics,
-        turns: children.turns,
-        childrenSnapshotLiveId,
-        answersSnapshot: answersResolved.snapshot,
-        profiles,
-        answers,
-        scores,
-        resolvedAnswers,
-        resolvedScoresByAnswer,
-        lastRefreshedAt: new Date().toISOString(),
-        error: null,
+
+      // --- answers スライス ---
+      let answersOutcome: SliceLoadOutcome = "applied";
+      const turnId = freshLive.current_turn_id;
+      if (turnId) {
+        answersOutcome = await loadSnapshotSlice<AnswerRow[]>({
+          gate: answersGate,
+          fetch: () => fetchAnswersForTurn(turnId),
+          stillCurrent: () => {
+            const s = get();
+            return s.live?.id === liveId && s.live?.current_turn_id === turnId;
+          },
+          applyFresh: (data) =>
+            set({ answers: data, scores: [], answersSnapshot: { liveId, turnId } }),
+          markUnconfirmed: () => set({ answersSnapshot: null }),
+        });
+      } else {
+        answersGate.begin();
+        set({ answers: [], scores: [], answersSnapshot: null });
+      }
+
+      // --- resolved（確定ログ）スライス ---
+      const resolvedOutcome = await loadSnapshotSlice<ResolvedPayload>({
+        gate: resolvedGate,
+        fetch: () => fetchResolvedWithScores(liveId),
+        stillCurrent: () => get().live?.id === liveId,
+        applyFresh: ({ resolvedAnswers, resolvedScoresByAnswer }) =>
+          set({ resolvedAnswers, resolvedScoresByAnswer }),
+        markUnconfirmed: () => {},
       });
-      return anyFailed
-        ? { ok: false, reason: "一部の情報の取得に失敗しました（前回の表示を維持しています）" }
+
+      set({ lastRefreshedAt: new Date().toISOString(), error: null });
+      const anyUnconfirmed =
+        childrenOutcome === "unconfirmed" ||
+        answersOutcome === "unconfirmed" ||
+        resolvedOutcome === "unconfirmed";
+      return anyUnconfirmed
+        ? {
+            ok: false,
+            reason: "一部の情報を取得できませんでした（前回の表示を維持しています）。しばらくすると自動的に再試行します。",
+          }
         : { ok: true };
-    } catch (e) {
-      return { ok: false, reason: e instanceof Error ? e.message : "取得に失敗しました" };
+    } catch {
+      return { ok: false, reason: "最新状態の取得に失敗しました。しばらくすると自動的に再試行します。" };
     }
   },
 
@@ -1449,8 +1624,15 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     if (existing) {
       // 別ライブへ切り替える：前ライブのスナップショット識別情報は必ず無効化する
       // （subscribeLiveChannelsのSUBSCRIBED時、またはinit()/refresh()で
-      // このライブについて取得成功して初めてreadyに戻る）。
-      set({ live: existing, childrenSnapshotLiveId: null, answersSnapshot: null });
+      // このライブについて取得成功して初めてreadyに戻る）。live行自体は
+      // fetchActiveLiveで取得済み＝liveSnapshotConfirmed。
+      liveGate.begin();
+      set({
+        live: existing,
+        liveSnapshotConfirmed: true,
+        childrenSnapshotLiveId: null,
+        answersSnapshot: null,
+      });
       await subscribeLiveChannels(existing.id);
       return { ok: false, reason: "既に進行中のライブがあります" };
     }
@@ -1506,7 +1688,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     });
 
     // 新しいライブへ切り替える直前に、前ライブのスナップショット識別情報を無効化する。
-    set({ childrenSnapshotLiveId: null, answersSnapshot: null });
+    liveGate.begin();
+    childrenGate.begin();
+    answersGate.begin();
+    set({ childrenSnapshotLiveId: null, answersSnapshot: null, liveSnapshotConfirmed: false });
 
     const { data: liveRow, error: liveFetchError } = await supabase
       .from("lives")
@@ -1514,14 +1699,17 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .eq("id", result.live_id)
       .single();
     if (liveFetchError || !liveRow) {
-      set({ error: "ライブは作成できましたが、最新状態の取得に失敗しました。「最新状態を取得」で再試行してください。" });
+      set({ error: "ライブは作成できましたが、最新状態の取得に失敗しました。しばらくすると自動的に再試行します。" });
       return { ok: true };
     }
     const live = liveRow as LiveRow;
     const childrenResult = await fetchLiveChildren(live.id);
     const profiles = await fetchProfilesFor(childrenResult.data.participants);
+    liveGate.begin();
+    childrenGate.begin();
     set({
       live,
+      liveSnapshotConfirmed: true,
       ...childrenResult.data,
       // createLivePreparation後のfetchLiveChildren成功時は、Realtimeの
       // SUBSCRIBED通知を待たずその場でreadyにする（interludeが0秒で止まらない
@@ -1531,7 +1719,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       profiles,
       error: childrenResult.ok
         ? null
-        : "作成後の情報取得に失敗しました。「最新状態を取得」で再試行してください。",
+        : "作成後の組・お題情報を取得できませんでした。しばらくすると自動的に再試行します。",
     });
     await subscribeLiveChannels(live.id);
     return { ok: true };
@@ -1567,7 +1755,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       set({ error: message });
       return { ok: false, reason: message };
     }
-    set({ live: data as LiveRow });
+    applyAuthoritativeLive(data as LiveRow);
     await logAdminAction({ action: "reception_opened", targetType: "lives", targetId: live.id });
     return { ok: true };
   },
@@ -1608,7 +1796,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       return { ok: false, reason: "組分け後の情報取得に失敗しました。「最新状態を取得」で確認してください。" };
     }
     const profiles = await fetchProfilesFor(childrenResult.data.participants);
-    // 有効なchildrenを再取得できたので、このライブについてreadyに更新する。
+    // 有効なchildrenを再取得できたので、このライブについてreadyに更新する
+    // （進行中の古いchildren読み取りを begin() で無効化してから反映）。
+    childrenGate.begin();
     set({ ...childrenResult.data, childrenSnapshotLiveId: live.id, profiles, error: null });
     return { ok: true };
   },
@@ -1644,6 +1834,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       const childrenResult = await fetchLiveChildren(live.id);
       if (childrenResult.ok) {
         const profiles = await fetchProfilesFor(childrenResult.data.participants);
+        childrenGate.begin();
         set({ ...childrenResult.data, childrenSnapshotLiveId: live.id, profiles });
       }
     }
@@ -1918,6 +2109,8 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     // begin_game前のchildrenスナップショット（turns未作成）はもう信頼できない。
     // 一旦無効化し、この直後のchildrenResult.ok（turns込みの再取得成功）で
     // 初めてreadyに戻す（取得失敗中は自動進行しない）。
+    childrenGate.begin();
+    answersGate.begin();
     set({ childrenSnapshotLiveId: null, answersSnapshot: null });
 
     // 2026-09-06:「最初のお題発表だけ0秒になっても回答画面へ進まない」不具合対応。
@@ -1932,14 +2125,18 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       fetchLiveChildren(live.id),
     ]);
     if (liveResult.ok && liveResult.data) {
-      set({ live: liveResult.data });
+      applyAuthoritativeLive(liveResult.data);
     } else {
-      // lives行の再取得に失敗した場合、state.liveをopeningのまま放置すると
-      // 自動進行が止まったままになるため、エラーとして明示し「最新状態を取得」を促す。
-      set({ error: "ゲームは開始しましたが、最新のライブ状態の取得に失敗しました。「最新状態を取得」してください。" });
+      // lives行の再取得に失敗した場合、liveSnapshotConfirmed=falseにして
+      // advanceIfDueに自動進行を凍結させる（読み取り再試行で自動的に復帰する）。
+      set({
+        liveSnapshotConfirmed: false,
+        error: "ゲームは開始しましたが、最新のライブ状態を取得できませんでした。しばらくすると自動的に再試行します。",
+      });
     }
     if (childrenResult.ok) {
       const profiles = await fetchProfilesFor(childrenResult.data.participants);
+      childrenGate.begin();
       set({
         ...childrenResult.data,
         childrenSnapshotLiveId: live.id,
@@ -1947,10 +2144,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         error: liveResult.ok ? null : get().error,
       });
     } else if (liveResult.ok) {
-      // ゲーム開始自体（begin_game）は既に成功しているので、ここでは進行は止めず、
-      // 参加者一覧などの取得失敗だけをerrorとして伝える（次のRealtime更新や
-      // 「最新状態を取得」で追いつく）。
-      set({ error: "ゲームは開始しましたが、最新の参加者情報の取得に失敗しました。「最新状態を取得」してください。" });
+      // ゲーム開始自体（begin_game）は成功しているが、組・ターン情報の取得に
+      // 失敗した：childrenSnapshotLiveId は null のまま（自動進行は凍結）にし、
+      // advanceIfDueの読み取り再試行で復帰させる。
+      set({ error: "ゲームは開始しましたが、組・ターン情報を取得できませんでした。しばらくすると自動的に再試行します。" });
     }
     await refreshAnswersForTurn(result.first_turn_id);
     return { ok: true };
@@ -1987,6 +2184,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         resolvedScoresByAnswer: {},
         childrenSnapshotLiveId: null,
         answersSnapshot: null,
+        liveSnapshotConfirmed: true,
         error: null,
       });
       return { ok: true };
@@ -2017,6 +2215,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       resolvedScoresByAnswer: {},
       childrenSnapshotLiveId: null,
       answersSnapshot: null,
+      liveSnapshotConfirmed: true,
       error: result.rewards_applied ? null : s.error,
     }));
     return { ok: true };

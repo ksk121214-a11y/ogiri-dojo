@@ -1,57 +1,72 @@
-// useLiveHostStore.ts（司会ストア）の「取得したスナップショットが、今表示中の
-// ライブ／ターンについて信頼できるか」を判定する副作用のない純粋関数群。
+// useLiveHostStore.ts（司会ストア）の非同期取得まわりの並行制御を、副作用のない
+// 純粋関数へ分離したもの。
 //
-// 背景：HostProgressController（RootLayout常駐）がfocus/visibilitychange/pageshow/
-// online のたびにinit()を呼び直すようになったことで、一時的な通信失敗のたびに
-// participants/groups/topics/turns や answers が空配列で上書きされる恐れが出た。
-// - turns/groupsが空になると、advanceIfDueが「次のターンが無い」と誤判定して
-//   final_resultへ誤って進む。
-// - 採点中のanswersが空になると、isAnsweringBusy()がfalseと判断し、
-//   syncAnsweringPause()が回答時間を再開してしまう。
-//
-// そこで「どのliveId（children）／どのliveId+turnId（answers）についての
-// スナップショットが正常取得済みか」をstateに持ち、取得失敗時は
-// - 同じ対象なら既存値を維持する
-// - 別の対象なら空にしたうえで「未確認」に戻す
-// という判断をこの関数群に集約する。boolean単体だと別ライブ・別ターンへ
-// 誤って流用しやすいため、必ずliveId／turnIdを含む識別情報で判定する。
+// 解決する問題：
+// 1. 取得失敗時に「確認済み」状態まで維持してしまい、advanceIfDueの再取得が
+//    作動せず、切断中に追加された回答/組情報を知らないまま自動進行しうる。
+//    → 取得失敗時は画面表示データは維持しつつ、確認状態は必ず未確認へ戻す。
+// 2. 同じライブ・同じターンでも複数の取得が並行すると、古いリクエストが後から
+//    完了して新しい状態を巻き戻せる（liveId/turnIdの一致確認だけでは不十分）。
+//    → スライスごとの取得世代番号（SliceGate）で、より新しい取得が始まった後の
+//      古い結果を一切反映しない。
+// 3. ライブ本体の最新状態を確認できない間も500msタイマーで自動進行してしまう。
+//    → liveSnapshotConfirmed が false の間は読み取り再試行だけを行い凍結する。
 
-// ===== children（participants/groups/topics/turns）=====
+// ===== スライスごとの取得世代ゲート（並行取得の新旧判定）=====
 
-export interface ChildrenSnapshotInput<TChildren> {
-  fetchOk: boolean;
-  freshChildren: TChildren;
-  targetLiveId: string;
-  prevChildren: TChildren;
-  // 直前にstateへ入っているchildrenが、どのliveIdについて正常取得済みか（未確認ならnull）。
-  prevSnapshotLiveId: string | null;
-  emptyChildren: TChildren;
+export interface SliceGate {
+  /** 新しい取得を開始する。返り値のトークンを、反映時に isCurrent へ渡す。 */
+  begin: () => number;
+  /** そのトークンが今も最新（＝これより後に begin されていない）か。 */
+  isCurrent: (token: number) => boolean;
+  /** 現在の世代番号（テスト・診断用）。 */
+  current: () => number;
 }
 
-export interface ChildrenSnapshotResult<TChildren> {
-  children: TChildren;
-  // 反映後、childrenがどのliveIdについて正常取得済みか（未確認ならnull）。
-  snapshotLiveId: string | null;
+export function createSliceGate(): SliceGate {
+  let seq = 0;
+  return {
+    begin: () => (seq += 1),
+    isCurrent: (token: number) => token === seq,
+    current: () => seq,
+  };
 }
 
-export function resolveChildrenSnapshot<TChildren>(
-  input: ChildrenSnapshotInput<TChildren>,
-): ChildrenSnapshotResult<TChildren> {
-  const { fetchOk, freshChildren, targetLiveId, prevChildren, prevSnapshotLiveId, emptyChildren } =
-    input;
-  if (fetchOk) {
-    // 取得成功：新しいデータを採用し、このliveIdについて確認済みとする。
-    return { children: freshChildren, snapshotLiveId: targetLiveId };
+// ===== 1スライスの「取得 → 新旧判定 → 反映 / 未確認化」の共通フロー =====
+
+export type SliceLoadOutcome = "applied" | "unconfirmed" | "superseded" | "target-changed";
+
+export interface SliceLoadDeps<TResult> {
+  gate: SliceGate;
+  /** DBからの取得。{ ok:false } は通信失敗。 */
+  fetch: () => Promise<{ ok: boolean; data: TResult }>;
+  /** この取得が対象としていたライブ／ターンが、今も現在の対象か。 */
+  stillCurrent: () => boolean;
+  /** 取得成功かつ最新かつ対象一致のときだけ呼ぶ：画面データを差し替え、確認済みにする。 */
+  applyFresh: (data: TResult) => void;
+  /** 取得失敗かつ最新かつ対象一致のときだけ呼ぶ：画面データは維持し、確認状態だけ未確認へ戻す。 */
+  markUnconfirmed: () => void;
+}
+
+export async function loadSnapshotSlice<TResult>(
+  deps: SliceLoadDeps<TResult>,
+): Promise<SliceLoadOutcome> {
+  const token = deps.gate.begin();
+  const result = await deps.fetch();
+  // より新しい取得が始まっていれば、この（古い）結果は一切反映しない
+  // （古いリクエストが後から完了して新しい状態を巻き戻すのを防ぐ）。
+  if (!deps.gate.isCurrent(token)) return "superseded";
+  // 取得中にライブ／ターンが切り替わっていれば、この結果は今の対象のものではない。
+  if (!deps.stillCurrent()) return "target-changed";
+  if (result.ok) {
+    deps.applyFresh(result.data);
+    return "applied";
   }
-  if (prevSnapshotLiveId === targetLiveId) {
-    // 取得失敗だが、同じライブについての正常な既存値がある：それを維持する
-    // （空配列で上書きしない）。
-    return { children: prevChildren, snapshotLiveId: targetLiveId };
-  }
-  // 取得失敗、かつ別ライブ（または一度も確認できていない）：前ライブのデータを
-  // 流用せず空にし、「未確認」に戻す（＝自動進行を行わせない）。
-  return { children: emptyChildren, snapshotLiveId: null };
+  deps.markUnconfirmed();
+  return "unconfirmed";
 }
+
+// ===== 確認済み判定 =====
 
 export function childrenSnapshotReady(
   snapshotLiveId: string | null,
@@ -60,54 +75,9 @@ export function childrenSnapshotReady(
   return !!liveId && snapshotLiveId === liveId;
 }
 
-// ===== answers（現在ターンぶんの回答一覧）=====
-
 export interface AnswersSnapshotKey {
   liveId: string;
   turnId: string;
-}
-
-export interface AnswersSnapshotInput<TAnswers> {
-  fetchOk: boolean;
-  freshAnswers: TAnswers;
-  targetLiveId: string;
-  targetTurnId: string;
-  prevAnswers: TAnswers;
-  prevSnapshot: AnswersSnapshotKey | null;
-  emptyAnswers: TAnswers;
-}
-
-export interface AnswersSnapshotResult<TAnswers> {
-  // stateへ書き込むべきanswers（writeAnswers=falseなら書き込まない）。
-  answers: TAnswers;
-  // answersを実際にstateへ書き込んでよいか。取得失敗時は既存値を壊さないためfalse。
-  writeAnswers: boolean;
-  // 反映後、answersがどの(liveId,turnId)について正常取得済みか（未確認ならnull）。
-  snapshot: AnswersSnapshotKey | null;
-}
-
-export function resolveAnswersSnapshot<TAnswers>(
-  input: AnswersSnapshotInput<TAnswers>,
-): AnswersSnapshotResult<TAnswers> {
-  const { fetchOk, freshAnswers, targetLiveId, targetTurnId, prevAnswers, prevSnapshot, emptyAnswers } =
-    input;
-  if (fetchOk) {
-    return {
-      answers: freshAnswers,
-      writeAnswers: true,
-      snapshot: { liveId: targetLiveId, turnId: targetTurnId },
-    };
-  }
-  if (prevSnapshot && prevSnapshot.liveId === targetLiveId && prevSnapshot.turnId === targetTurnId) {
-    // 取得失敗だが、同じライブ・同じターンについての正常な既存値がある：
-    // 何も書き換えず維持する（画面表示用のanswersを空にしない）。
-    return { answers: prevAnswers, writeAnswers: false, snapshot: prevSnapshot };
-  }
-  // 取得失敗、かつ別ターン（または一度も確認できていない）：既存answersを
-  // 壊さない（writeAnswers=false）が、このターンについては「未確認」に戻す
-  // ＝advanceIfDue側で回答時間の減算・processRevealQueue・resolveIfDue・
-  //   syncAnsweringPause・group_result遷移を一切行わない。
-  return { answers: emptyAnswers, writeAnswers: false, snapshot: null };
 }
 
 export function answersSnapshotMatches(
@@ -116,20 +86,23 @@ export function answersSnapshotMatches(
   turnId: string | null | undefined,
 ): boolean {
   return (
-    !!snapshot &&
-    !!liveId &&
-    !!turnId &&
-    snapshot.liveId === liveId &&
-    snapshot.turnId === turnId
+    !!snapshot && !!liveId && !!turnId && snapshot.liveId === liveId && snapshot.turnId === turnId
   );
+}
+
+// ===== 読み取り再試行の間隔制御（single-flight ＋ 最小間隔）=====
+
+export function shouldRetryNow(
+  inFlight: boolean,
+  lastAttemptAt: number,
+  now: number,
+  minIntervalMs: number,
+): boolean {
+  return !inFlight && now - lastAttemptAt >= minIntervalMs;
 }
 
 // ===== init()の並行実行制御（initInFlightの所有権）=====
 
-// 「finallyで自分自身のPromiseを片付けてよいか」の判定。
-// stopHostProgress()がinitInFlight=nullにした後に新しいinitが始まっていると、
-// 古いinitのfinallyが無条件にnullへ戻すと新しいinitのinitInFlightを消してしまう。
-// 現在のinitInFlightが自分のPromiseと同一のときだけ片付ける。
 export function shouldReleaseInitInFlight<T>(current: T | null, mine: T): boolean {
   return current === mine;
 }
