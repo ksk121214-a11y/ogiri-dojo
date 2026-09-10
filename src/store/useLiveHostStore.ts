@@ -20,7 +20,7 @@ import {
   awaitChannelsSubscribed,
   botScoringAllowed,
   childrenSnapshotReady,
-  createChannelSubscriptionTracker,
+  createChannelSwapController,
   createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
@@ -166,7 +166,6 @@ interface LiveHostState {
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
-let channels: ReturnType<typeof supabase.channel>[] = [];
 // 2026-09-09（再レビュー対応）：stopHostProgress()を呼ぶたびに+1する世代番号。
 // init()の非同期処理は開始時点の世代を覚えておき、要所（特にtickTimer/Realtime
 // channelを作る直前）で現在の世代と比較する。ずれていれば、そのinit()呼び出しは
@@ -182,10 +181,21 @@ let progressGeneration = 0;
 // 呼び出しを実質1本化する（intervalやRealtime channelが増殖しないことの追加の保険）。
 let initInFlight: Promise<void> | null = null;
 // ボット観客がたまにツッコミ/爆笑/拍手を送るためのブロードキャストチャンネル。
-// useLiveFollowerStore.tsと同じ"follower-tsukkomi"チャンネルに直接送るため、
-// 参加者としての書き込み(bot.client)は不要で、司会クライアント自身の
-// supabaseクライアントから送るだけでよい(誰が送ったかは表示に使わないため)。
+// useLiveFollowerStore.tsと同じ固定topic名 "follower-tsukkomi"（followerが受信する）
+// のため、購読世代ごとに一意化できない。DB購読チャンネルのライフサイクルから
+// 完全に分離し、ページ存続中は1インスタンスだけを保持する（cleanupChannels /
+// subscribeLiveChannels / stopHostProgress で作り直さない・削除しない）。
+// これにより「削除途中(leaving)の古いインスタンスを参照する」事故が構造的に起きない。
+// 送信専用・liveId非依存（payload に liveId を載せる）なので保持し続けても害は無い。
 let tsukkomiChannel: ReturnType<typeof supabase.channel> | null = null;
+function ensureTsukkomiChannel() {
+  if (!tsukkomiChannel) {
+    tsukkomiChannel = supabase
+      .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
+      .subscribe();
+  }
+  return tsukkomiChannel;
+}
 let lastBotTsukkomiAt = 0;
 let pendingRevealAt: number | null = null; // 次の回答をrevealする予定時刻（ホスト内メモリのみ）
 // 回答受付フェーズの「本当の残り持ち時間」（ホスト内メモリのみ）。src/store/useLiveDemoStore.tsの
@@ -241,21 +251,21 @@ const SNAPSHOT_RETRY_INTERVAL_MS = 2_000;
 let subscribedLiveId: string | null = null;
 let runtimeReadyLiveId: string | null = null;
 
-// 2026-09-14（再レビュー対応・P1-1/P1-2）：Realtime購読の「世代」。
-// subscribeLiveChannels を呼ぶたび（＝cleanupChannels のたび）に +1 する。
-// 各チャンネルの status/postgres_changes コールバックは自分が作られたときの
-// 世代を捕捉し、コールバック開始時に channelGeneration と一致するかを確認する。
-// 古い購読世代のコールバック（遅延した refetch・遅れて届く SUBSCRIBED/
-// CHANNEL_ERROR/CLOSED）は現在の state に一切影響させない。
-let channelGeneration = 0;
-// 現在の購読世代が対象としている liveId と、必須チャンネルの接続状態集約。
-let currentChannelLiveId: string | null = null;
-let currentChannelTracker: ChannelSubscriptionTracker | null = null;
-// 進行に必要な（＝SUBSCRIBED を待つ）チャンネル。tsukkomi は送信専用の
-// 賑やかし用ブロードキャストで、接続できなくても進行に支障が無いため必須にしない。
+// 2026-09-14/15（再レビュー対応・P1）：Realtime購読の入れ替え管理。
+// - Postgres Changes 用 topic を購読世代ごとに一意化（buildChannelTopic）し、
+//   supabase-js が「同じ topic の残存インスタンスを返す」問題（削除中の leaving
+//   チャンネルが返り新しい .subscribe() が効かない）を構造的に回避する。
+// - 入れ替えのたびに世代を同期的に +1（古い世代のコールバックを即無効化）。
+// - 旧チャンネルは確保してから背景除去（await しない）。新チャンネルは消さない。
+// - 複数の入れ替え要求が並行しても、最後の swap の世代だけが currentGen と一致する。
+// 進行に必要な（＝SUBSCRIBED を待つ）チャンネル。tsukkomi は上記のとおり別管理。
 const REQUIRED_CHANNELS = ["lives", "participants", "turns", "answers", "scores"] as const;
 const CHANNEL_SUBSCRIBE_TIMEOUT_MS = 10_000;
 const CHANNEL_SUBSCRIBE_POLL_MS = 150;
+
+// 現在の購読世代が対象としている liveId と、必須チャンネルの接続状態集約。
+let currentChannelLiveId: string | null = null;
+let currentChannelTracker: ChannelSubscriptionTracker | null = null;
 
 // 完全復旧（init / 初回失敗後のretry / 未初期化状態の手動refresh）を1本化する
 // 所有権コーディネータ。同一世代の完全復旧が進行中なら、その Promise へ合流する
@@ -281,16 +291,27 @@ const answerPerfectRoundIds = new Map<string, boolean>();
 // 処理中のIDを覚えておき、二重着手を防ぐ。
 const resolvingAnswerIds = new Set<string>();
 
+// DB購読チャンネル（lives/participants/turns/answers/scores）の入れ替え管理。
+// spawn は下の spawnLiveChannels（関数宣言なので巻き上げ済み）。
+// tsukkomi は含めない（ensureTsukkomiChannel が別管理）。
+const channelSwap = createChannelSwapController<ReturnType<typeof supabase.channel>>({
+  kinds: [...REQUIRED_CHANNELS],
+  spawn: (args) => spawnLiveChannels(args),
+  remove: (ch) => supabase.removeChannel(ch),
+});
+
+// 現在の購読世代（他ガード用のショートカット）。
+function currentChannelGen(): number {
+  return channelSwap.currentGen();
+}
+
+// DB購読チャンネルを全て破棄する。channelSwap.invalidate() が世代を +1（古い
+// コールバックを即無効化）し、旧チャンネルを背景除去する。tsukkomi は触らない。
 function cleanupChannels() {
-  for (const ch of channels) supabase.removeChannel(ch);
-  channels = [];
-  tsukkomiChannel = null;
-  subscribedLiveId = null;
-  // 購読世代を +1 して、古い（この cleanup より前に作られた）チャンネルの
-  // 遅延コールバックを全て無効化する。
-  channelGeneration += 1;
+  channelSwap.invalidate();
   currentChannelLiveId = null;
   currentChannelTracker = null;
+  subscribedLiveId = null;
 }
 
 // 待機（awaitChannelsSubscribed のポーリング）で使う sleep。
@@ -479,32 +500,35 @@ async function fetchResolvedWithScores(
   return { ok: true, data: { resolvedAnswers: ra.data, resolvedScoresByAnswer: rs.data } };
 }
 
-// Realtime を対象 liveId で購読する。cleanupChannels で購読世代 channelGeneration を
-// +1 したうえで新しい世代の channel を作る。各コールバックは自分が作られた世代
-// (myGen) を捕捉し、コールバック開始時に channelGeneration と一致するかを確認する。
-// 古い購読世代のコールバック（遅延 refetch・遅れて届く SUBSCRIBED/CHANNEL_ERROR/
-// CLOSED）は現在の state に一切影響させない。
-// 「購読を作った」だけでは接続完了ではないため、subscribedLiveId は
-// onChannelStatus が「全必須チャンネル SUBSCRIBED」を確認したときだけ設定する。
-function subscribeLiveChannels(liveId: string) {
-  cleanupChannels(); // channelGeneration += 1
-  const myGen = channelGeneration;
-  const tracker = createChannelSubscriptionTracker([...REQUIRED_CHANNELS]);
-  currentChannelTracker = tracker;
-  currentChannelLiveId = liveId;
+// DB必須チャンネル（lives/participants/turns/answers/scores）を1世代ぶん作成し
+// .subscribe() する。channelSwap（createChannelSwapController）の spawn として呼ばれる。
+// - topic は購読世代ごとに一意（args.topicFor）＝ supabase-js が leaving 中の古い
+//   同名インスタンスを返す事故が起きない。
+// - 全コールバックの入口で targetMatches()（＝購読世代が現行 かつ 現在の state.live.id
+//   がこの liveId）を確認する。P2：state.live だけ A→B へ変わり channelGeneration が
+//   まだ A のままでも、A の古いコールバックが B の gate を進めたり確認状態を
+//   未確認へ落としたりしない（loadSnapshotSlice の beginGuard でも二重に防ぐ）。
+function spawnLiveChannels(args: {
+  liveId: string;
+  gen: number;
+  tracker: ChannelSubscriptionTracker;
+  isCurrentGen: () => boolean;
+  topicFor: (kind: string) => string;
+}): ReturnType<typeof supabase.channel>[] {
+  const { liveId, tracker, isCurrentGen, topicFor } = args;
 
-  // この購読世代がまだ現行か。古い世代のコールバックは全てここで弾く。
-  const isCurrentGen = () => myGen === channelGeneration;
+  // 購読世代が現行 かつ 現在表示中のライブがこの liveId であること。
+  // 旧購読・別ライブ向けの遅延コールバックはここで全て弾く（gate.begin より前）。
+  const targetMatches = () =>
+    isCurrentGen() && useLiveHostStore.getState().live?.id === liveId;
 
   const refetchChildren = () => {
-    if (!isCurrentGen()) return;
+    if (!targetMatches()) return;
     void loadSnapshotSlice<ChildrenPayload>({
       gate: childrenGate,
+      beginGuard: targetMatches, // gate.begin/markPending より前の対象確認
       fetch: () => fetchChildrenWithProfiles(liveId),
-      // 2026-09-14（再レビュー対応・P1-1）：「無条件に現在」を返す stillCurrent を廃止。
-      // 「liveIdで絞って取得している」ことは、そのliveIdが現在表示中のライブである
-      // ことを保証しない。購読世代と現在の live.id の両方が一致するときだけ反映する。
-      stillCurrent: () => isCurrentGen() && useLiveHostStore.getState().live?.id === liveId,
+      stillCurrent: () => targetMatches(),
       markPending: () => useLiveHostStore.setState({ childrenSnapshotLiveId: null }),
       applyFresh: ({ profiles, ...children }) =>
         useLiveHostStore.setState({ ...children, profiles, childrenSnapshotLiveId: liveId }),
@@ -512,19 +536,13 @@ function subscribeLiveChannels(liveId: string) {
     });
   };
 
-  const refetchAnswersAndScores = () => {
-    if (!isCurrentGen()) return;
-    void resyncAnswersAndScoresForCurrentLive();
-  };
-
   const refetchLive = () => {
-    if (!isCurrentGen()) return;
+    if (!targetMatches()) return;
     void loadSnapshotSlice<LiveRow | null>({
       gate: liveGate,
+      beginGuard: targetMatches,
       fetch: () => fetchLiveRow(liveId),
-      // 2026-09-14（再レビュー対応・P1-1）：購読世代と現在の live.id の両方を確認する。
-      // ライブAの遅延した refetchLive がライブBを上書きしないようにする。
-      stillCurrent: () => isCurrentGen() && useLiveHostStore.getState().live?.id === liveId,
+      stillCurrent: () => targetMatches(),
       markPending: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
       applyFresh: (row) =>
         useLiveHostStore.setState({ live: row ?? null, liveSnapshotConfirmed: true }),
@@ -532,35 +550,37 @@ function subscribeLiveChannels(liveId: string) {
     });
   };
 
-  const refetchOnReconnect = (channel: (typeof REQUIRED_CHANNELS)[number]) => {
-    // チャンネルが(再)接続できた瞬間に、そのチャンネルが担う範囲の最新スナップショットを
-    // 取り直す（Realtimeは切断中に起きた変更を後から届けてくれないため）。
+  const refetchAnswersAndScores = () => {
+    if (!targetMatches()) return;
+    void resyncAnswersAndScoresForCurrentLive();
+  };
+
+  const refetchOnReconnect = (channel: string) => {
     if (channel === "lives") refetchLive();
     else if (channel === "participants" || channel === "turns") refetchChildren();
     else refetchAnswersAndScores();
   };
 
-  // 各必須チャンネルの status コールバック。古い購読世代は無視。SUBSCRIBED を集約し、
-  // 全必須チャンネル SUBSCRIBED になった時点でだけ subscribedLiveId を確立する。
-  // CHANNEL_ERROR / TIMED_OUT / CLOSED は無視せず、このliveIdの runtime ready を無効化して
-  // 自動進行を凍結する（ensureHostRecovery が再試行する）。
-  const onChannelStatus =
-    (channel: (typeof REQUIRED_CHANNELS)[number]) => (status: string) => {
-      if (!isCurrentGen()) return; // 古い購読世代の通知は現在の状態へ影響させない
-      tracker.note(channel, status);
-      if (status === "SUBSCRIBED") {
-        refetchOnReconnect(channel);
-        if (tracker.allSubscribed() && !tracker.hasFailure()) {
-          subscribedLiveId = liveId;
-        }
-      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-        if (subscribedLiveId === liveId) subscribedLiveId = null;
-        if (runtimeReadyLiveId === liveId) runtimeReadyLiveId = null;
+  // status コールバック。古い購読世代は無視。ライブ切替後（gen未更新でも）
+  // この channel の liveId が現在ライブでなければ、subscribedLiveId /
+  // runtimeReadyLiveId / 確認状態へ一切影響させない。
+  const onChannelStatus = (channel: string) => (status: string) => {
+    if (!isCurrentGen()) return;
+    if (useLiveHostStore.getState().live?.id !== liveId) return;
+    tracker.note(channel, status);
+    if (status === "SUBSCRIBED") {
+      refetchOnReconnect(channel);
+      if (tracker.allSubscribed() && !tracker.hasFailure()) {
+        subscribedLiveId = liveId;
       }
-    };
+    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      if (subscribedLiveId === liveId) subscribedLiveId = null;
+      if (runtimeReadyLiveId === liveId) runtimeReadyLiveId = null;
+    }
+  };
 
   const livesCh = supabase
-    .channel(`host-lives-${liveId}`)
+    .channel(topicFor("lives"))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
@@ -569,7 +589,7 @@ function subscribeLiveChannels(liveId: string) {
     .subscribe(onChannelStatus("lives"));
 
   const participantsCh = supabase
-    .channel(`host-participants-${liveId}`)
+    .channel(topicFor("participants"))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "participants", filter: `live_id=eq.${liveId}` },
@@ -578,7 +598,7 @@ function subscribeLiveChannels(liveId: string) {
     .subscribe(onChannelStatus("participants"));
 
   const turnsCh = supabase
-    .channel(`host-turns-${liveId}`)
+    .channel(topicFor("turns"))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "turns", filter: `live_id=eq.${liveId}` },
@@ -587,12 +607,12 @@ function subscribeLiveChannels(liveId: string) {
     .subscribe(onChannelStatus("turns"));
 
   const answersCh = supabase
-    .channel(`host-answers-${liveId}`)
+    .channel(topicFor("answers"))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "answers", filter: `live_id=eq.${liveId}` },
       () => {
-        if (!isCurrentGen()) return;
+        if (!targetMatches()) return;
         const { live } = useLiveHostStore.getState();
         if (!live?.current_turn_id) return;
         void refreshAnswersForTurn(live.current_turn_id);
@@ -600,59 +620,68 @@ function subscribeLiveChannels(liveId: string) {
     )
     .subscribe(onChannelStatus("answers"));
 
-  // scoresにはlive_idが無いため、絞り込まず購読し現在の回答分だけ都度取り直す
-  // （リハ規模の件数なので問題にならない）。2026-09-12（P1-2）：scoresGate越しに
-  // 取り直し、古いR1が新しいR2の後に完了して古い一覧で上書きするのを防ぐ。
+  // scoresにはlive_idが無いため、絞り込まず購読し現在の回答分だけ都度取り直す。
   const scoresCh = supabase
-    .channel(`host-scores-${liveId}`)
+    .channel(topicFor("scores"))
     .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, () => {
-      if (!isCurrentGen()) return;
+      if (!targetMatches()) return;
       void refreshScoresForActiveAnswer();
     })
     .subscribe(onChannelStatus("scores"));
 
-  // ボット観客のツッコミ/爆笑/拍手を送るための送信専用チャンネル。
-  // これは賑やかし用のブロードキャストで、接続できなくても進行に支障が無いため
-  // 必須チャンネル（SUBSCRIBEDを待つ対象）には含めない。
-  tsukkomiChannel = supabase
-    .channel("follower-tsukkomi", { config: { broadcast: { self: true } } })
-    .subscribe();
+  return [livesCh, participantsCh, turnsCh, answersCh, scoresCh];
+}
 
-  channels = [livesCh, participantsCh, turnsCh, answersCh, scoresCh, tsukkomiChannel];
+// Realtime を対象 liveId で購読する（channelSwap 経由）。
+// - 購読世代を同期的に +1（古い世代のコールバックを即無効化）
+// - 旧チャンネルを確保してから背景除去（新チャンネルは消さない）
+// - gen固有 topic で新チャンネルを作成
+// 「購読を作った」だけでは接続完了ではないため、subscribedLiveId は
+// spawnLiveChannels 内の onChannelStatus が「全必須チャンネル SUBSCRIBED」を
+// 確認したときだけ設定する（runtimeReadyLiveId は hydrate が確立する）。
+function subscribeLiveChannels(liveId: string) {
+  const { tracker } = channelSwap.swap(liveId);
+  currentChannelTracker = tracker;
+  currentChannelLiveId = liveId;
+  subscribedLiveId = null;
+  // tsukkomi は DB購読チャンネルのライフサイクルから分離（1インスタンスを保持）。
+  ensureTsukkomiChannel();
 }
 
 // hydrateAfterLive の subscribeAndWait 実装。必須チャンネルが実際に SUBSCRIBED に
 // なるまで待つ。既に同じliveId向けのチャンネルがあり異常が無ければ張り直さず待つ
 // （タイムアウトしたら一度だけ張り直す）。abortedFn は stop / 進行世代変更 /
-// 対象liveId変更 / 購読世代の入れ替わり を検知する。
+// 対象liveId変更 を検知する。購読世代の入れ替わりは channelSwap.currentGen() で見る。
 async function subscribeAndWaitForLive(
   targetLiveId: string,
-  abortedFn: (channelGen: number) => boolean,
+  abortedFn: () => boolean,
 ): Promise<ChannelSubscribeOutcome> {
   const waitOn = (tracker: ChannelSubscriptionTracker, chGen: number) =>
     awaitChannelsSubscribed({
       tracker,
-      aborted: () => channelGeneration !== chGen || abortedFn(chGen),
+      aborted: () => currentChannelGen() !== chGen || abortedFn(),
       timeoutMs: CHANNEL_SUBSCRIBE_TIMEOUT_MS,
       pollMs: CHANNEL_SUBSCRIBE_POLL_MS,
       now: () => Date.now(),
       sleep: channelSleep,
     });
 
+  if (abortedFn()) return "aborted";
   if (
     currentChannelLiveId === targetLiveId &&
     currentChannelTracker !== null &&
     !currentChannelTracker.hasFailure()
   ) {
     // 既にこのliveId向けのチャンネルがあり、接続待ち or 接続済み → 張り直さず待つ。
-    const outcome = await waitOn(currentChannelTracker, channelGeneration);
+    const outcome = await waitOn(currentChannelTracker, currentChannelGen());
     if (outcome !== "timeout") return outcome;
     // タイムアウト → 一度だけ張り直して再待機する（stuck した接続の作り直し）。
   }
+  if (abortedFn()) return "aborted"; // 張り直し前に中断確認（stop 直後にchannelを増やさない）
   subscribeLiveChannels(targetLiveId);
   const tracker = currentChannelTracker;
   if (!tracker) return "aborted";
-  return waitOn(tracker, channelGeneration);
+  return waitOn(tracker, currentChannelGen());
 }
 
 // current_turn_idが切り替わった直後は、Realtimeイベントを待たずに即座に
@@ -1234,7 +1263,8 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
   // 客席のボットがたまにツッコミ/爆笑/拍手ボタンを押したかのように送る
   // （見た目の賑やかし用のブロードキャストのみで、どのボットが送ったかは扱わない）。
   // 60秒の回答フェーズ中に数回程度発生する頻度を狙っている（2026-08-19：2%→5%に引き上げ）。
-  if (bots.length > 0 && tsukkomiChannel && now - lastBotTsukkomiAt > 1_500 && Math.random() < 0.05) {
+  // tsukkomi は DB購読チャンネルと分離した1インスタンス（ensureTsukkomiChannel）。
+  if (bots.length > 0 && now - lastBotTsukkomiAt > 1_500 && Math.random() < 0.05) {
     lastBotTsukkomiAt = now;
     const roll = Math.random();
     const [kind, text]: ["stamp" | "clap", string] =
@@ -1243,7 +1273,7 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
         : roll < 2 / 3
           ? ["stamp", "爆笑"]
           : ["clap", "👏"];
-    tsukkomiChannel.send({
+    ensureTsukkomiChannel().send({
       type: "broadcast",
       event: "tsukkomi",
       payload: { liveId: live.id, kind, text },

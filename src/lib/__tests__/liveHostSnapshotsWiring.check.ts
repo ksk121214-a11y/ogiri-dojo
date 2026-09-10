@@ -20,7 +20,7 @@ const count = (needle: string) => src.split(needle).length - 1;
     "awaitChannelsSubscribed",
     "botScoringAllowed",
     "childrenSnapshotReady",
-    "createChannelSubscriptionTracker",
+    "createChannelSwapController",
     "createRecoveryCoordinator",
     "createSliceGate",
     "hydrateAfterLive",
@@ -46,9 +46,12 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(src.includes("const recovery = createRecoveryCoordinator()"), "recovery コーディネータが無い");
   assert.ok(/let subscribedLiveId: string \| null = null;/.test(src), "subscribedLiveId が無い");
   assert.ok(/let runtimeReadyLiveId: string \| null = null;/.test(src), "runtimeReadyLiveId が無い");
-  assert.ok(/let channelGeneration = 0;/.test(src), "購読世代 channelGeneration が無い");
+  assert.ok(
+    /const channelSwap = createChannelSwapController<[\s\S]{0,120}?>\(\{/.test(src),
+    "DB購読チャンネルの入れ替え管理（createChannelSwapController）が無い",
+  );
   assert.ok(/let currentChannelTracker: ChannelSubscriptionTracker \| null = null;/.test(src), "currentChannelTracker が無い");
-  console.log("PASS: 配線-2（5スライスゲート ＋ recoveryコーディネータ ＋ subscribedLiveId/runtimeReadyLiveId/channelGeneration）");
+  console.log("PASS: 配線-2（5スライスゲート ＋ recoveryコーディネータ ＋ channelSwapController）");
 }
 
 // 3: 各取得経路が loadSnapshotSlice を通っている。
@@ -288,32 +291,48 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-15（stopHostProgress: 全ゲート begin ＋ recovery無効化 ＋ 確立/retry/snapshot リセット）");
 }
 
-// 16: P1-2（実際の SUBSCRIBED を待つ）。cleanupChannels が購読世代を +1、
-//     subscribeLiveChannels は subscribedLiveId を直接設定せず、onChannelStatus が
-//     全必須チャンネル SUBSCRIBED を確認したときだけ設定する。
+// 16: P1（旧チャンネルの削除完了前に同名を再作成しない）。
+//     - DB購読チャンネルは channelSwap（createChannelSwapController）経由で入れ替える
+//     - cleanupChannels は channelSwap.invalidate() へ委譲
+//     - subscribeLiveChannels は channelSwap.swap() 経由で spawnLiveChannels を呼ぶ
+//     - spawn は gen固有 topic（topicFor / buildChannelTopic）を使う＝同名衝突しない
+//     - subscribedLiveId は onChannelStatus が全必須 SUBSCRIBED を確認したときだけ設定
 {
   assert.ok(
-    /function cleanupChannels\(\) \{[\s\S]*?subscribedLiveId = null;[\s\S]*?channelGeneration \+= 1;[\s\S]*?\n\}/.test(src),
-    "cleanupChannels が subscribedLiveId クリア＋購読世代 +1 をしていない",
+    /function cleanupChannels\(\) \{\s*\n\s*channelSwap\.invalidate\(\);/.test(src),
+    "cleanupChannels が channelSwap.invalidate() へ委譲していない",
   );
-  // subscribeLiveChannels は「作った直後に subscribedLiveId = liveId」を **しない**。
   assert.ok(
-    !/channels = \[livesCh[\s\S]{0,120}?subscribedLiveId = liveId;/.test(src),
-    "subscribeLiveChannels が .subscribe() 直後に subscribedLiveId を立てている（接続完了ではない）",
+    /function subscribeLiveChannels\(liveId: string\) \{\s*\n\s*const \{ tracker \} = channelSwap\.swap\(liveId\);/.test(src),
+    "subscribeLiveChannels が channelSwap.swap(liveId) 経由になっていない",
+  );
+  assert.ok(
+    /spawn: \(args\) => spawnLiveChannels\(args\)/.test(src),
+    "channelSwap の spawn が spawnLiveChannels を使っていない",
+  );
+  assert.ok(
+    /function spawnLiveChannels\(/.test(src) &&
+      count(".channel(topicFor(") === 5,
+    "spawnLiveChannels が gen固有 topic（topicFor）で5チャンネルを作っていない",
+  );
+  // 「作った直後に subscribedLiveId = liveId」を **しない**（.subscribe() は接続完了ではない）。
+  assert.ok(
+    !/return \[livesCh[\s\S]{0,120}?subscribedLiveId = liveId;/.test(src),
+    "spawnLiveChannels が .subscribe() 直後に subscribedLiveId を立てている（接続完了ではない）",
   );
   assert.ok(
     src.includes("const REQUIRED_CHANNELS = [\"lives\", \"participants\", \"turns\", \"answers\", \"scores\"]"),
     "必須チャンネル一覧（REQUIRED_CHANNELS）が無い",
   );
-  assert.ok(
-    src.includes("createChannelSubscriptionTracker([...REQUIRED_CHANNELS])"),
-    "subscribeLiveChannels が接続状態集約 tracker を作っていない",
-  );
   // onChannelStatus：古い世代は無視、SUBSCRIBED を集約、全 SUBSCRIBED でだけ確立、
   // CHANNEL_ERROR / TIMED_OUT / CLOSED でランタイム無効化。
-  const onStatus = src.match(/const onChannelStatus =[\s\S]*?\n {4}\};/);
+  const onStatus = src.match(/const onChannelStatus = \(channel: string\) =>[\s\S]*?\n {2}\};/);
   assert.ok(onStatus, "onChannelStatus が見つからない");
   assert.ok(/if \(!isCurrentGen\(\)\) return;/.test(onStatus[0]), "onChannelStatus が古い購読世代を弾いていない");
+  assert.ok(
+    /if \(useLiveHostStore\.getState\(\)\.live\?\.id !== liveId\) return;/.test(onStatus[0]),
+    "onChannelStatus が『この channel の liveId が現在ライブか』を確認していない（P2）",
+  );
   assert.ok(
     /if \(tracker\.allSubscribed\(\) && !tracker\.hasFailure\(\)\) \{\s*\n\s*subscribedLiveId = liveId;/.test(onStatus[0]),
     "全必須チャンネル SUBSCRIBED のときだけ subscribedLiveId を確立していない",
@@ -324,40 +343,47 @@ const count = (needle: string) => src.split(needle).length - 1;
       /if \(runtimeReadyLiveId === liveId\) runtimeReadyLiveId = null;/.test(onStatus[0]),
     "接続異常（CHANNEL_ERROR/TIMED_OUT/CLOSED）で該当liveIdの runtime を無効化していない",
   );
-  console.log("PASS: 配線-16（P1-2：全必須チャンネル SUBSCRIBED でだけ確立・異常で凍結・古い世代は無視）");
+  console.log("PASS: 配線-16（P1：channelSwap経由・gen固有topic・全SUBSCRIBEDでだけ確立・古い世代/別ライブは無視）");
 }
 
-// 16b: P1-1（`stillCurrent: () => true` の廃止 ＋ 購読世代 & liveId 二重確認）。
+// 16b: P1-1/P2（旧購読の遅延コールバックが現在ライブへ影響しない）。
+//   - `stillCurrent: () => true` を廃止
+//   - refetchLive / refetchChildren は targetMatches（isCurrentGen ＋ state.live.id === liveId）
+//   - loadSnapshotSlice の beginGuard（gate.begin より前の対象確認）で二重防御
 {
-  assert.ok(!/stillCurrent: \(\) => true/.test(src), "`stillCurrent: () => true` が残っている（P1-1）");
-  // refetchLive / refetchChildren の stillCurrent が isCurrentGen() と live.id を両方見る。
+  assert.ok(!/stillCurrent: \(\) => true(?!\))/.test(src.replace(/\/\/.*$/gm, "")), "`stillCurrent: () => true` が残っている（P1-1）");
   assert.ok(
-    /const refetchLive = \(\) => \{[\s\S]*?stillCurrent: \(\) => isCurrentGen\(\) && useLiveHostStore\.getState\(\)\.live\?\.id === liveId,/.test(src),
-    "refetchLive の stillCurrent が『購読世代一致 ＋ 現在の live.id 一致』になっていない",
+    /const targetMatches = \(\) =>\s*\n?\s*isCurrentGen\(\) && useLiveHostStore\.getState\(\)\.live\?\.id === liveId;/.test(src),
+    "spawnLiveChannels に targetMatches（購読世代 ＋ 現在の live.id）が無い",
   );
   assert.ok(
-    /const refetchChildren = \(\) => \{[\s\S]*?stillCurrent: \(\) => isCurrentGen\(\) && useLiveHostStore\.getState\(\)\.live\?\.id === liveId,/.test(src),
-    "refetchChildren の stillCurrent が『購読世代一致 ＋ 現在の live.id 一致』になっていない",
+    /const refetchLive = \(\) => \{\s*\n\s*if \(!targetMatches\(\)\) return;[\s\S]*?beginGuard: targetMatches,[\s\S]*?stillCurrent: \(\) => targetMatches\(\),/.test(src),
+    "refetchLive が targetMatches ＋ beginGuard で守られていない",
   );
-  // 各 postgres_changes コールバックが古い購読世代を弾く。
-  assert.ok(count("if (!isCurrentGen()) return;") >= 6, "Realtime コールバックの古い世代ガードが不足");
-  console.log("PASS: 配線-16b（P1-1：stillCurrent:()=>true 廃止・購読世代＋liveId の二重確認）");
+  assert.ok(
+    /const refetchChildren = \(\) => \{\s*\n\s*if \(!targetMatches\(\)\) return;[\s\S]*?beginGuard: targetMatches,[\s\S]*?stillCurrent: \(\) => targetMatches\(\),/.test(src),
+    "refetchChildren が targetMatches ＋ beginGuard で守られていない",
+  );
+  // answers / scores のインラインコールバックも targetMatches で守る。
+  assert.ok(count("if (!targetMatches()) return;") >= 5, "Realtime コールバックの targetMatches ガードが不足");
+  console.log("PASS: 配線-16b（P1-1/P2：stillCurrent:()=>true 廃止・targetMatches ＋ beginGuard の二重防御）");
 }
 
 // 16c: subscribeAndWaitForLive：awaitChannelsSubscribed で SUBSCRIBED を待ち、
-//      abort に stop / 進行世代 / 対象liveId / 購読世代 を含める。
+//      abort に stop / 進行世代 / 対象liveId / 購読世代の入れ替わり を含める。
 {
   const fn = src.match(/async function subscribeAndWaitForLive\([\s\S]*?\n\}/);
   assert.ok(fn, "subscribeAndWaitForLive が無い");
   assert.ok(fn[0].includes("awaitChannelsSubscribed({"), "awaitChannelsSubscribed を使っていない");
   assert.ok(
-    /aborted: \(\) => channelGeneration !== chGen \|\| abortedFn\(chGen\)/.test(fn[0]),
-    "aborted が購読世代の入れ替わりを見ていない",
+    /aborted: \(\) => currentChannelGen\(\) !== chGen \|\| abortedFn\(\)/.test(fn[0]),
+    "aborted が購読世代の入れ替わり（channelSwap.currentGen）を見ていない",
   );
   assert.ok(
-    /if \(outcome !== "timeout"\) return outcome;[\s\S]{0,120}?subscribeLiveChannels\(targetLiveId\);/.test(fn[0]),
+    /if \(outcome !== "timeout"\) return outcome;[\s\S]{0,200}?subscribeLiveChannels\(targetLiveId\);/.test(fn[0]),
     "タイムアウト時に一度だけ張り直す経路が無い（無限待ち防止）",
   );
+  assert.ok(count("if (abortedFn()) return \"aborted\";") >= 2, "張り直し前の中断確認が無い（stop直後にchannelを増やさない）");
   assert.ok(src.includes("const CHANNEL_SUBSCRIBE_TIMEOUT_MS = 10_000"), "接続待ちタイムアウト定数が無い");
   console.log("PASS: 配線-16c（subscribeAndWaitForLive: SUBSCRIBED待ち ＋ 中断条件 ＋ タイムアウト再張り）");
 }
@@ -366,6 +392,37 @@ const count = (needle: string) => src.split(needle).length - 1;
 {
   assert.ok(/function ensureTickTimer\(generation: number\) \{[\s\S]*?if \(tickTimer\) return;/.test(src), "ensureTickTimer が『既に1本あればそのまま』になっていない");
   console.log("PASS: 配線-16d（ensureTickTimer はタイマーを重複作成しない）");
+}
+
+// 16e: tsukkomi チャンネルは DB購読チャンネルのライフサイクルから分離。
+//   - ensureTsukkomiChannel が1インスタンスを保持（!tsukkomiChannel のときだけ作る）
+//   - cleanupChannels / stopHostProgress で tsukkomi を削除・null 化しない
+//   - channelSwap の kinds に tsukkomi を含めない
+{
+  assert.ok(
+    /function ensureTsukkomiChannel\(\) \{\s*\n\s*if \(!tsukkomiChannel\) \{/.test(src),
+    "ensureTsukkomiChannel が1インスタンス保持になっていない",
+  );
+  const cleanup = src.match(/function cleanupChannels\(\) \{[\s\S]*?\n\}/);
+  assert.ok(cleanup && !/tsukkomiChannel/.test(cleanup[0]), "cleanupChannels が tsukkomiChannel を触っている（分離できていない）");
+  const stop = src.match(/stopHostProgress: \(\) => \{[\s\S]*?\n {2}\},/);
+  assert.ok(stop && !/tsukkomiChannel/.test(stop[0]), "stopHostProgress が tsukkomiChannel を触っている（分離できていない）");
+  assert.ok(
+    /kinds: \[\.\.\.REQUIRED_CHANNELS\]/.test(src) && !/REQUIRED_CHANNELS = \[[^\]]*tsukkomi/.test(src),
+    "channelSwap の必須チャンネルに tsukkomi が混ざっている",
+  );
+  console.log("PASS: 配線-16e（follower-tsukkomi は DB購読チャンネルのライフサイクルから分離）");
+}
+
+// 16f: loadSnapshotSlice の beginGuard は gate.begin より前（対象不一致で gate を進めない）。
+{
+  assert.ok(
+    /export async function loadSnapshotSlice<TResult>\([\s\S]*?if \(deps\.beginGuard && !deps\.beginGuard\(\)\) return "target-changed";\s*\n\s*const token = deps\.gate\.begin\(\);/.test(
+      readFileSync(join(process.cwd(), "src", "lib", "liveHostSnapshots.ts"), "utf8"),
+    ),
+    "loadSnapshotSlice の beginGuard が gate.begin() より前で確認していない",
+  );
+  console.log("PASS: 配線-16f（beginGuard は gate.begin より前＝対象不一致で gate を進めない）");
 }
 
 // 17: init/hydrate のstop検出ブランチが cleanupChannels() を呼ばない。

@@ -8,8 +8,10 @@ import {
   answersSnapshotMatches,
   awaitChannelsSubscribed,
   botScoringAllowed,
+  buildChannelTopic,
   childrenSnapshotReady,
   createChannelSubscriptionTracker,
+  createChannelSwapController,
   createRecoveryCoordinator,
   createSliceGate,
   hydrateAfterLive,
@@ -22,6 +24,7 @@ import {
   shouldReleaseRetryFlag,
   shouldRetryNow,
   type ChannelSubscribeOutcome,
+  type ChannelSubscriptionTracker,
   type HostHydrationDeps,
   type HostHydrationOutcome,
   type ProgressGuardState,
@@ -723,6 +726,198 @@ async function main() {
     assert.equal(newTracker.hasFailure(), false, "古い世代のエラーは新しい世代の tracker に影響しない");
     assert.equal(newTracker.allSubscribed(), true, "新しい世代の runtime ready は解除されない（必須6）");
     console.log("PASS: 追加必須6（古い購読世代のエラーが現在の runtime を無効化しない）");
+  }
+
+  // ========== createChannelSwapController（購読の入れ替え：P1）==========
+
+  // 疑似 Supabase チャンネル。topic を記録し、status を後から手動で流せる。
+  type FakeChannel = { topic: string; onStatus: (kind: string, s: string) => void; removed: boolean };
+  const makeSwapDeps = () => {
+    const spawned: FakeChannel[][] = [];
+    const removed: FakeChannel[] = [];
+    const removeDeferrals: Array<() => void> = []; // 保留中の removeChannel を後で解決する
+    let removeMode: "resolve" | "pending" | "throw" = "resolve";
+    const deps = {
+      kinds: ["lives", "participants", "turns", "answers", "scores"],
+      spawn: (args: {
+        liveId: string;
+        gen: number;
+        tracker: ChannelSubscriptionTracker;
+        isCurrentGen: () => boolean;
+        topicFor: (kind: string) => string;
+      }) => {
+        const chs: FakeChannel[] = deps.kinds.map((kind) => {
+          const ch: FakeChannel = {
+            topic: args.topicFor(kind),
+            removed: false,
+            onStatus: (k, s) => {
+              if (!args.isCurrentGen()) return; // 古い購読世代は無視
+              args.tracker.note(k, s);
+            },
+          };
+          return ch;
+        });
+        spawned.push(chs);
+        return chs;
+      },
+      remove: (ch: FakeChannel) => {
+        removed.push(ch);
+        ch.removed = true;
+        if (removeMode === "throw") throw new Error("removeChannel sync failure");
+        if (removeMode === "pending") {
+          return new Promise<void>((res) => removeDeferrals.push(() => res()));
+        }
+        return Promise.resolve();
+      },
+    };
+    return {
+      deps,
+      spawned,
+      removed,
+      flushRemovals: () => removeDeferrals.splice(0).forEach((f) => f()),
+      setRemoveMode: (m: "resolve" | "pending" | "throw") => {
+        removeMode = m;
+      },
+    };
+  };
+
+  // 追加必須2：購読世代ごとに一意な topic（同名衝突しない）。
+  {
+    assert.equal(buildChannelTopic("lives", "L1", 1), "host-lives-L1-g1");
+    assert.notEqual(buildChannelTopic("lives", "L1", 1), buildChannelTopic("lives", "L1", 2));
+    console.log("PASS: 追加必須2（buildChannelTopic：購読世代ごとに一意な topic）");
+  }
+
+  // 追加必須1/2：removeChannel を保留中に同じ liveId を再 swap しても、古い同名
+  // チャンネルを再利用しない（gen固有 topic で衝突しない）。
+  {
+    const h = makeSwapDeps();
+    h.setRemoveMode("pending"); // removeChannel は解決しない（leaving のまま）
+    const c = createChannelSwapController(h.deps);
+    const s1 = c.swap("L1");
+    const s2 = c.swap("L1"); // removeChannel 保留中に同じ liveId を再 swap
+    assert.notDeepEqual(
+      s1.channels.map((x) => x.topic),
+      s2.channels.map((x) => x.topic),
+      "removeChannel 保留中でも新しい世代は別 topic のチャンネルを作る（古い同名を再利用しない）",
+    );
+    assert.equal(c.currentGen(), 2);
+    // s1 の全チャンネルは remove 対象になっている（背景除去、保留中でも呼ばれる）。
+    for (const ch of s1.channels) assert.ok(h.removed.includes(ch), "旧世代チャンネルが除去されていない");
+    // s2 の全チャンネルは remove されていない。
+    for (const ch of s2.channels) assert.ok(!h.removed.includes(ch), "新世代チャンネルが誤って除去された（必須4）");
+    console.log("PASS: 追加必須1/2/4（保留 removeChannel 中でも新世代は別topic・旧世代のみ除去）");
+  }
+
+  // 追加必須3：入れ替え要求を2回並行させても、最後の世代だけが currentGen と一致する。
+  {
+    const h = makeSwapDeps();
+    const c = createChannelSwapController(h.deps);
+    const s1 = c.swap("L1");
+    const s2 = c.swap("L2");
+    assert.equal(c.currentGen(), s2.gen);
+    // s1 の status コールバックは無効（古い世代）→ s1.tracker に反映されない。
+    s1.channels[0].onStatus("lives", "SUBSCRIBED");
+    assert.deepEqual(s1.tracker.state().subscribed, [], "古い世代の SUBSCRIBED は古い tracker にも入らない（必須3）");
+    // s2 の status は有効。
+    for (const kind of ["lives", "participants", "turns", "answers", "scores"]) {
+      const idx = ["lives", "participants", "turns", "answers", "scores"].indexOf(kind);
+      s2.channels[idx].onStatus(kind, "SUBSCRIBED");
+    }
+    assert.equal(s2.tracker.allSubscribed(), true, "最新世代の SUBSCRIBED は集約される");
+    console.log("PASS: 追加必須3（並行入れ替え：最後の世代だけが有効）");
+  }
+
+  // 追加必須4：古い削除処理の完了（保留していた removeChannel の解決）が、新しい
+  // チャンネルを削除しない。
+  {
+    const h = makeSwapDeps();
+    h.setRemoveMode("pending");
+    const c = createChannelSwapController(h.deps);
+    c.swap("L1");
+    const s2 = c.swap("L1");
+    h.flushRemovals(); // 1回目 swap の removeChannel が今になって完了
+    for (const ch of s2.channels) assert.ok(!ch.removed, "古い削除の完了が新しいチャンネルを削除した（必須4）");
+    console.log("PASS: 追加必須4（古い削除処理の完了が新しいチャンネルを消さない）");
+  }
+
+  // 追加必須（removeChannel の失敗・同期例外でも永久停止しない）。
+  {
+    const h = makeSwapDeps();
+    h.setRemoveMode("throw"); // removeChannel が同期例外を投げる
+    const c = createChannelSwapController(h.deps);
+    c.swap("L1");
+    // 例外が伝播せず次の swap が普通にできる。
+    const s2 = c.swap("L1");
+    assert.equal(c.currentGen(), 2);
+    assert.equal(s2.channels.length, 5);
+    console.log("PASS: 追加必須（removeChannel の同期例外でも swap は継続できる＝永久停止しない）");
+  }
+
+  // 追加必須11：invalidate（stop 相当）後、遅延 status / 遅延削除がチャンネルを復活させない。
+  {
+    const h = makeSwapDeps();
+    h.setRemoveMode("pending");
+    const c = createChannelSwapController(h.deps);
+    const s1 = c.swap("L1");
+    c.invalidate(); // stopHostProgress 相当
+    assert.equal(c.current(), null, "invalidate 後は current が無い");
+    // 遅れて届く SUBSCRIBED は古い世代なので tracker に入らない。
+    s1.channels[0].onStatus("lives", "SUBSCRIBED");
+    assert.deepEqual(s1.tracker.state().subscribed, [], "invalidate 後の遅延 SUBSCRIBED は無視される（必須11）");
+    // 遅れて removeChannel が完了しても current は null のまま。
+    h.flushRemovals();
+    assert.equal(c.current(), null);
+    // invalidate 後にもう一度 swap でき、世代は進む。
+    const s2 = c.swap("L2");
+    assert.equal(s2.gen, c.currentGen());
+    console.log("PASS: 追加必須11（invalidate 後の遅延 status/削除がチャンネルを復活させない）");
+  }
+
+  // 追加必須7/8（P2）：loadSnapshotSlice の beginGuard が false のとき、gate を
+  // 進めず（gate.begin を呼ばず）、markPending も fetch も実行しない。
+  {
+    const gate = createSliceGate();
+    const before = gate.current();
+    let markPendingCalled = false;
+    let fetchCalled = false;
+    const o = await loadSnapshotSlice<string>({
+      gate,
+      beginGuard: () => false, // 旧購読世代・別ライブ相当
+      markPending: () => {
+        markPendingCalled = true;
+      },
+      fetch: async () => {
+        fetchCalled = true;
+        return { ok: true, data: "x" };
+      },
+      stillCurrent: () => true,
+      applyFresh: () => {},
+      markUnconfirmed: () => {},
+    });
+    assert.equal(o, "target-changed", "beginGuard=false は target-changed で即戻る");
+    assert.equal(gate.current(), before, "beginGuard=false のとき gate.begin() を呼ばない（必須8）");
+    assert.equal(markPendingCalled, false, "beginGuard=false のとき markPending を呼ばない（必須7）");
+    assert.equal(fetchCalled, false, "beginGuard=false のとき fetch を呼ばない（必須8）");
+    console.log("PASS: 追加必須7/8（beginGuard=false は gate/markPending/fetch のどれも実行しない）");
+  }
+  // beginGuard=true なら通常どおり。
+  {
+    const gate = createSliceGate();
+    let applied = "";
+    const o = await loadSnapshotSlice<string>({
+      gate,
+      beginGuard: () => true,
+      fetch: async () => ({ ok: true, data: "ok" }),
+      stillCurrent: () => true,
+      applyFresh: (d) => {
+        applied = d;
+      },
+      markUnconfirmed: () => {},
+    });
+    assert.equal(o, "applied");
+    assert.equal(applied, "ok");
+    console.log("PASS: 追加必須（beginGuard=true なら通常どおり適用される）");
   }
 
   console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");

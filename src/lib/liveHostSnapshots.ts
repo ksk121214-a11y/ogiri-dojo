@@ -55,11 +55,22 @@ export interface SliceLoadDeps<TResult> {
    * されており、古い completion がこの markPending を上書きすることはない。
    */
   markPending?: () => void;
+  /**
+   * gate.begin() より **前** に呼ぶ対象確認。省略可。false を返した場合、
+   * gate.begin()・markPending()・fetch() のいずれも実行せず即座に "target-changed" で戻る。
+   * 旧購読世代・別ライブ向けの遅延コールバックが、現在ライブの gate を進めたり
+   * 確認状態を未確認へ落としたりするのを防ぐ（stillCurrent は fetch 完了「後」の
+   * 確認なので、markPending の副作用を止められない）。
+   */
+  beginGuard?: () => boolean;
 }
 
 export async function loadSnapshotSlice<TResult>(
   deps: SliceLoadDeps<TResult>,
 ): Promise<SliceLoadOutcome> {
+  // 対象確認は gate.begin() より前に行う。対象不一致（旧購読世代・別ライブ）の
+  // 呼び出しが gate を進めたり markPending で確認状態を落としたりしないようにする。
+  if (deps.beginGuard && !deps.beginGuard()) return "target-changed";
   const token = deps.gate.begin();
   // 取得を「開始した」時点で、このスライスの表示データは最新か未確認。
   // 確認状態だけ未確認へ落とす（表示データは維持）。gate.begin() 済みなので、
@@ -230,6 +241,110 @@ export async function awaitChannelsSubscribed(deps: AwaitChannelsDeps): Promise<
     // sleep 明けにも中断確認（stop 直後に allSubscribed へ滑り込まないように）。
     if (deps.aborted()) return "aborted";
   }
+}
+
+// ===== 購読の入れ替え（購読世代・所有権・旧チャンネルの直列除去）=====
+//
+// supabase-js は「同じ topic のチャンネルがクライアント内に残っていると、新規作成
+// せず既存インスタンスを返す」。removeChannel は非同期なので、削除中（leaving）の
+// 古いインスタンスが返り、新しい .subscribe() が有効にならず SUBSCRIBED が新しい
+// tracker に届かない → 10秒タイムアウト・長時間の進行停止につながる。
+// 対策：
+// - Postgres Changes 用の topic を「購読世代ごとに一意」にする（buildChannelTopic）。
+//   新旧で topic が衝突しないため、古いインスタンスが返ることが構造的に起きない。
+// - 購読を入れ替えるたびに世代を同期的に +1（＝古い世代のコールバックを即無効化）。
+// - 旧チャンネルは「入れ替え時にローカルへ確保してから」背景除去する（await しない）。
+//   確保済みの集合だけを除去するので、後から新しいチャンネルを消すことはない。
+// - removeChannel が同期例外・拒否を返しても握りつぶす（永久停止しない）。
+// - invalidate()（stop 用）でも世代を +1 して旧チャンネルを背景除去する。
+export function buildChannelTopic(kind: string, liveId: string, gen: number): string {
+  return `host-${kind}-${liveId}-g${gen}`;
+}
+
+export interface ChannelSwapSpawnArgs {
+  liveId: string;
+  gen: number;
+  tracker: ChannelSubscriptionTracker;
+  /** この世代が今も現行か（コールバック内の古い世代ガード用）。 */
+  isCurrentGen: () => boolean;
+  /** kind と gen固有 topic を組み立てる（buildChannelTopic のショートカット）。 */
+  topicFor: (kind: string) => string;
+}
+
+export interface ChannelSwapDeps<TChannel> {
+  kinds: string[];
+  /** 全必須チャンネルを作成し .subscribe() まで行って返す（gen固有 topic を使う）。 */
+  spawn: (args: ChannelSwapSpawnArgs) => TChannel[];
+  /** チャンネル1つを除去する（Promise 可。await されない。例外は握りつぶされる）。 */
+  remove: (channel: TChannel) => unknown;
+}
+
+export interface ChannelSwapResult<TChannel> {
+  gen: number;
+  liveId: string;
+  tracker: ChannelSubscriptionTracker;
+  channels: TChannel[];
+}
+
+export interface ChannelSwapController<TChannel> {
+  /** 購読を入れ替える。旧世代を同期的に無効化し旧チャンネルを背景除去してから
+   *  新世代を spawn する。最後の swap の世代だけが currentGen と一致する。 */
+  swap: (liveId: string) => ChannelSwapResult<TChannel>;
+  /** stop 用。現在の世代を無効化し旧チャンネルを背景除去する（新規 spawn はしない）。 */
+  invalidate: () => void;
+  currentGen: () => number;
+  /** 診断・テスト用。現在の swap 結果。 */
+  current: () => ChannelSwapResult<TChannel> | null;
+}
+
+export function createChannelSwapController<TChannel>(
+  deps: ChannelSwapDeps<TChannel>,
+): ChannelSwapController<TChannel> {
+  let gen = 0;
+  let current: ChannelSwapResult<TChannel> | null = null;
+
+  const removeCaptured = (channels: TChannel[]) => {
+    for (const ch of channels) {
+      try {
+        // await しない。gen固有 topic なので除去が遅延・失敗しても新チャンネルと衝突しない。
+        void Promise.resolve(deps.remove(ch)).catch(() => {});
+      } catch {
+        /* removeChannel が同期例外を投げても永久停止させない */
+      }
+    }
+  };
+
+  return {
+    swap(liveId) {
+      // 1) 旧世代を同期的に無効化（古いコールバックは以降 isCurrentGen()=false）。
+      gen += 1;
+      const myGen = gen;
+      // 2) 旧チャンネルをローカルへ確保してから背景除去（新チャンネルは絶対に消さない）。
+      const prev = current;
+      current = null;
+      if (prev) removeCaptured(prev.channels);
+      // 3) 新世代の tracker とチャンネルを作る（gen固有 topic）。
+      const tracker = createChannelSubscriptionTracker(deps.kinds);
+      const channels = deps.spawn({
+        liveId,
+        gen: myGen,
+        tracker,
+        isCurrentGen: () => myGen === gen,
+        topicFor: (kind) => buildChannelTopic(kind, liveId, myGen),
+      });
+      const result: ChannelSwapResult<TChannel> = { gen: myGen, liveId, tracker, channels };
+      current = result;
+      return result;
+    },
+    invalidate() {
+      gen += 1;
+      const prev = current;
+      current = null;
+      if (prev) removeCaptured(prev.channels);
+    },
+    currentGen: () => gen,
+    current: () => current,
+  };
 }
 
 // ===== 取得失敗からの完全復旧オーケストレーション（live確定後の順序）=====
