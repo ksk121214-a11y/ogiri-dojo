@@ -87,7 +87,7 @@ export default function HowToPlayPage() {
 
       <StepCard icon={null} title="お題提供">
         <p>
-          爆笑スタジアムで使用するすべてのお題は、
+          爆笑スタジアムで使用するお題は、
           <br />
           「癖の強いお題を出す大喜利」さんにご提供いただいています。
         </p>
