@@ -282,6 +282,7 @@ export default function LivePage() {
                   data={finalResult}
                   myParticipantId={myParticipant?.id ?? null}
                   participantAvatars={participantAvatars}
+                  liveMode={live.live_mode}
                 />
               ) : (
                 <p className="font-sans text-sm text-white/70">結果を集計中…</p>
@@ -431,6 +432,7 @@ export default function LivePage() {
               data={finalResult}
               myParticipantId={myParticipant?.id ?? null}
               participantAvatars={participantAvatars}
+              liveMode={live.live_mode}
             />
           )}
 

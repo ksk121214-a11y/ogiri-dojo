@@ -508,7 +508,22 @@ begin
 
   reset role;
   update public.answers set resolved = true where id = v_answer_id;
-  update public.lives set current_phase = 'closed', results_published = true where id = v_live_id;
+  -- 0068で追加された制約により、results_published=trueにするにはlive_mode='official'
+  -- かつofficial_sequence_numberが必須になった（テストライブは結果を公開できない）。
+  -- このテストはSNS公開後のRLSを検証したいだけなので、本番専用カウンター
+  -- (official_live_counter)自体を実際にインクリメントして値を割り当てる
+  -- （max()+1のような即席の値だと、後続の0068テストが同じ本番カウンターから
+  -- 独立に採番した値と衝突しうるため、必ず共有カウンターを経由する）。
+  with bumped as (
+    update public.official_live_counter set last_value = last_value + 1 where id = true
+    returning last_value
+  )
+  update public.lives
+  set current_phase = 'closed',
+      results_published = true,
+      live_mode = 'official',
+      official_sequence_number = (select last_value from bumped)
+  where id = v_live_id;
   insert into public.sns_live_results (id, live_id) values (gen_random_uuid(), v_live_id) returning id into v_result_id;
   insert into public.sns_live_result_answers (id, live_result_id, answer_id, included)
     values (gen_random_uuid(), v_result_id, v_answer_id, true);

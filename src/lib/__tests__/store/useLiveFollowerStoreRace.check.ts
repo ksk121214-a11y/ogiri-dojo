@@ -121,6 +121,8 @@ const baseLive: LiveRow = {
   announcement_sent_at: null,
   created_by: null,
   rank_rewards_applied: false,
+  live_mode: "official",
+  official_sequence_number: 1,
 };
 
 const participants: ParticipantRow[] = [

@@ -14,7 +14,7 @@ import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 
@@ -195,9 +195,14 @@ export default function LiveHostPage() {
         <>
           <AdminCard>
             <p className="text-lg font-bold text-gray-900">
-              {live.sequence_number ? `${formatLiveTicketNo(live.sequence_number)} ` : ""}
+              {formatLiveTicketLabel(live.live_mode, live.official_sequence_number)}{" "}
               {PHASE_LABEL[live.current_phase] ?? live.current_phase}
             </p>
+            {live.live_mode === "test" && (
+              <p className="mt-0.5 text-xs font-bold text-orange-600">
+                テストライブ（開催番号・ポイント・実績には反映されません）
+              </p>
+            )}
             {live.title && <p className="mt-0.5 text-sm text-gray-600">{live.title}</p>}
             {remainingSec !== null && (
               <p className="mt-1 text-sm font-bold tabular-nums text-gray-700">
@@ -349,6 +354,9 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const [groupCount, setGroupCount] = useState(3);
   const [topicMode, setTopicMode] = useState<"random" | "manual">("random");
   const [manualTopicIds, setManualTopicIds] = useState<string[]>([]);
+  // 0068追加：初期値は必ず「テストライブ」（誤って本番を選んだまま送信することを
+  // 防ぐため、既定を安全側に倒す）。
+  const [liveMode, setLiveMode] = useState<"test" | "official">("test");
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -357,6 +365,12 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const handleSubmit = async () => {
     if (submitting) return;
     setLocalError(null);
+    if (liveMode === "official") {
+      const confirmed = window.confirm(
+        "本番ライブとして準備します。正式な開催番号が付与され、終了後にポイント・実績へ反映されます。よろしいですか？",
+      );
+      if (!confirmed) return;
+    }
     const input: LivePreparationInput = {
       title,
       scheduledAt: fromDatetimeLocalValue(scheduledAt) ?? new Date().toISOString(),
@@ -366,6 +380,7 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
         topicMode === "random"
           ? { mode: "random" }
           : { mode: "manual", topicBankIds: manualTopicIds },
+      liveMode,
     };
     setSubmitting(true);
     try {
@@ -390,6 +405,46 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
   return (
     <AdminCard title="ライブ準備（次回ライブの設定）">
       <div className="flex flex-col gap-3">
+        <div className="rounded border border-gray-200 p-2">
+          <p className="text-xs font-bold text-gray-700">ライブ種別</p>
+          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
+            <label
+              className={`flex-1 cursor-pointer rounded border p-2 text-xs ${
+                liveMode === "test" ? "border-blue-500 bg-blue-50" : "border-gray-300"
+              }`}
+            >
+              <span className="flex items-center gap-1.5 font-bold text-gray-900">
+                <input
+                  type="radio"
+                  checked={liveMode === "test"}
+                  onChange={() => setLiveMode("test")}
+                />
+                テストライブ
+              </span>
+              <span className="mt-1 block text-gray-600">
+                動作確認用です。本番の開催番号・ポイント・実績には反映されません。
+              </span>
+            </label>
+            <label
+              className={`flex-1 cursor-pointer rounded border p-2 text-xs ${
+                liveMode === "official" ? "border-red-500 bg-red-50" : "border-gray-300"
+              }`}
+            >
+              <span className="flex items-center gap-1.5 font-bold text-gray-900">
+                <input
+                  type="radio"
+                  checked={liveMode === "official"}
+                  onChange={() => setLiveMode("official")}
+                />
+                本番ライブ
+              </span>
+              <span className="mt-1 block text-gray-600">
+                正式なライブです。開催番号が付与され、ポイント・実績に反映されます。
+              </span>
+            </label>
+          </div>
+        </div>
+
         <LabeledInput label="タイトル">
           <input
             type="text"

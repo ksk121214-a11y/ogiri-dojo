@@ -6,17 +6,18 @@ import { useEffect, useState } from "react";
 import AdminCard from "@/components/admin/AdminCard";
 import AdminHeader from "@/components/admin/AdminHeader";
 import AdminShell from "@/components/admin/AdminShell";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import { toLiveScheduleDate } from "@/lib/liveDateFormat";
 import { supabase } from "@/lib/supabase";
 
 interface LiveRowLite {
   id: string;
-  sequence_number: number;
   title: string | null;
   scheduled_at: string;
   ended_at: string | null;
   results_published: boolean;
+  live_mode: "test" | "official";
+  official_sequence_number: number | null;
 }
 
 // ライブ結果（SNS掲載）管理画面・一覧。終了済み(current_phase='closed')のライブだけを
@@ -32,7 +33,7 @@ export default function AdminLiveResultsPage() {
     (async () => {
       const { data } = await supabase
         .from("lives")
-        .select("id, sequence_number, title, scheduled_at, ended_at, results_published")
+        .select("id, title, scheduled_at, ended_at, results_published, live_mode, official_sequence_number")
         .eq("current_phase", "closed")
         .order("scheduled_at", { ascending: false })
         .limit(50);
@@ -65,7 +66,7 @@ export default function AdminLiveResultsPage() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {formatLiveTicketNo(live.sequence_number)}
+                      {formatLiveTicketLabel(live.live_mode, live.official_sequence_number)}
                       {live.title ? `　${live.title}` : ""}
                     </p>
                     <p className="mt-0.5 text-xs text-gray-500">

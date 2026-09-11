@@ -1,15 +1,15 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
 
-import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useTsukkomiReactionQueue } from "@/lib/liveReactionQueue";
+import type { TsukkomiEvent } from "@/store/useLiveFollowerStore";
 
 // 「爆笑」ボタンを押した瞬間、観客シルエット(AudienceLayer)のどこか1人の頭の上に、
 // 漫画的な「大笑いのシワ」マークを1回だけ出す演出。
 // src/components/live-demo/LaughMarkOverlay.tsxと同じ演出だが、あちらは
 // useLiveDemoStoreのtsukkomiSeqを見る点だけがこちら(useLiveFollowerStore)と異なる。
-// タイマー・state更新の構成はsrc/components/live-room/TsukkomiFloatOverlay.tsxを踏襲している。
+// タイマー・state更新の構成はsrc/lib/liveReactionQueue.tsの共通フックに揃えている。
 //
 // マークを出す座標は、AudienceLayerが描画しているaudience-2-crop.png(537x189)を
 // 実際にピクセル解析し、シルエットの「頭のてっぺん」に相当するローカル極小点を
@@ -17,6 +17,11 @@ import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 // fixedRenderWidthPx=614/fixedRenderHeightPx=216/bottom=-45pxのボックスに
 // 重ねて配置するため、この座標のまま流用できる(画像とボックスの縦横比がほぼ同じため
 // object-containによる余白もほぼ発生しない)。押すたびにこの中からランダムに1箇所選ぶ。
+//
+// 0068：単一のlastTsukkomiを見て毎回上書きする方式から、useLiveFollowerStoreの
+// 待機キュー(tsukkomiQueue)から順番に取り出すキュー方式に変更した
+// （src/lib/liveReactionQueue.ts参照）。大勢が同時に「爆笑」を押した場合、
+// 複数個別のマークを画面に出す（「×10」等の集約はしない）。
 const HEAD_POSITIONS = [
   { x: 15.5, y: 0.5 },
   { x: 22.7, y: 15.3 },
@@ -32,12 +37,17 @@ const HEAD_POSITIONS = [
 
 const MARK_DURATION_MS = 900;
 const REMOVE_FALLBACK_MS = MARK_DURATION_MS + 500;
+const MAX_CONCURRENT = 10;
 
 interface LaughMark {
   id: string;
   x: number;
   y: number;
   rotate: number;
+}
+
+function isLaughTarget(event: TsukkomiEvent): boolean {
+  return event.kind === "stamp" && event.text === "爆笑";
 }
 
 // 「大笑いのシワ」マーク本体。弧を描く太いアーチ状の線に、短い線3本が
@@ -60,40 +70,20 @@ function LaughCreaseIcon() {
 }
 
 export default function LaughMarkOverlay() {
-  const tsukkomiSeq = useLiveFollowerStore((s) => s.tsukkomiSeq);
-  const lastTsukkomi = useLiveFollowerStore((s) => s.lastTsukkomi);
-  const [marks, setMarks] = useState<LaughMark[]>([]);
-  const seenSeqRef = useRef(tsukkomiSeq);
-
-  useEffect(() => {
-    if (
-      tsukkomiSeq === seenSeqRef.current ||
-      !lastTsukkomi ||
-      lastTsukkomi.kind !== "stamp" ||
-      lastTsukkomi.text !== "爆笑"
-    ) {
-      return;
-    }
-    seenSeqRef.current = tsukkomiSeq;
-
-    const pos = HEAD_POSITIONS[Math.floor(Math.random() * HEAD_POSITIONS.length)];
-    const mark: LaughMark = {
-      id: `${lastTsukkomi.id}`,
-      x: pos.x + (Math.random() - 0.5) * 4,
-      y: pos.y + (Math.random() - 0.5) * 4,
-      rotate: (Math.random() - 0.5) * 8,
-    };
-    setMarks((prev) => [...prev, mark]);
-
-    const fallback = setTimeout(() => {
-      setMarks((prev) => prev.filter((m) => m.id !== mark.id));
-    }, REMOVE_FALLBACK_MS);
-    return () => clearTimeout(fallback);
-  }, [tsukkomiSeq, lastTsukkomi]);
-
-  const remove = (id: string) => {
-    setMarks((prev) => prev.filter((m) => m.id !== id));
-  };
+  const { items: marks, remove } = useTsukkomiReactionQueue<LaughMark>({
+    predicate: isLaughTarget,
+    maxConcurrent: MAX_CONCURRENT,
+    removeFallbackMs: REMOVE_FALLBACK_MS,
+    mapToDisplay: (event) => {
+      const pos = HEAD_POSITIONS[Math.floor(Math.random() * HEAD_POSITIONS.length)];
+      return {
+        id: event.id,
+        x: pos.x + (Math.random() - 0.5) * 4,
+        y: pos.y + (Math.random() - 0.5) * 4,
+        rotate: (Math.random() - 0.5) * 8,
+      };
+    },
+  });
 
   return (
     <div

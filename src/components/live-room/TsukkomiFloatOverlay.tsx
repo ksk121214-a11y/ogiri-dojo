@@ -1,12 +1,13 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 
-import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useTsukkomiReactionQueue } from "@/lib/liveReactionQueue";
+import type { TsukkomiEvent } from "@/store/useLiveFollowerStore";
 
 interface FloatItem {
-  id: number;
+  id: string;
   kind: "clap" | "stamp";
   text: string;
   xPercent: number;
@@ -14,48 +15,33 @@ interface FloatItem {
 
 // src/components/live-demo/TsukkomiFloatOverlay.tsxと同じ演出だが、
 // useLiveDemoStoreではなく実際にRealtimeブロードキャストで届いたイベント(useLiveFollowerStore)を見る。
+// 現在の実ライブ画面ではTsukkomiDanmakuOverlayに置き換わっている（未使用）が、
+// 将来また使われる可能性があるため、0068のキュー方式（src/lib/liveReactionQueue.ts）に
+// 揃えて更新している。
 const X_OFFSETS = [18, 62, 38, 78, 26, 50, 70, 34, 58];
 const FLOAT_DURATION_MS = 1800;
 const REMOVE_FALLBACK_MS = FLOAT_DURATION_MS + 500;
-const MAX_CONCURRENT = 8;
+const MAX_CONCURRENT = 10;
+
+function isFloatTarget(event: TsukkomiEvent): boolean {
+  // 「爆笑」は下から上に浮くバッジではなく、LaughMarkOverlay側の観客の頭上マークで
+  // 表現するため、ここでは素通りさせる（ツッコミ・拍手は従来通りここで浮かせる）。
+  return !(event.kind === "stamp" && event.text === "爆笑");
+}
 
 export default function TsukkomiFloatOverlay() {
-  const tsukkomiSeq = useLiveFollowerStore((s) => s.tsukkomiSeq);
-  const lastTsukkomi = useLiveFollowerStore((s) => s.lastTsukkomi);
-  const [items, setItems] = useState<FloatItem[]>([]);
-  const seenSeqRef = useRef(tsukkomiSeq);
   const offsetIndexRef = useRef(0);
 
-  useEffect(() => {
-    // 「爆笑」は下から上に浮くバッジではなく、LaughMarkOverlay側の観客の頭上マークで
-    // 表現するため、ここでは素通りさせる（ツッコミ・拍手は従来通りここで浮かせる）。
-    if (
-      tsukkomiSeq === seenSeqRef.current ||
-      !lastTsukkomi ||
-      (lastTsukkomi.kind === "stamp" && lastTsukkomi.text === "爆笑")
-    ) {
-      return;
-    }
-    seenSeqRef.current = tsukkomiSeq;
-    const xPercent = X_OFFSETS[offsetIndexRef.current % X_OFFSETS.length];
-    offsetIndexRef.current += 1;
-    const item: FloatItem = {
-      id: lastTsukkomi.id,
-      kind: lastTsukkomi.kind,
-      text: lastTsukkomi.text,
-      xPercent,
-    };
-    setItems((prev) => [...prev.slice(-(MAX_CONCURRENT - 1)), item]);
-
-    const fallback = setTimeout(() => {
-      setItems((prev) => prev.filter((v) => v.id !== item.id));
-    }, REMOVE_FALLBACK_MS);
-    return () => clearTimeout(fallback);
-  }, [tsukkomiSeq, lastTsukkomi]);
-
-  const remove = (id: number) => {
-    setItems((prev) => prev.filter((v) => v.id !== id));
-  };
+  const { items, remove } = useTsukkomiReactionQueue<FloatItem>({
+    predicate: isFloatTarget,
+    maxConcurrent: MAX_CONCURRENT,
+    removeFallbackMs: REMOVE_FALLBACK_MS,
+    mapToDisplay: (event) => {
+      const xPercent = X_OFFSETS[offsetIndexRef.current % X_OFFSETS.length];
+      offsetIndexRef.current += 1;
+      return { id: event.id, kind: event.kind, text: event.text, xPercent };
+    },
+  });
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 bottom-16 overflow-hidden sm:bottom-20">

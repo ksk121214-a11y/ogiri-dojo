@@ -106,6 +106,28 @@ else
 fi
 rm -rf "$FOLLOWER_RACE_DIR"
 
+# src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.ts も同じ理由
+# （useLiveFollowerStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を
+# 含む）で専用tsconfig経由にする。0068のツッコミ/拍手/爆笑キュー方式（過負荷対策込み）を検証する。
+REACTION_QUEUE_DIR="$(mktemp -d)"
+REACTION_QUEUE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.reactionQueue.json"
+REACTION_QUEUE_ENTRY="$REACTION_QUEUE_DIR/src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.js"
+
+echo "--- useLiveFollowerStoreReactionQueue.check.ts ---"
+if npx tsc -p "$REACTION_QUEUE_TSCONFIG" --outDir "$REACTION_QUEUE_DIR" && [ -f "$REACTION_QUEUE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$REACTION_QUEUE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$REACTION_QUEUE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreReactionQueue.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$REACTION_QUEUE_DIR"
+
 # src/lib/__tests__/store/useSnsStoreDelete.check.ts も同じ理由（useSnsStore.tsが
 # "@/..."エイリアス・実際のSupabaseクライアント生成を含む）で専用tsconfig経由にする。
 SNS_DELETE_DIR="$(mktemp -d)"

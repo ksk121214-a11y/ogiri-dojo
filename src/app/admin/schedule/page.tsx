@@ -21,7 +21,7 @@ import {
   type LiveScheduleDisplayRole,
   type LiveScheduleEntry,
 } from "@/lib/liveSchedulePlan";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import type { LiveRow } from "@/lib/liveRoomTypes";
 import { supabase } from "@/lib/supabase";
 
@@ -493,7 +493,7 @@ function ResultsPublishSection() {
               >
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-gray-700">
-                    {formatLiveTicketNo(live.sequence_number)} {live.title ?? "（タイトル未設定）"}
+                    {formatLiveTicketLabel(live.live_mode, live.official_sequence_number)} {live.title ?? "（タイトル未設定）"}
                   </p>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${

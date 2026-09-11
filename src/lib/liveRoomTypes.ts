@@ -45,6 +45,15 @@ export interface LiveRow {
   // ライブ終了時の段位・ポイント付与(apply_live_rank_rewards)が完了済みかどうか
   // （0033で追加、二重付与防止に使う列）。TS側の型定義に無かったため追加した。
   rank_rewards_applied: boolean;
+  // 0068追加：「テスト／本番」の選択。'test'は動作確認用（開催番号・ポイント・
+  // 実績に反映しない）、'official'は正式なライブ（開催番号が付与され、ポイント・
+  // 実績に反映する）。
+  live_mode: "test" | "official";
+  // 0068追加：本番ライブだけに付与される#0001始まりの開催番号（official_live_counter
+  // から採番）。live_mode='test'なら常にnull。レガシーのsequence_number
+  // （0017、test/official問わず増え続ける内部カウンター）とは別物で、表示用の
+  // 番号は必ずこちら（またはformatLiveTicketLabel経由）を使うこと。
+  official_sequence_number: number | null;
 }
 
 export interface GroupRow {

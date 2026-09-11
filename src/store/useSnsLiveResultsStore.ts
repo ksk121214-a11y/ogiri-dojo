@@ -69,7 +69,12 @@ async function resolveAuthorNamesIntoSnsStore(profileIds: string[]): Promise<voi
 
 interface LiveRowLite {
   id: string;
-  sequence_number: number;
+  // 0068追加：寄合帳に出るライブ結果はresults_published=trueかつ
+  // live_mode='official'の行に限られる（DB制約・RLSで保証される）ため、
+  // 表示用の番号は必ず本番専用の official_sequence_number を使う
+  // （レガシーのsequence_numberはtest/official問わず増え続ける内部カウンター
+  // のため、寄合帳の表示には使わない）。
+  official_sequence_number: number;
   title: string | null;
   ended_at: string | null;
   results_published: boolean;
@@ -126,7 +131,7 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
 }> {
   let liveQuery = supabase
     .from("lives")
-    .select("id, sequence_number, title, ended_at, results_published")
+    .select("id, official_sequence_number, title, ended_at, results_published")
     .eq("results_published", true)
     .eq("current_phase", "closed")
     .order("ended_at", { ascending: false, nullsFirst: false })
@@ -219,7 +224,7 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
       const summary: SnsLiveResultSummary = {
         id: result.id,
         liveId: live.id,
-        sequenceNumber: live.sequence_number,
+        sequenceNumber: live.official_sequence_number,
         title: live.title,
         endedAtLabel: formatEndedAtLabel(live.ended_at),
         podiumNames,
@@ -290,7 +295,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
 
     const { data: liveData } = await supabase
       .from("lives")
-      .select("id, sequence_number, title, ended_at, results_published")
+      .select("id, official_sequence_number, title, ended_at, results_published")
       .eq("id", result.live_id)
       .maybeSingle();
     const live = liveData as LiveRowLite | null;
@@ -422,7 +427,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     const detail: SnsLiveResultDetail = {
       id: result.id,
       liveId: result.live_id,
-      sequenceNumber: live?.sequence_number ?? 0,
+      sequenceNumber: live?.official_sequence_number ?? 0,
       title: live?.title ?? null,
       endedAtLabel: formatEndedAtLabel(live?.ended_at ?? null),
       managerComment: result.manager_comment,

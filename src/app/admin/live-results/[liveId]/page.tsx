@@ -13,7 +13,7 @@ import { logAdminAction } from "@/lib/adminActionLog";
 import { toLiveScheduleDate } from "@/lib/liveDateFormat";
 import { computeLiveResultCandidates, isPerfectAnswer } from "@/lib/liveResultsExtraction";
 import type { AnswerRow, LiveRow, ParticipantRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
-import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import { supabase } from "@/lib/supabase";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
@@ -481,9 +481,14 @@ export default function AdminLiveResultDetailPage() {
 
       <AdminCard>
         <p className="text-sm font-bold text-gray-900">
-          {formatLiveTicketNo(live.sequence_number)}
+          {formatLiveTicketLabel(live.live_mode, live.official_sequence_number)}
           {live.title ? `　${live.title}` : ""}
         </p>
+        {live.live_mode === "test" && (
+          <p className="mt-0.5 text-xs font-bold text-orange-600">
+            テストライブ（ポイント・実績には反映されていません）
+          </p>
+        )}
         <p className="mt-1 text-xs text-gray-500">
           {(() => {
             const d = toLiveScheduleDate(live.scheduled_at);
@@ -497,7 +502,7 @@ export default function AdminLiveResultDetailPage() {
         <div className="mt-3">
           <AdminButton
             variant={live.results_published ? "danger" : "primary"}
-            disabled={publishing || live.current_phase !== "closed"}
+            disabled={publishing || live.current_phase !== "closed" || live.live_mode !== "official"}
             onClick={handleTogglePublish}
           >
             {publishing
@@ -509,10 +514,15 @@ export default function AdminLiveResultDetailPage() {
           {live.current_phase !== "closed" && (
             <p className="mt-1 text-[11px] text-red-600">終了していないライブは公開できません。</p>
           )}
+          {live.current_phase === "closed" && live.live_mode !== "official" && (
+            <p className="mt-1 text-[11px] text-red-600">
+              テストライブのためSNSに公開できません（動作確認用のライブです）。
+            </p>
+          )}
         </div>
       </AdminCard>
 
-      {live.current_phase === "closed" && !live.rank_rewards_applied && (
+      {live.current_phase === "closed" && live.live_mode === "official" && !live.rank_rewards_applied && (
         <AdminCard>
           <p className="text-sm font-bold text-red-600">
             段位・ポイントの付与に失敗しています
@@ -630,7 +640,7 @@ export default function AdminLiveResultDetailPage() {
 
       <AdminCard title="運営ベスト">
         <select
-          disabled={busy}
+          disabled={busy || live.live_mode !== "official"}
           value={liveResult.manager_best_answer_id ?? ""}
           onChange={(e) => handleSetManagerBest(e.target.value || null)}
           className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
@@ -642,9 +652,15 @@ export default function AdminLiveResultDetailPage() {
             </option>
           ))}
         </select>
-        <p className="mt-1 text-[11px] text-gray-500">
-          1〜3位代表・満点回答は候補に表示されません。候補が無い場合は「該当なし」のままにできます。
-        </p>
+        {live.live_mode !== "official" ? (
+          <p className="mt-1 text-[11px] text-red-600">
+            テストライブのため運営ベストを設定できません（ポイント・実績には反映されません）。
+          </p>
+        ) : (
+          <p className="mt-1 text-[11px] text-gray-500">
+            1〜3位代表・満点回答は候補に表示されません。候補が無い場合は「該当なし」のままにできます。
+          </p>
+        )}
         <label className="mt-3 flex flex-col gap-1">
           <span className="text-xs font-bold text-gray-700">運営コメント（任意）</span>
           <textarea

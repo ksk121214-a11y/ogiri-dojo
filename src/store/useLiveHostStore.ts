@@ -77,6 +77,10 @@ export interface LivePreparationInput {
   // お題の選び方："random"ならtopic_bankから必要数(groupCount×ROUNDS_PER_LIVE_DEFAULT)を
   // 自動抽選、"manual"なら指定したtopic_bank行のIDをそのまま使う。
   topicSelection: { mode: "random" } | { mode: "manual"; topicBankIds: string[] };
+  // 0068追加：「テスト／本番」の選択。初期値は必ず"test"（呼び出し元のUI側で
+  // 保証する）。"official"を選ぶと開催番号が付与され、終了後にポイント・実績へ
+  // 反映される。
+  liveMode: "test" | "official";
 }
 
 interface LiveHostState {
@@ -2279,6 +2283,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         p_max_players: input.maxPlayers,
         p_planned_group_count: input.groupCount,
         p_topic_bank_ids: entries.slice(0, neededTopics).map((entry) => entry.id),
+        p_live_mode: input.liveMode,
       })
       .single();
     if (error) {

@@ -59,10 +59,16 @@ export default function FinalResultView({
   data,
   myParticipantId,
   participantAvatars = EMPTY_AVATARS,
+  liveMode = "official",
 }: {
   data: FinalResultData;
   myParticipantId: string | null;
   participantAvatars?: Record<string, ParticipantAvatarInfo>;
+  // 0068追加：'test'なら段位・累計ポイント・実績には一切反映されない
+  // （supabase/migrations/0068のclose_live/apply_live_rank_rewards参照）。
+  // あたかも付与したかのような表示にしないため、末尾の熟練度メーター演出を
+  // 出さず、代わりに注記を表示する。
+  liveMode?: "test" | "official";
 }) {
   // ベストアンサーの発表ステップを廃止したため、1位分（従来のstep1〜3）から始める。
   const [step, setStep] = useState(1);
@@ -119,10 +125,16 @@ export default function FinalResultView({
   // シェア文面：自分が1〜3位の場合だけ順位を明記する（他の参加者の順位は一切含めない。
   // 下位の順位を本人の意図に反してさらけ出さない、という既存の匿名性方針を踏まえた
   // デフォルト文面。送信前のX投稿画面でユーザー自身が自由に編集できる）。
+  // 0068追加：テストライブは実際にはポイントが付与されないため、シェア文面にも
+  // 獲得ポイントを含めない（あたかも付与したかのような表示にしない）。
   const shareText = myEntry
     ? data.myRank !== null && data.myRank <= 3
-      ? `${APP_NAME}のライブで${data.myRank}位でした！獲得ポイント+${gain}pt\n#${APP_NAME}`
-      : `${APP_NAME}のライブに参加しました！獲得ポイント+${gain}pt\n#${APP_NAME}`
+      ? liveMode === "official"
+        ? `${APP_NAME}のライブで${data.myRank}位でした！獲得ポイント+${gain}pt\n#${APP_NAME}`
+        : `${APP_NAME}のライブで${data.myRank}位でした！\n#${APP_NAME}`
+      : liveMode === "official"
+        ? `${APP_NAME}のライブに参加しました！獲得ポイント+${gain}pt\n#${APP_NAME}`
+        : `${APP_NAME}のライブに参加しました！\n#${APP_NAME}`
     : `${APP_NAME}のライブを観戦しました！\n#${APP_NAME}`;
 
   return (
@@ -130,6 +142,11 @@ export default function FinalResultView({
       <p className="text-center font-sans text-xs font-bold tracking-widest text-[#3b5bff]">
         最終結果・表彰式
       </p>
+      {liveMode === "test" && (
+        <p className="mt-1 text-center font-sans text-[11px] font-bold text-[#ff8f4a]">
+          テストライブのため、ポイント・段位・実績には反映されません
+        </p>
+      )}
 
       <div className="mt-4 flex min-h-[220px] w-full flex-col items-center justify-center">
         <AnimatePresence mode="wait">
@@ -243,7 +260,7 @@ export default function FinalResultView({
         </AnimatePresence>
       </div>
 
-      {step > totalSteps && myEntry && profile && (
+      {step > totalSteps && myEntry && profile && liveMode === "official" && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}

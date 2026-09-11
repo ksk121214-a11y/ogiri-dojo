@@ -45,9 +45,18 @@ export interface FinalResultData {
 }
 
 export interface TsukkomiEvent {
-  id: number;
+  // 0068：live_tsukkomi_events.id（uuid）をそのまま使う。以前はクライアント側の
+  // 通し番号(number)を独自に振っていたが、DBのidを使うことで重複受信の判定
+  // （processedTsukkomiIds）や到着順の保持が正確に行えるようにする。
+  id: string;
   kind: "clap" | "stamp";
   text: string;
+}
+
+// 0068：待機キュー内で保持する形（受信時刻を持たせ、3秒以上経過した古いイベントを
+// 表示せず破棄する判定に使う）。
+interface QueuedTsukkomiEvent extends TsukkomiEvent {
+  receivedAt: number;
 }
 
 // 2026-08-29:「ライブ中、自分のアイコンが他の参加者の画面ではランダムなアイコンに
@@ -84,8 +93,10 @@ interface LiveFollowerState {
   myScore: number | null;
   groupResult: GroupResultData | null;
   finalResult: FinalResultData | null;
-  tsukkomiSeq: number; // つっこみ/拍手のブロードキャストを受け取るたびに増える通し番号
-  lastTsukkomi: TsukkomiEvent | null;
+  // 0068：単一のlastTsukkomi(1件だけ保持して上書きする方式)から、キュー(配列)方式に
+  // 変更した。10〜20人がほぼ同時に押しても、各参加者ぶんのイベントを1件ずつ
+  // 積んで表示できるようにするため（詳細はsrc/lib/liveReactionQueue.ts参照）。
+  tsukkomiQueue: QueuedTsukkomiEvent[];
   laughEventSeq: number; // 誰かの回答が笑いエフェクト付きで確定するたびに増える通し番号
   // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策で意味を
   // 厳密化した。loading===trueの間は、live/participants/myParticipant/currentTurn/
@@ -118,6 +129,13 @@ interface LiveFollowerState {
     points: 0 | 1 | 2 | 3,
   ) => Promise<{ ok: true } | { ok: false; silent: boolean; reason?: string }>;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
+  // 0068追加：ツッコミ/拍手/爆笑の表示演出（src/lib/liveReactionQueue.tsの
+  // useTsukkomiReactionQueueフック）が、待機キューから自分が担当する種別の
+  // イベントを1件だけ取り出す。受信から3秒以上経過したイベントは表示せず
+  // 破棄する（predicateに関わらず、スキャンの過程で見つかった時点で捨てる）。
+  // この呼び出し・待機キューはライブ進行のstateと完全に独立しており、演出側の
+  // 遅延・例外がフェーズ進行・回答受付・採点に影響することはない。
+  claimReactionEvent: (predicate: (event: TsukkomiEvent) => boolean) => TsukkomiEvent | null;
 }
 
 // 2026-09-15（レビュー対応）：観客側の Realtime 購読はすべて Postgres Changes。
@@ -145,15 +163,65 @@ const followerChannelSwap = createChannelSwapController<ReturnType<typeof supaba
   topicFor: (kind, _liveId, gen) => buildChannelTopic("follower", kind, gen),
   remove: (ch) => supabase.removeChannel(ch),
 });
-let tsukkomiIdCounter = 0;
 // retrySyncアクションから、subscribe()内で今動いているrefetchAllを直接叩けるようにする
 // ための参照（subscribe()のクリーンアップでnullに戻す）。
 let currentRefetchAllRef: (() => void) | null = null;
 // ツッコミ・爆笑・拍手ボタンの連打制限（1秒に1回まで）。ボタン自体の見た目は
 // 変えず、裏で黙って間引く。ボタンはUIから常にsendTsukkomiを直接呼ぶだけなので、
-// ここ1箇所でガードすれば全ボタンに効く。
+// ここ1箇所でガードすれば全ボタンに効く（0066のDB側レート制限とは別の、UX目的の
+// 間引き。変更しない）。
 const TSUKKOMI_COOLDOWN_MS = 1_000;
 let lastTsukkomiSentAt = 0;
+
+// 0068追加：ツッコミ/拍手/爆笑イベントのキュー方式への変更（過負荷対策込み）。
+// - TSUKKOMI_QUEUE_MAX：待機キューの最大件数。これを超えたら、ライブ進行
+//   （回答・採点・フェーズ遷移等の本来の機能）を優先し、古いイベントから破棄する。
+// - TSUKKOMI_STALE_MS：受信からこの時間以上経過した待機中のイベントは、
+//   表示せずに破棄する（古いリアクションとして扱う。基準はクライアント側で
+//   キューに積んだ時刻）。
+// - TSUKKOMI_PROCESSED_ID_CACHE_MAX：重複UUID判定用に保持するidの最大件数。
+//   無限に増え続けないよう、古いものから捨てる（Setは挿入順を保持するため、
+//   先頭＝最も古いものをvalues().next()で取り出せる）。
+export const TSUKKOMI_QUEUE_MAX = 30;
+export const TSUKKOMI_STALE_MS = 3_000;
+export const TSUKKOMI_PROCESSED_ID_CACHE_MAX = 200;
+let processedTsukkomiIds = new Set<string>();
+
+// 0068追加：ライブ変更・退出・購読解除・再購読（subscribe()のcleanup/世代交代）の
+// たびに、前のライブの待機キューと処理済みIDセットをリセットする。リロード・
+// 再接続時に過去のリアクションをまとめて再生しないための対策でもある
+// （新しいsubscribe世代は必ず空のキューから始まる）。
+export function resetTsukkomiReactionQueue(): void {
+  processedTsukkomiIds = new Set<string>();
+  useLiveFollowerStore.setState({ tsukkomiQueue: [] });
+}
+
+// 0068追加：Realtimeで受信したツッコミ/拍手/爆笑イベントを待機キューへ積む。
+// テスト（src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.ts）から
+// 本番と同じ実装をそのまま呼び出して検証できるようexportする。
+export function enqueueTsukkomiEvent(
+  id: string,
+  kind: "clap" | "stamp",
+  text: string,
+  now: number = Date.now(),
+): void {
+  // 同じUUIDを重複受信しても一度だけ処理する。
+  if (processedTsukkomiIds.has(id)) return;
+  processedTsukkomiIds.add(id);
+  if (processedTsukkomiIds.size > TSUKKOMI_PROCESSED_ID_CACHE_MAX) {
+    const oldest = processedTsukkomiIds.values().next().value;
+    if (oldest !== undefined) processedTsukkomiIds.delete(oldest);
+  }
+  useLiveFollowerStore.setState((s) => {
+    const next = [...s.tsukkomiQueue, { id, kind, text, receivedAt: now }];
+    if (next.length > TSUKKOMI_QUEUE_MAX) {
+      // 待機キューの上限を超えた分は、古いイベントから破棄する
+      // （ライブ本来の進行を優先し、リアクション表示だけが無限に積み上がらないようにする）。
+      next.splice(0, next.length - TSUKKOMI_QUEUE_MAX);
+    }
+    return { tsukkomiQueue: next };
+  });
+}
 
 // ホーム画面の「次回ライブ」チケット（参加ボタン押下時に「既に参加済みか」を確認する
 // 用途、src/components/home/useLiveJoinFlow.ts参照）でも使うためexportしている。
@@ -596,8 +664,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   myScore: null,
   groupResult: null,
   finalResult: null,
-  tsukkomiSeq: 0,
-  lastTsukkomi: null,
+  tsukkomiQueue: [],
   laughEventSeq: 0,
   loading: true,
   syncError: null,
@@ -776,6 +843,10 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // - この subscribe が返す cleanup は所有権付き（swap.dispose）
     const spawnFollowerChannels = (swapArgs: ChannelSwapSpawnArgs) => {
       const isCurrentGen = swapArgs.isCurrentGen;
+      // 0068：購読世代が切り替わるたびに、前のライブの待機キュー・処理済みID
+      // セットをリセットする（リロード・再接続時に過去のリアクションをまとめて
+      // 再生しないため。新しい世代は必ず空のキューから始まる）。
+      resetTsukkomiReactionQueue();
       // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す。
       const onSubscribeStatus = (status: string) => {
         if (!isCurrentGen()) return;
@@ -816,14 +887,19 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
           { event: "INSERT", schema: "public", table: "live_tsukkomi_events" },
           (payload) => {
             if (!isCurrentGen()) return;
-            const row = payload.new as { live_id: string; kind: "clap" | "stamp"; text: string };
-            const currentLive = useLiveFollowerStore.getState().live;
-            if (!currentLive || row.live_id !== currentLive.id) return;
-            tsukkomiIdCounter += 1;
-            useLiveFollowerStore.setState((s) => ({
-              tsukkomiSeq: s.tsukkomiSeq + 1,
-              lastTsukkomi: { id: tsukkomiIdCounter, kind: row.kind, text: row.text },
-            }));
+            // 0068：payload.new.id（live_tsukkomi_events.id、uuid）を使う
+            // （以前は捨てていた）。重複UUIDの排除・待機キューへの追加は
+            // enqueueTsukkomiEvent側で行う（表示演出とは独立した処理のため、
+            // ここでの例外・遅延がライブ進行の他のRealtime処理に影響しないよう
+            // try/catchで囲む）。
+            try {
+              const row = payload.new as { id: string; live_id: string; kind: "clap" | "stamp"; text: string };
+              const currentLive = useLiveFollowerStore.getState().live;
+              if (!currentLive || row.live_id !== currentLive.id) return;
+              enqueueTsukkomiEvent(row.id, row.kind, row.text);
+            } catch (e) {
+              console.warn("[tsukkomi] リアクション受信処理でエラーが発生しました", e);
+            }
           },
         )
         .subscribe(onSubscribeStatus);
@@ -911,6 +987,11 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // 所有権付きクリーンアップ：この subscribe の世代のチャンネルだけを除去する。
       // 既に新しい subscribe に追い越されていたら、最新世代の channels/gen には触らない。
       channelSwapResult.dispose();
+      // 0068：ライブ変更・退出・購読解除時にも、待機キュー・処理済みIDセットを
+      // リセットする（次にspawnFollowerChannelsが呼ばれた時にも同様にリセット
+      // されるため二重にはなるが、ページ自体を離脱してsubscribe()が呼ばれ
+      // 直さないケースでも古いキューを残さないための保険）。
+      resetTsukkomiReactionQueue();
     };
   },
 
@@ -1047,5 +1128,35 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     supabase.rpc("send_tsukkomi", { p_live_id: live.id, p_kind: kind, p_text: text }).then(({ error }) => {
       if (error) console.warn("[tsukkomi] 送信に失敗", error);
     });
+  },
+
+  claimReactionEvent: (predicate) => {
+    const queue = get().tsukkomiQueue;
+    if (queue.length === 0) return null;
+    const now = Date.now();
+    let claimed: QueuedTsukkomiEvent | null = null;
+    const next: QueuedTsukkomiEvent[] = [];
+    for (const item of queue) {
+      if (claimed) {
+        // 既に1件取り出した後に残る要素は、そのまま順序を保って残す。
+        next.push(item);
+        continue;
+      }
+      if (now - item.receivedAt > TSUKKOMI_STALE_MS) {
+        // 受信から3秒以上経過した待機イベントは、表示せずに破棄する
+        // （predicateの種別を問わず捨てる＝古いリアクションとして扱う）。
+        continue;
+      }
+      if (!claimed && predicate(item)) {
+        claimed = item;
+        continue; // このイベントは取り出す（queueから除く）
+      }
+      next.push(item);
+    }
+    if (next.length !== queue.length) {
+      set({ tsukkomiQueue: next });
+    }
+    if (!claimed) return null;
+    return { id: claimed.id, kind: claimed.kind, text: claimed.text };
   },
 }));

@@ -708,6 +708,8 @@ export const useLiveDesignPreviewStore2 = create<LiveDesignPreviewState>()((set,
       announcement_sent_at: null,
       created_by: null,
       rank_rewards_applied: false,
+      live_mode: "test",
+      official_sequence_number: null,
     };
     set({
       live,
