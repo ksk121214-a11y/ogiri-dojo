@@ -383,11 +383,23 @@ async function fetchAnsweringCue(
   };
 }
 
-async function refreshFinalResult() {
+// 2026-09-16（再レビュー対応・問題1）：stillCurrentは「呼び出し元（refetchAllや
+// Realtimeコールバック）の購読世代が今も現行か」を確認する所有権ガード。
+// 未指定（submitMyAnswer/submitMyScoreなど購読世代と無関係な既存呼び出し）は
+// 常にtrueを返す既定値とし、従来どおり無条件に反映する。関数開始時と、
+// 非同期取得の直後・setStateの直前で必ず確認し、古い世代ならstateを一切
+// 変更せず終了する。
+// 2026-09-16（再レビュー対応・問題1）：src/lib/__tests__/store/
+// useLiveFollowerStoreRace.check.ts から、本番と同じ実装をそのまま呼び出して
+// 「古い購読世代の取得結果が新しい世代のstateを上書きしない」ことを検証できるよう
+// exportする（テストのためだけに別のロジックを再実装しない）。
+export async function refreshFinalResult(stillCurrent: () => boolean = () => true): Promise<void> {
+  if (!stillCurrent()) return;
   const { live, myParticipant, participants, participantNames } =
     useLiveFollowerStore.getState();
   if (!live) return;
   const resolvedResult = await fetchResolvedAnswersForLive(live.id);
+  if (!stillCurrent()) return; // 取得後：追い越されていたら反映しない
   // 取得エラー時は既存のfinalResultを一切書き換えず、次の再試行に任せる。
   if (!resolvedResult.ok) return;
   const resolvedAnswers = resolvedResult.data;
@@ -407,6 +419,7 @@ async function refreshFinalResult() {
   const myRank = myParticipant
     ? (ranking.find((r) => r.participantId === myParticipant.id)?.rank ?? null)
     : null;
+  if (!stillCurrent()) return; // setState直前：追い越されていたら反映しない
   useLiveFollowerStore.setState({
     finalResult: { bestAnswer, ranking, myRank },
   });
@@ -424,7 +437,17 @@ let turnDerivedRequestId = 0;
 // 場合はcurrentTurn/currentTopicを含め一切stateを書き換えない（既に確定している
 // 正常な値を、取得エラーによる一時的なnullで上書きしない）。呼び出し元は失敗時、
 // loading:falseへの遷移を保留し、再試行する。
-async function refreshTurnDerived(): Promise<boolean> {
+// 2026-09-16（再レビュー対応・問題1）：turnDerivedRequestIdによる「同一世代内の
+// 追い越し防止」だけでは不十分だった。subscribe A→Bと購読世代が切り替わっても、
+// AのrefreshTurnDerivedがBより先に呼ばれていればturnDerivedRequestId上はAが
+// 最新のままになり得るため、Aの取得が遅れて完了するとAがsetStateしてしまう
+// （refetchAll側がisMyGenCurrent()を確認するのはrefreshTurnDerivedから戻った
+// 後なので手遅れ）。stillCurrent（呼び出し元の購読世代ガード）を関数開始時・
+// 各awaitの直後・すべてのsetState直前で確認し、古い世代ならstateを一切
+// 変更せずfalseで終了する。未指定（submitMyAnswer/submitMyScoreなど購読世代と
+// 無関係な既存呼び出し）は常にtrueを返す既定値とし、従来どおり動作する。
+export async function refreshTurnDerived(stillCurrent: () => boolean = () => true): Promise<boolean> {
+  if (!stillCurrent()) return false; // 関数開始時：呼び出し時点で既に古い世代なら何もしない
   const requestId = ++turnDerivedRequestId;
   const {
     live,
@@ -435,7 +458,7 @@ async function refreshTurnDerived(): Promise<boolean> {
     currentTurn: prevTurn,
   } = useLiveFollowerStore.getState();
   if (!live?.current_turn_id) {
-    if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
+    if (requestId !== turnDerivedRequestId || !stillCurrent()) return false; // より新しい呼び出しに追い越された
     // ライブが無い・current_turn_idが無い（interlude/opening等）状態は、revisionの
     // 大小に関わらず確定的にpendingCueを消してよい（次にcurrent_turn_idが
     // 立った時、pendingCueがnullなのでresolveAnsweringCueは新しい値を必ず採用する）。
@@ -468,7 +491,7 @@ async function refreshTurnDerived(): Promise<boolean> {
     fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id),
     fetchAnsweringCue(live.id),
   ]);
-  if (requestId !== turnDerivedRequestId) return false; // より新しい呼び出しに追い越された
+  if (requestId !== turnDerivedRequestId || !stillCurrent()) return false; // より新しい呼び出しに追い越された
   if (!turnResult.ok) return false; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
   if (!answersResult.ok) return false; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
   const { turn, topic } = turnResult;
@@ -511,6 +534,7 @@ async function refreshTurnDerived(): Promise<boolean> {
   // 「前回のターンが実際にあり、かつ今回と違う」場合だけを本当の切り替えとする。
   const turnChanged = prevTurn !== null && prevTurn.id !== (turn?.id ?? null);
 
+  if (requestId !== turnDerivedRequestId || !stillCurrent()) return false; // setState直前の再確認
   useLiveFollowerStore.setState((s) => ({
     currentTurn: turn,
     currentTopic: topic,
@@ -532,7 +556,7 @@ async function refreshTurnDerived(): Promise<boolean> {
   }));
 
   if (live.current_phase === "final_result") {
-    await refreshFinalResult();
+    await refreshFinalResult(stillCurrent);
   }
   return true;
 }
@@ -714,7 +738,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
 
       // 段階3：currentTurn/currentTopic確定。ここまで揃って初めて舞台/観客の
       // 判定材料が出揃うため、これが成功するまではloadingをfalseにしない。
-      const turnOk = await refreshTurnDerived();
+      // isMyGenCurrentを渡し、refreshTurnDerived（と、その中で呼ばれる
+      // refreshFinalResult）が古い購読世代のままstateを書き換えないようにする。
+      const turnOk = await refreshTurnDerived(isMyGenCurrent);
       if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
       if (!turnOk) {
         failStage("進行状況の取得に失敗しました");
@@ -741,7 +767,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         if (isCurrentGen()) refetchAll();
       };
       const guardedRefreshTurnDerived = () => {
-        if (isCurrentGen()) void refreshTurnDerived();
+        if (isCurrentGen()) void refreshTurnDerived(isCurrentGen);
       };
 
       const livesCh = supabase

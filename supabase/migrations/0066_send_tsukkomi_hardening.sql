@@ -26,6 +26,21 @@
 --   - 参加者行をFOR UPDATEしたままレート制限判定〜更新までをアトミックに行う
 -- SECURITY DEFINER・固定search_path・PUBLIC/anonへのEXECUTE明示的REVOKE・
 -- authenticatedのみEXECUTE可・live_tsukkomi_eventsへの直接INSERT禁止は維持する。
+--
+-- 2026-09-16（再レビュー対応・問題2）：上のcurrent_phase確認は当初、対象live行を
+-- ロックしない普通のSELECTで行っていたため、確認直後（participantsのFOR UPDATE〜
+-- INSERTまでの間）に別トランザクション（host_advance_answering_to_group_result等、
+-- 0065参照）がlives行をFOR UPDATEしてanswering→group_resultへ進めてコミットすると、
+-- こちらはその変化に一切気付けないまま「まだanswering」の前提でINSERTを完了させて
+-- しまう（フェーズ確認とINSERTがアトミックでない）。対象live行もFOR UPDATEで
+-- ロックし、コミットまで保持することで、同時に走る他のトランザクションのフェーズ
+-- 変更（それらも同じlives行をFOR UPDATEしてから更新する、0018/0065等と同じ規約）は
+-- こちらのロック解放を待つようになり、確認からINSERT完了まで割り込めなくする。
+-- ロック順序：本関数はlives→participantsの順で1回ずつ取得するだけで、他のロックを
+-- 取り直すことはない。既存RPC群を確認した限り、lives・participantsの両方を
+-- FOR UPDATEする関数は本関数以外に無く（host系RPCはlivesのみ、kick_participant等は
+-- participantsのみ）、かつ本関数はlivesを先に取るため、双方向の取り合いによる
+-- デッドロックは起きない。
 
 create or replace function public.send_tsukkomi(p_live_id uuid, p_kind text, p_text text)
 returns void
@@ -56,8 +71,12 @@ begin
     raise exception 'INVALID_TSUKKOMI';
   end if;
 
-  -- 対象ライブが存在し、回答受付中であること。
-  select * into v_live from public.lives where id = p_live_id;
+  -- 対象ライブが存在し、回答受付中であること。for updateでロックし、この
+  -- トランザクションがコミットするまで他のフェーズ変更（host_advance_*系、
+  -- 0065参照）を待たせることで、フェーズ確認からINSERT完了までをアトミックにする
+  -- （フェーズ確認直後に別トランザクションがanswering以外へ進めてしまい、
+  -- 既にanswering中でなくなったライブへイベントがINSERTされる、という競合を防ぐ）。
+  select * into v_live from public.lives where id = p_live_id for update;
   if not found then
     raise exception 'LIVE_NOT_FOUND';
   end if;

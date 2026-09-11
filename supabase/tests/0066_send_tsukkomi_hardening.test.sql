@@ -363,6 +363,129 @@ begin
   end;
 end $$;
 
+-- ============================================================
+-- テスト10（再レビュー対応・問題2）：フェーズ確認とINSERTのアトミック性。
+-- 別トランザクションが対象live行をFOR UPDATEで先にロックしたまま保持している間、
+-- send_tsukkomiの呼び出しはそのロックを待ってブロックされ、ロック解放（＝別
+-- トランザクションのコミット）後の最新current_phase（answering以外）を正しく見て
+-- LIVE_NOT_SENDABLEで拒否すること（フェーズ確認とINSERTの間に別トランザクションの
+-- フェーズ変更が割り込めないこと）を、dblinkで開いた別セッションを使って検証する。
+-- dblink拡張が使えない環境ではこのテストだけをスキップする（他のテストは影響しない）。
+-- ============================================================
+do $$
+declare
+  v_has_dblink boolean;
+begin
+  begin
+    create extension if not exists dblink;
+    v_has_dblink := true;
+  exception when others then
+    v_has_dblink := false;
+  end;
+
+  if not v_has_dblink then
+    raise notice 'SKIP: dblink拡張が利用できないため、フェーズ切替境界の競合テストを省略';
+    return;
+  end if;
+
+  -- 別セッション（dblink接続）からも呼べるよう、public スキーマに一時的な
+  -- ヘルパー関数を用意する（pg_tempは接続ごとに独立していて dblink の別接続からは
+  -- 見えないため）。1回のトップレベル呼び出し＝1トランザクションとして、
+  -- lives行をFOR UPDATEしたままp_hold_secondsだけ保持し、その後current_phaseを
+  -- group_resultへ進めて（呼び出し完了時に自動コミット）解放する。
+  create or replace function public._t0066_hold_lock_then_advance(
+    p_live_id uuid,
+    p_hold_seconds numeric
+  ) returns boolean
+  language plpgsql
+  as $f$
+  begin
+    perform 1 from public.lives where id = p_live_id for update;
+    perform pg_sleep(p_hold_seconds);
+    update public.lives set current_phase = 'group_result' where id = p_live_id;
+    return true;
+  end;
+  $f$;
+end $$;
+
+do $$
+declare
+  ctx record;
+  v_conn text := 'dbname=' || current_database();
+  v_connected boolean := false;
+  v_started_at timestamptz;
+  v_elapsed_ms numeric;
+  v_before int;
+  v_after int;
+begin
+  if to_regprocedure('public._t0066_hold_lock_then_advance(uuid,numeric)') is null then
+    return; -- 直前のブロックでdblinkが使えずスキップ済み
+  end if;
+
+  select * into ctx from _t0066_ctx;
+  update public.participants set last_tsukkomi_at = null
+    where live_id = ctx.live_a_id and user_id = 'a6000000-0000-0000-0000-00000000000a';
+  select count(*) into v_before from public.live_tsukkomi_events where live_id = ctx.live_a_id;
+
+  begin
+    perform dblink_connect('t0066bg', v_conn);
+    v_connected := true;
+  exception when others then
+    raise notice 'SKIP: dblink接続に失敗したため、フェーズ切替境界の競合テストを省略 (%)', sqlerrm;
+  end;
+
+  if v_connected then
+    -- 別セッションでlives行をFOR UPDATEでロックし1.5秒保持した後、
+    -- current_phaseをgroup_resultへ進めて（関数呼び出し完了時に）コミットする。
+    perform dblink_send_query(
+      't0066bg',
+      format('select public._t0066_hold_lock_then_advance(%L::uuid, %s)', ctx.live_a_id, 1.5)
+    );
+    -- 別セッションが実際にロックを取るまで少し待つ（非同期送信のため）。
+    perform pg_sleep(0.3);
+
+    v_started_at := clock_timestamp();
+    set local role authenticated;
+    perform set_config('myapp.uid', 'a6000000-0000-0000-0000-00000000000a', true);
+    begin
+      perform public.send_tsukkomi(ctx.live_a_id, 'clap', '👏');
+      raise exception 'FAIL: 別トランザクションのフェーズ変更をまたいでもsend_tsukkomiが成功してしまった';
+    exception
+      when others then
+        if sqlerrm <> 'LIVE_NOT_SENDABLE' then
+          raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm;
+        end if;
+    end;
+    reset role;
+    v_elapsed_ms := extract(epoch from (clock_timestamp() - v_started_at)) * 1000;
+
+    -- 別セッションの結果を受け取ってから切断する。
+    perform ok from dblink_get_result('t0066bg') as t(ok boolean);
+    perform dblink_disconnect('t0066bg');
+
+    if v_elapsed_ms < 800 then
+      raise exception
+        'FAIL: send_tsukkomiが別トランザクションのlivesロックを待たずに完了した（約%ms、FOR UPDATEが効いていない疑い）',
+        round(v_elapsed_ms);
+    end if;
+
+    select count(*) into v_after from public.live_tsukkomi_events where live_id = ctx.live_a_id;
+    if v_after <> v_before then
+      raise exception 'FAIL: フェーズ変更後にもかかわらずイベントがINSERTされた (before=%, after=%)', v_before, v_after;
+    end if;
+
+    update public.lives set current_phase = 'answering' where id = ctx.live_a_id;
+    raise notice
+      'PASS: フェーズ確認とINSERTがアトミック（別トランザクションのlivesロック解放を約%ms待ってから最新フェーズで拒否）',
+      round(v_elapsed_ms);
+  end if;
+end $$;
+
+do $$
+begin
+  drop function if exists public._t0066_hold_lock_then_advance(uuid, numeric);
+end $$;
+
 drop table _t0066_ctx;
 
 select 'ALL 0066 TESTS PASSED' as result;

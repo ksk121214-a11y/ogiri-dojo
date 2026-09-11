@@ -16,6 +16,12 @@
 #   3. このスクリプトの対象一覧に追加する必要は無い（*.check.tsを自動的に
 #      全て検出してコンパイル・実行する）。ただしcheck.tsが依存する
 #      src/lib/内のソースファイルは、下のSOURCE_FILES配列に追記すること。
+#
+# 例外：Zustandストア本体（"@/..."エイリアス・実際のSupabaseクライアント生成を
+# 含む）を本番と同じ実装のままテストしたい場合は、src/lib/__tests__/store/配下に
+# 専用のtsconfig（例：tsconfig.followerRace.json）を置き、このスクリプト末尾の
+# 個別ブロックに追加する（-maxdepth 1のCHECK_FILESループには含まれないため、
+# 素のtsc起動では解決できないパスエイリアスの問題を回避できる）。
 
 set -euo pipefail
 
@@ -75,5 +81,29 @@ for src in "${CHECK_FILES[@]}"; do
     FAILED=1
   fi
 done
+
+# src/lib/__tests__/store/useLiveFollowerStoreRace.check.ts は、useLiveFollowerStore.ts
+# （"@/..."エイリアス・実際のSupabaseクライアント生成を含む）を本番と同じ実装のまま
+# importして検証するため、上のCHECK_FILESループ（-maxdepth 1、素のtsc起動）とは別に、
+# 専用のtsconfig（パスエイリアス解決込み）とrequireフック（pathAliasHook.js）を使って
+# 個別にコンパイル・実行する。
+FOLLOWER_RACE_DIR="$(mktemp -d)"
+FOLLOWER_RACE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.followerRace.json"
+FOLLOWER_RACE_ENTRY="$FOLLOWER_RACE_DIR/src/lib/__tests__/store/useLiveFollowerStoreRace.check.js"
+
+echo "--- useLiveFollowerStoreRace.check.ts ---"
+if npx tsc -p "$FOLLOWER_RACE_TSCONFIG" --outDir "$FOLLOWER_RACE_DIR" && [ -f "$FOLLOWER_RACE_ENTRY" ]; then
+  if ! FOLLOWER_RACE_OUT_DIR="$FOLLOWER_RACE_DIR" \
+    FOLLOWER_RACE_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_RACE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreRace.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FOLLOWER_RACE_DIR"
 
 exit $FAILED
