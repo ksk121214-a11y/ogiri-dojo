@@ -61,6 +61,19 @@ function mapSnsSubmitError(message: string | undefined): string {
   return message;
 }
 
+// delete_own_sns_topic/delete_own_sns_answer/delete_own_sns_comment（0067）が
+// 投げるエラーコードを日本語文言に変換する。生のPostgres/Supabaseのエラー文言は
+// 画面に出さない。
+function mapSnsDeleteError(message: string | undefined): string {
+  if (!message) return "削除に失敗しました";
+  if (message.includes("NOT_LOGGED_IN")) return "削除にはログインが必要です";
+  if (message.includes("NOT_OWNER")) return "自分の投稿だけ削除できます";
+  if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
+  if (message.includes("ANSWER_NOT_FOUND")) return "回答が見つかりませんでした";
+  if (message.includes("COMMENT_NOT_FOUND")) return "ツッコミが見つかりませんでした";
+  return "削除に失敗しました";
+}
+
 // DBのtimestamptzを表示用の相対時間ラベルに変換する（取得時点で1回だけ計算する
 // ため、既存のcreatedAtLabel設計＝SSR/CSRのずれを避ける固定文字列と矛盾しない）。
 function formatRelativeLabel(iso: string): string {
@@ -102,6 +115,11 @@ export type SnsFeedKind = "topics" | "answers" | "results";
 export type SnsAudienceKind = "forYou" | "following";
 export type SnsSortKind = "new" | "popular";
 
+// 自分の投稿削除（delete_own_sns_topic/answer/comment、0067）の対象種別。
+// reports（通報）のtarget_typeと同じ命名にしている。
+export type SnsDeleteTargetType = "sns_topic" | "sns_answer" | "sns_comment";
+export type DeleteResult = { ok: true } | { ok: false; reason: string };
+
 interface SnsState {
   topics: SnsTopic[];
   answers: SnsAnswer[];
@@ -126,6 +144,7 @@ interface SnsState {
   // 連打・二重送信防止（対象IDごとに処理中かどうか）。
   likePending: Record<string, boolean>;
   followPending: Record<string, boolean>;
+  deletePending: Record<string, boolean>;
 
   // フィードのタブ選択状態（上記コメント参照）。
   feedTab: SnsFeedKind;
@@ -163,6 +182,12 @@ interface SnsState {
   toggleLike: (answerId: string) => Promise<ActionResult>;
   toggleFollow: (authorId: string) => Promise<ActionResult>;
   isFollowing: (authorId: string) => boolean;
+  // 自分の投稿（お題・回答・ツッコミ）の削除。DB側は論理削除（is_hidden化、0067）で
+  // 寄合券には一切触れない。成功時はローカルstateからも対象と子要素（お題削除なら
+  // その回答・ツッコミ、回答削除ならそのツッコミ）をまとめて除去する。
+  deleteTopic: (topicId: string) => Promise<DeleteResult>;
+  deleteAnswer: (answerId: string) => Promise<DeleteResult>;
+  deleteComment: (commentId: string) => Promise<DeleteResult>;
 }
 
 type DbTopicRow = {
@@ -264,6 +289,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   loadingMoreAnswers: false,
   likePending: {},
   followPending: {},
+  deletePending: {},
 
   feedTab: "topics",
   audienceTab: "forYou",
@@ -709,6 +735,93 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   },
 
   isFollowing: (authorId) => get().followingAuthorIds.includes(authorId),
+
+  // 自分のお題を削除する。delete_own_sns_topic（0067）がDB側で所有者確認・
+  // お題本体とその回答・ツッコミの非表示化をアトミックに行う。寄合券には
+  // 一切触れない（DB側も触れていない）。成功時はローカルstateからもお題・
+  // その回答・その回答へのツッコミをまとめて除去し、削除された回答ぶんの
+  // likedAnswerIdsも一緒に取り除く（もう存在しない回答へのいいね状態を残さない）。
+  deleteTopic: async (topicId) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (get().deletePending[topicId]) return { ok: false, reason: "削除に失敗しました" };
+    set((s) => ({ deletePending: { ...s.deletePending, [topicId]: true } }));
+
+    const { error } = await supabase.rpc("delete_own_sns_topic", { p_topic_id: topicId });
+
+    set((s) => {
+      const rest = { ...s.deletePending };
+      delete rest[topicId];
+      return { deletePending: rest };
+    });
+    if (error) {
+      return { ok: false, reason: mapSnsDeleteError(error.message) };
+    }
+
+    set((s) => {
+      const removedAnswerIds = new Set(
+        s.answers.filter((a) => a.topicId === topicId).map((a) => a.id),
+      );
+      return {
+        topics: s.topics.filter((t) => t.id !== topicId),
+        answers: s.answers.filter((a) => a.topicId !== topicId),
+        comments: s.comments.filter((c) => !removedAnswerIds.has(c.answerId)),
+        likedAnswerIds: s.likedAnswerIds.filter((id) => !removedAnswerIds.has(id)),
+      };
+    });
+    return { ok: true };
+  },
+
+  // 自分の回答を削除する。delete_own_sns_answer（0067）が回答本体とその
+  // ツッコミの非表示化をアトミックに行う。成功時はローカルstateからも回答・
+  // そのツッコミ・likedAnswerIdsの該当分を除去する。
+  deleteAnswer: async (answerId) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (get().deletePending[answerId]) return { ok: false, reason: "削除に失敗しました" };
+    set((s) => ({ deletePending: { ...s.deletePending, [answerId]: true } }));
+
+    const { error } = await supabase.rpc("delete_own_sns_answer", { p_answer_id: answerId });
+
+    set((s) => {
+      const rest = { ...s.deletePending };
+      delete rest[answerId];
+      return { deletePending: rest };
+    });
+    if (error) {
+      return { ok: false, reason: mapSnsDeleteError(error.message) };
+    }
+
+    set((s) => ({
+      answers: s.answers.filter((a) => a.id !== answerId),
+      comments: s.comments.filter((c) => c.answerId !== answerId),
+      likedAnswerIds: s.likedAnswerIds.filter((id) => id !== answerId),
+    }));
+    return { ok: true };
+  },
+
+  // 自分のツッコミを削除する。delete_own_sns_comment（0067）は対象の
+  // コメント自身だけを非表示にし、他の投稿には一切影響しない。
+  deleteComment: async (commentId) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (get().deletePending[commentId]) return { ok: false, reason: "削除に失敗しました" };
+    set((s) => ({ deletePending: { ...s.deletePending, [commentId]: true } }));
+
+    const { error } = await supabase.rpc("delete_own_sns_comment", { p_comment_id: commentId });
+
+    set((s) => {
+      const rest = { ...s.deletePending };
+      delete rest[commentId];
+      return { deletePending: rest };
+    });
+    if (error) {
+      return { ok: false, reason: mapSnsDeleteError(error.message) };
+    }
+
+    set((s) => ({ comments: s.comments.filter((c) => c.id !== commentId) }));
+    return { ok: true };
+  },
 }));
 
 // 2026-08-30（不具合修正）：モジュールロード直後に即座にinit()を呼んでいたため、

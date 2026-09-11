@@ -1,8 +1,10 @@
 // "@/..." インポートを、tscコンパイル後の出力先(<outDir>/src/...)へ解決するための
 // 最小限のrequireフック。tsconfig-paths等の追加npm依存を増やさず、
 // Module._resolveFilenameを直接パッチするだけの自己完結スクリプト。
+// useLiveFollowerStoreRace.check.ts・useSnsStoreDelete.check.ts等、Zustandストア
+// 本体を本番と同じ実装のままテストする複数のcheck.tsから共通で使う。
 // 使い方: node -r ./pathAliasHook.js <エントリポイントのコンパイル済みjs>
-// 環境変数 FOLLOWER_RACE_OUT_DIR に、tscの--outDirへ渡したのと同じディレクトリを渡すこと。
+// 環境変数 STORE_CHECK_OUT_DIR に、tscの--outDirへ渡したのと同じディレクトリを渡すこと。
 "use strict";
 // node -r 経由で読み込む素のCommonJSスクリプトのため、requireを使う。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -10,13 +12,13 @@ const Module = require("module");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
 
-const outDir = process.env.FOLLOWER_RACE_OUT_DIR;
-const repoRoot = process.env.FOLLOWER_RACE_REPO_ROOT;
+const outDir = process.env.STORE_CHECK_OUT_DIR;
+const repoRoot = process.env.STORE_CHECK_REPO_ROOT;
 if (!outDir) {
-  throw new Error("pathAliasHook.js: 環境変数 FOLLOWER_RACE_OUT_DIR が未設定です");
+  throw new Error("pathAliasHook.js: 環境変数 STORE_CHECK_OUT_DIR が未設定です");
 }
 if (!repoRoot) {
-  throw new Error("pathAliasHook.js: 環境変数 FOLLOWER_RACE_REPO_ROOT が未設定です");
+  throw new Error("pathAliasHook.js: 環境変数 STORE_CHECK_REPO_ROOT が未設定です");
 }
 const repoNodeModules = path.join(repoRoot, "node_modules");
 

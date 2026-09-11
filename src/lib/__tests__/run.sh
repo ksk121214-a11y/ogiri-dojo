@@ -93,8 +93,8 @@ FOLLOWER_RACE_ENTRY="$FOLLOWER_RACE_DIR/src/lib/__tests__/store/useLiveFollowerS
 
 echo "--- useLiveFollowerStoreRace.check.ts ---"
 if npx tsc -p "$FOLLOWER_RACE_TSCONFIG" --outDir "$FOLLOWER_RACE_DIR" && [ -f "$FOLLOWER_RACE_ENTRY" ]; then
-  if ! FOLLOWER_RACE_OUT_DIR="$FOLLOWER_RACE_DIR" \
-    FOLLOWER_RACE_REPO_ROOT="$REPO_ROOT" \
+  if ! STORE_CHECK_OUT_DIR="$FOLLOWER_RACE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
     NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
     NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
     node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_RACE_ENTRY"; then
@@ -105,5 +105,26 @@ else
   FAILED=1
 fi
 rm -rf "$FOLLOWER_RACE_DIR"
+
+# src/lib/__tests__/store/useSnsStoreDelete.check.ts も同じ理由（useSnsStore.tsが
+# "@/..."エイリアス・実際のSupabaseクライアント生成を含む）で専用tsconfig経由にする。
+SNS_DELETE_DIR="$(mktemp -d)"
+SNS_DELETE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.snsDelete.json"
+SNS_DELETE_ENTRY="$SNS_DELETE_DIR/src/lib/__tests__/store/useSnsStoreDelete.check.js"
+
+echo "--- useSnsStoreDelete.check.ts ---"
+if npx tsc -p "$SNS_DELETE_TSCONFIG" --outDir "$SNS_DELETE_DIR" && [ -f "$SNS_DELETE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$SNS_DELETE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$SNS_DELETE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useSnsStoreDelete.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$SNS_DELETE_DIR"
 
 exit $FAILED

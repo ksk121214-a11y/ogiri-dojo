@@ -85,6 +85,26 @@ export default function HowToPlayPage() {
         すべての組が終了したら順位発表。順位に応じたボーナスポイントを獲得。
       </StepCard>
 
+      <div className="flex flex-col items-center gap-1 py-1 text-center">
+        <p className="font-sans text-[11px] font-bold tracking-wide text-[var(--ink)]/55">
+          お題提供
+        </p>
+        <p className="font-sans text-xs leading-relaxed text-[var(--ink)]/70">
+          爆笑スタジアムで使用するすべてのお題は、
+          <br />
+          「癖の強いお題を出す大喜利」さんにご提供いただいています。
+        </p>
+        <a
+          href="https://x.com/kusenotuyoiodai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-sans text-xs font-bold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+          aria-label="「癖の強いお題を出す大喜利」さんのX（@kusenotuyoiodai）を新しいタブで開く"
+        >
+          X：@kusenotuyoiodai
+        </a>
+      </div>
+
       <Link
         href="/live-schedule"
         className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:opacity-90`}

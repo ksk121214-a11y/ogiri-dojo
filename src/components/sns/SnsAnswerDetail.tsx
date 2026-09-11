@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 
+import DeleteButton from "@/components/app/DeleteButton";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -26,6 +28,7 @@ const MAX_LENGTH = 60;
 // 2026-09-07: 押すと寄合券を使うことがボタンを見ただけで分かるよう、お題投稿・回答投稿と
 // 同じ表示パターン（残り0枚なら送信不可＋案内文、ボタンに「（寄合券を1枚使う）」を明記）を追加。
 export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
+  const router = useRouter();
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
@@ -110,6 +113,17 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
     setBody("");
   };
 
+  // 回答自体を削除した場合、この回答の詳細ページはもう存在できないため、
+  // 直前のページ（お題詳細・寄合帳等）またはマイページへ安全に戻る
+  // （SnsBackButton・SnsTopicDetailのhandleTopicDeletedと同じ方針）。
+  const handleAnswerDeleted = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/mypage");
+    }
+  };
+
   const handleToggleLike = async (e: MouseEvent) => {
     e.preventDefault();
     if (likePending) return;
@@ -170,13 +184,22 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>
           )}
         </div>
-        <ReportButton
-          className="absolute right-4 top-1/2 -translate-y-1/2"
-          targetType="sns_answer"
-          targetId={answer.id}
-          targetAuthorId={reportTargetAuthorId(answer.authorId)}
-          snapshotBody={answer.body}
-        />
+        {answer.authorId === "me" ? (
+          <DeleteButton
+            className="absolute right-4 top-1/2 -translate-y-1/2"
+            targetType="sns_answer"
+            targetId={answer.id}
+            onDeleted={handleAnswerDeleted}
+          />
+        ) : (
+          <ReportButton
+            className="absolute right-4 top-1/2 -translate-y-1/2"
+            targetType="sns_answer"
+            targetId={answer.id}
+            targetAuthorId={reportTargetAuthorId(answer.authorId)}
+            snapshotBody={answer.body}
+          />
+        )}
       </div>
 
       <form
@@ -240,13 +263,21 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
               </span>
             </div>
             <p className="font-sans text-sm text-[var(--ink)]">{comment.body}</p>
-            <ReportButton
-              className="absolute right-2 top-1/2 -translate-y-1/2"
-              targetType="sns_comment"
-              targetId={comment.id}
-              targetAuthorId={reportTargetAuthorId(comment.authorId)}
-              snapshotBody={comment.body}
-            />
+            {comment.authorId === "me" ? (
+              <DeleteButton
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+                targetType="sns_comment"
+                targetId={comment.id}
+              />
+            ) : (
+              <ReportButton
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+                targetType="sns_comment"
+                targetId={comment.id}
+                targetAuthorId={reportTargetAuthorId(comment.authorId)}
+                snapshotBody={comment.body}
+              />
+            )}
           </div>
         ))}
       </div>

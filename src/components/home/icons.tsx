@@ -246,3 +246,15 @@ export function CheckGlyph({ className }: { className?: string }) {
     </svg>
   );
 }
+
+// 自分の投稿の削除ボタン（DeleteButton）用のゴミ箱アイコン。
+export function TrashGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" className={className} fill="none" aria-hidden>
+      <path d="M4 7h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.5 7 7.4 19.6A2 2 0 0 0 9.4 21.4h5.2a2 2 0 0 0 2-1.8L17.5 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}

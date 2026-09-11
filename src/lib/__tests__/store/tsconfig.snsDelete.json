@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "../../../..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../../../..",
+    "types": ["node"]
+  },
+  "include": [
+    "../../../data/collectionData.ts",
+    "../../../data/snsData.ts",
+    "../../../lib/basePath.ts",
+    "../../../lib/supabase.ts",
+    "../../../store/useAuthStore.ts",
+    "../../../store/useProfileStore.ts",
+    "../../../store/useUserStore.ts",
+    "../../../store/useSnsStore.ts",
+    "../../../types/economy.ts",
+    "../../../types/sns.ts",
+    "useSnsStoreDelete.check.ts"
+  ]
+}

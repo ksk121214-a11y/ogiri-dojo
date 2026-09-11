@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import DeleteButton from "@/components/app/DeleteButton";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -25,6 +27,7 @@ const MAX_LENGTH = 80;
 // 2026-09-02: 寄合券をサーバー管理に一本化し、投稿保存に成功した場合だけ券が減る
 // ようにした（submit_sns_answer RPC内で原子的に処理）。失敗時は入力内容を残す。
 export default function SnsTopicDetail({ topicId }: { topicId: string }) {
+  const router = useRouter();
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
@@ -114,6 +117,16 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
     setBody("");
   };
 
+  // お題自体を削除した場合、このお題の詳細ページはもう存在できないため、
+  // 直前のページ（寄合帳等）またはマイページへ安全に戻る（SnsBackButtonと同じ方針）。
+  const handleTopicDeleted = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/mypage");
+    }
+  };
+
   const handleToggleLike = async (answerId: string) => {
     if (likePending[answerId]) return;
     const result = await toggleLike(answerId);
@@ -145,13 +158,22 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         <p className="mt-3 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {topic.body}
         </p>
-        <ReportButton
-          className="absolute right-4 top-1/2 -translate-y-1/2"
-          targetType="sns_topic"
-          targetId={topic.id}
-          targetAuthorId={reportTargetAuthorId(topic.authorId)}
-          snapshotBody={topic.body}
-        />
+        {topic.authorId === "me" ? (
+          <DeleteButton
+            className="absolute right-4 top-1/2 -translate-y-1/2"
+            targetType="sns_topic"
+            targetId={topic.id}
+            onDeleted={handleTopicDeleted}
+          />
+        ) : (
+          <ReportButton
+            className="absolute right-4 top-1/2 -translate-y-1/2"
+            targetType="sns_topic"
+            targetId={topic.id}
+            targetAuthorId={reportTargetAuthorId(topic.authorId)}
+            snapshotBody={topic.body}
+          />
+        )}
       </div>
 
       <form
@@ -258,13 +280,21 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
                   {answer.likes.toLocaleString()}
                 </span>
               </button>
-              <ReportButton
-                className="absolute right-2 top-1/2 -translate-y-1/2"
-                targetType="sns_answer"
-                targetId={answer.id}
-                targetAuthorId={reportTargetAuthorId(answer.authorId)}
-                snapshotBody={answer.body}
-              />
+              {answer.authorId === "me" ? (
+                <DeleteButton
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  targetType="sns_answer"
+                  targetId={answer.id}
+                />
+              ) : (
+                <ReportButton
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  targetType="sns_answer"
+                  targetId={answer.id}
+                  targetAuthorId={reportTargetAuthorId(answer.authorId)}
+                  snapshotBody={answer.body}
+                />
+              )}
             </div>
           );
         })}

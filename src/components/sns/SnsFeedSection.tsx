@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 
+import DeleteButton from "@/components/app/DeleteButton";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -273,13 +274,21 @@ function TopicFeedList({
                 {body}
               </Link>
             )}
-            <ReportButton
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-              targetType="sns_topic"
-              targetId={topic.id}
-              targetAuthorId={reportTargetAuthorId(topic.authorId)}
-              snapshotBody={topic.body}
-            />
+            {topic.authorId === "me" ? (
+              <DeleteButton
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                targetType="sns_topic"
+                targetId={topic.id}
+              />
+            ) : (
+              <ReportButton
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                targetType="sns_topic"
+                targetId={topic.id}
+                targetAuthorId={reportTargetAuthorId(topic.authorId)}
+                snapshotBody={topic.body}
+              />
+            )}
           </div>
         );
       })}
@@ -345,13 +354,21 @@ function AnswerFeedList({
                 {answerBody}
               </Link>
             )}
-            <ReportButton
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-              targetType="sns_answer"
-              targetId={answer.id}
-              targetAuthorId={reportTargetAuthorId(answer.authorId)}
-              snapshotBody={answer.body}
-            />
+            {answer.authorId === "me" ? (
+              <DeleteButton
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                targetType="sns_answer"
+                targetId={answer.id}
+              />
+            ) : (
+              <ReportButton
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                targetType="sns_answer"
+                targetId={answer.id}
+                targetAuthorId={reportTargetAuthorId(answer.authorId)}
+                snapshotBody={answer.body}
+              />
+            )}
           </div>
         );
       })}
