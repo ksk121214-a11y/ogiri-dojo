@@ -573,7 +573,20 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // refreshTurnDerivedと同様に「今回の呼び出しが最新か」を通し番号で管理する。
     // 無いと、後発の呼び出しが先に完了して反映された直後に、先発の（今となっては
     // 古い）呼び出しの結果が遅れて届いて上書きしてしまうことがあった。
+    // 2026-09-16（再レビュー対応）：ただしこのrefetchRequestIdはsubscribe()の
+    // 呼び出しごとに0から始まる「このクロージャ内だけの通し番号」であり、
+    // subscribe A→subscribe Bと短時間に切り替わった場合、AとBはそれぞれ独立した
+    // カウンタを持つため、Aの取得がBより遅れて完了してもAは自分自身の
+    // refetchRequestIdとしか比較できず、Bの結果を上書きできてしまう
+    // （cleanup漏れ・順序のズレがあった場合の構造的な穴）。
+    // channelSwapの購読世代（followerChannelSwap.currentGen()）はswap()を呼ぶ
+    // たびに無条件で進み、cleanupが呼ばれたかどうかに関わらず「今どの世代が
+    // 最新か」を正しく表す。refetchAll・failStage・scheduleRetry・
+    // visibility/online/auth変更のすべてをこの世代に縛ることで、古い世代の
+    // 経路がどの段階からでもstateを変更できないようにする。
     let refetchRequestId = 0;
+    let myGen = -1;
+    const isMyGenCurrent = () => followerChannelSwap.currentGen() === myGen;
 
     // 2026-09-03:「回答者としてリロードすると観客画面になる」不具合の根本対策
     // （認証復元待ちだけでは不十分だったため全面的に作り直した）。
@@ -610,10 +623,15 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = setTimeout(() => {
         retryTimer = null;
-        if (!cancelled) refetchAll();
+        // 再試行予約の実行直前にも世代を確認する（タイマーが生きている間に
+        // 新しい世代へ切り替わっていたら、古い世代の再試行は行わない）。
+        if (!cancelled && isMyGenCurrent()) refetchAll();
       }, RETRY_DELAY_MS);
     };
     const failStage = (message: string) => {
+      // 既に新しい世代に追い越されていたら、古い世代のsyncError表示・
+      // 再試行予約は行わない（stateを一切変更しない）。
+      if (!isMyGenCurrent()) return;
       console.warn("[live]", message);
       set({ syncError: message });
       scheduleRetry();
@@ -622,7 +640,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     const refetchAll = async () => {
       const requestId = ++refetchRequestId;
       await waitForAuthResolved();
-      if (cancelled || requestId !== refetchRequestId) return;
+      if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
       const userId = useAuthStore.getState().user?.id ?? null;
 
       // 段階1：live確定。
@@ -633,7 +651,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (cancelled || requestId !== refetchRequestId) return;
+      if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
       if (liveError) {
         failStage("ライブ情報の取得に失敗しました");
         return;
@@ -663,7 +681,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
           .eq("live_id", live.id)
           .order("joined_at", { ascending: true })
           .order("id", { ascending: true });
-        if (cancelled || requestId !== refetchRequestId) return;
+        if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
         if (participantsError) {
           failStage("参加者情報の取得に失敗しました");
           return;
@@ -678,7 +696,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
           fetchGroupsForLive(live.id),
           fetchParticipantProfiles(live.id),
         ]);
-        if (cancelled || requestId !== refetchRequestId) return;
+        if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
         if (groupsResult.ok) {
           groups = groupsResult.data;
         }
@@ -691,13 +709,13 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         // 前のライブのgroupsを引き継がず明示的に空にする。
         groups = [];
       }
-      if (cancelled || requestId !== refetchRequestId) return;
+      if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
       set({ live, myParticipant, participants, groups, participantNames, participantAvatars });
 
       // 段階3：currentTurn/currentTopic確定。ここまで揃って初めて舞台/観客の
       // 判定材料が出揃うため、これが成功するまではloadingをfalseにしない。
       const turnOk = await refreshTurnDerived();
-      if (cancelled || requestId !== refetchRequestId) return;
+      if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
       if (!turnOk) {
         failStage("進行状況の取得に失敗しました");
         return;
@@ -706,7 +724,6 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     };
 
     currentRefetchAllRef = refetchAll;
-    refetchAll();
 
     // 購読世代（channelSwap）越しに全 Postgres Changes チャンネルを作る。
     // - topic は `follower-<kind>-g<gen>` の世代固有名（固定 topic 名に依存しない）
@@ -810,12 +827,19 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // liveId は購読時点で未確定（refetchAll が発見する）。観客側の購読はテーブル
     // 全体で liveId 絞りも無いため、swap の liveId には空文字を渡す（topic は
     // `follower-<kind>-g<gen>` で世代固有になる）。
+    // 2026-09-16（再レビュー対応）：myGen をここで確定させてから初回refetchAllを
+    // 開始する（初回取得も必ずこの世代に縛り、subscribe直後に別のsubscribeへ
+    // 追い越された場合はrefetchAllの最初のawait直後で弾かれるようにする）。
     const channelSwapResult = followerChannelSwap.swap("", spawnFollowerChannels);
+    myGen = channelSwapResult.gen;
+    refetchAll();
 
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") refetchAll();
+      if (document.visibilityState === "visible" && isMyGenCurrent()) refetchAll();
     };
-    const handleOnline = () => refetchAll();
+    const handleOnline = () => {
+      if (isMyGenCurrent()) refetchAll();
+    };
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("online", handleOnline);
 
@@ -830,7 +854,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       const nextUserId = state.user?.id ?? null;
       if (nextUserId === lastAuthUserId) return;
       lastAuthUserId = nextUserId;
-      refetchAll();
+      if (isMyGenCurrent()) refetchAll();
     });
 
     return () => {

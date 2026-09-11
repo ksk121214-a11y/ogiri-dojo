@@ -395,7 +395,9 @@ const count = (needle: string) => src.split(needle).length - 1;
 }
 
 // 16e: ホスト側は "follower-tsukkomi" の生 Broadcast チャンネルを一切作らず、
-//      ボット反応はホスト専用 RPC host_send_bot_tsukkomi 経由で送る。
+//      host_send_bot_tsukkomi（代理送信者をクライアントが指定できるRPC）も無く、
+//      ボット反応は「ボット本人としてログイン済みのクライアント」から既存の
+//      一般参加者用 send_tsukkomi を呼ぶ（なりすまし経路を構造的に無くす）。
 {
   assert.ok(!/ensureTsukkomiChannel/.test(src), "ensureTsukkomiChannel が残っている（廃止するはず）");
   assert.ok(!/"follower-tsukkomi"/.test(src), "ホスト側に固定topic名 \"follower-tsukkomi\" が残っている");
@@ -403,8 +405,16 @@ const count = (needle: string) => src.split(needle).length - 1;
     !/type: "broadcast",\s*\n\s*event: "tsukkomi"/.test(src),
     "ホスト側に生の Realtime Broadcast 送信（event:\"tsukkomi\"）が残っている",
   );
-  // ボット反応は host_send_bot_tsukkomi RPC。発生確率・間隔・テンプレート・
-  // clap/stamp割合は不変（0.05 / 1_500 / TSUKKOMI_TEMPLATES / roll<1/3・<2/3）。
+  assert.ok(
+    !/host_send_bot_tsukkomi/.test(src),
+    "host_send_bot_tsukkomi（代理送信者をクライアントが指定できるRPC）への参照が残っている",
+  );
+  assert.ok(
+    !/supabase\s*\n?\s*\.rpc\("send_tsukkomi"/.test(src),
+    "メインの supabase クライアントから send_tsukkomi を呼んでいる（本人以外への代理送信になる）",
+  );
+  // ボット反応は各ボット本人のクライアントから send_tsukkomi。発生確率・間隔・
+  // テンプレート・clap/stamp割合は不変（0.05 / 1_500 / TSUKKOMI_TEMPLATES / roll<1/3・<2/3）。
   const botBlock = src.match(
     /if \(bots\.length > 0 && now - lastBotTsukkomiAt > 1_500 && Math\.random\(\) < 0\.05\) \{[\s\S]*?\n {2}\}/,
   );
@@ -416,16 +426,20 @@ const count = (needle: string) => src.split(needle).length - 1;
     "clap/stamp の割合・テンプレートが変わっている",
   );
   assert.ok(
-    /supabase\s*\n?\s*\.rpc\("host_send_bot_tsukkomi", \{\s*\n\s*p_live_id: live\.id,\s*\n\s*p_participant_id: senderBot\.participantId,\s*\n\s*p_kind: kind,\s*\n\s*p_text: text,/.test(
+    /senderBot\.client\s*\n?\s*\.rpc\("send_tsukkomi", \{\s*\n\s*p_live_id: live\.id,\s*\n\s*p_kind: kind,\s*\n\s*p_text: text,/.test(
       botBlock[0],
     ),
-    "ボット反応が host_send_bot_tsukkomi RPC 経由で送られていない",
+    "ボット反応が senderBot.client.rpc(\"send_tsukkomi\", ...) 経由で送られていない",
+  );
+  assert.ok(
+    !/p_participant_id/.test(botBlock[0]),
+    "ボット反応の送信でparticipant_idを指定している（代理送信者をクライアントが指定できてしまう）",
   );
   assert.ok(
     /if \(error\) console\.warn\("\[tsukkomi\] ボット反応の送信に失敗", error\)/.test(botBlock[0]),
     "RPC失敗時に進行を止めずコンソール警告に留めていない",
   );
-  console.log("PASS: 配線-16e（ホスト：Broadcast廃止・ボット反応は host_send_bot_tsukkomi RPC・頻度不変）");
+  console.log("PASS: 配線-16e（ホスト：Broadcast廃止・ボット反応は本人クライアントからの send_tsukkomi・頻度不変）");
 }
 
 // 16g: 観客側（useLiveFollowerStore）の購読も channelSwap 化。
@@ -468,6 +482,56 @@ const count = (needle: string) => src.split(needle).length - 1;
     "観客側が live_tsukkomi_events を世代固有 topic で購読していない",
   );
   console.log("PASS: 配線-16g（観客側：channelSwap化・固定topic名廃止・所有権付きcleanup・世代ガード）");
+}
+
+// 16h: 観客側の refetchAll・failStage・scheduleRetry・visibility/online/auth変更経路が
+//      すべて channelSwap の購読世代（isMyGenCurrent）に縛られている
+//      （subscribe A→Bと短時間に切り替わっても、Aの取得がBより遅れて完了してBの
+//      stateを上書きできない。cleanup漏れの有無に依存しない構造）。
+{
+  const follower = readFileSync(
+    join(process.cwd(), "src", "store", "useLiveFollowerStore.ts"),
+    "utf8",
+  );
+  const count = (re: RegExp) => (follower.match(re) ?? []).length;
+  assert.ok(
+    /const isMyGenCurrent = \(\) => followerChannelSwap\.currentGen\(\) === myGen;/.test(follower),
+    "isMyGenCurrent（購読世代ガード）が定義されていない",
+  );
+  // myGen は channelSwap.swap(...) の戻り値から確定させ、その後で初回refetchAllを呼ぶ
+  // （初回取得も必ずこの世代に縛る）。
+  assert.ok(
+    /const channelSwapResult = followerChannelSwap\.swap\(""[\s\S]{0,80}?\);\s*\n\s*myGen = channelSwapResult\.gen;\s*\n\s*refetchAll\(\);/.test(
+      follower,
+    ),
+    "myGen が channelSwap.swap(...) の戻り値から確定してから初回refetchAllが呼ばれていない",
+  );
+  // refetchAll内の各await後（段階1〜3の計5箇所）・set前・failStage前に isMyGenCurrent() を確認。
+  assert.ok(
+    count(/requestId !== refetchRequestId \|\| !isMyGenCurrent\(\)/g) >= 5,
+    "refetchAll の各チェックポイントで isMyGenCurrent() を確認していない",
+  );
+  assert.ok(
+    /const failStage = \(message: string\) => \{\s*\n[\s\S]{0,120}?if \(!isMyGenCurrent\(\)\) return;/.test(follower),
+    "failStage が isMyGenCurrent() を確認せずに syncError・再試行予約を行っている",
+  );
+  assert.ok(
+    /if \(!cancelled && isMyGenCurrent\(\)\) refetchAll\(\);/.test(follower),
+    "scheduleRetry の再試行予約実行時に isMyGenCurrent() を確認していない",
+  );
+  assert.ok(
+    /document\.visibilityState === "visible" && isMyGenCurrent\(\)/.test(follower),
+    "visibilitychange 経路が isMyGenCurrent() を確認していない",
+  );
+  assert.ok(
+    /const handleOnline = \(\) => \{\s*\n\s*if \(isMyGenCurrent\(\)\) refetchAll\(\);/.test(follower),
+    "online 経路が isMyGenCurrent() を確認していない",
+  );
+  assert.ok(
+    /lastAuthUserId = nextUserId;\s*\n\s*if \(isMyGenCurrent\(\)\) refetchAll\(\);/.test(follower),
+    "auth変更経路が isMyGenCurrent() を確認していない",
+  );
+  console.log("PASS: 配線-16h（観客側：refetchAll/failStage/scheduleRetry/visibility/online/auth変更が購読世代に縛られている）");
 }
 
 // 16f: loadSnapshotSlice の beginGuard は gate.begin より前（対象不一致で gate を進めない）。

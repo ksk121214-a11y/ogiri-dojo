@@ -937,6 +937,83 @@ async function main() {
     console.log("PASS: 追加必須（beginGuard=true なら通常どおり適用される）");
   }
 
+  // 2026-09-16（再レビュー対応・問題3）：観客側 useLiveFollowerStore の
+  // subscribe()冒頭のrefetchAllは、Realtimeコールバックの世代ガード
+  // （isCurrentGen）とは別に、購読世代（createChannelSwapController.
+  // currentGen()）を確認しないままstateを書き換えていたため、subscribe A→
+  // subscribe Bと短時間に切り替わり、
+  // Aの取得がBより遅れて完了すると、古いAの結果がBのstateを上書きできる
+  // 構造だった（詳細は useLiveFollowerStore.ts の isMyGenCurrent 参照）。
+  // ここでは実際に使っている createChannelSwapController をそのまま使い、
+  // useLiveFollowerStore.ts と同じ「swap→myGen確定→各awaitの直後に
+  // isMyGenCurrentを確認してからのみ反映」という形を再現して、要求された
+  // 6ステップ（A開始→Aの取得保留→B開始→Bを先に完了→Aを最後に完了→
+  // 最終stateがBのまま）を実際の非同期実行で検証する（正規表現による配線確認
+  // は liveHostSnapshotsWiring.check.ts の配線-16h で別途行っている）。
+  {
+    const swap = createChannelSwapController<{ id: number }>({
+      kinds: ["x"],
+      topicFor: (kind, _liveId, gen) => `follower-${kind}-g${gen}`,
+      remove: () => {},
+    });
+    const state = { finalValue: "" };
+
+    function deferred<T>() {
+      let resolve!: (v: T) => void;
+      const promise = new Promise<T>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    // useLiveFollowerStoreのrefetchAll（段階1のawait直後・段階2のawait直後＝
+    // set直前でisMyGenCurrentを確認する構造）を最小限のかたちで再現する。
+    function fakeSubscribe(stage1: Promise<string>, stage2: Promise<string>) {
+      let myGen = -1;
+      const isMyGenCurrent = () => swap.currentGen() === myGen;
+      const refetchAll = async () => {
+        const v1 = await stage1;
+        if (!isMyGenCurrent()) return; // 段階1のawait直後
+        const v2 = await stage2;
+        if (!isMyGenCurrent()) return; // 段階2のawait直後（set前）
+        state.finalValue = `${v1}:${v2}`;
+      };
+      const result = swap.swap("", () => []);
+      myGen = result.gen;
+      void refetchAll();
+      return () => result.dispose();
+    }
+
+    // 1〜2. subscribe A開始・Aの取得を保留（stage1/stage2ともまだresolveしない）。
+    const aStage1 = deferred<string>();
+    const aStage2 = deferred<string>();
+    fakeSubscribe(aStage1.promise, aStage2.promise);
+
+    // 3. subscribe B開始（Aのcleanupを待たずに始まるケース＝cleanup漏れ・
+    //    順序のズレがあった場合と同じ状況を再現する）。
+    fakeSubscribe(Promise.resolve("B1"), Promise.resolve("B2"));
+
+    // 4. Bを先に完了させる。
+    await delay(5);
+    assert.equal(state.finalValue, "B1:B2", "Bの取得が先に完了して反映されていない");
+
+    // 5. Aを最後に完了させる（段階1→段階2の順で遅れて解決する）。
+    aStage1.resolve("A1");
+    await delay(5);
+    aStage2.resolve("A2");
+    await delay(5);
+
+    // 6. 最終stateがBの値のまま（Aの遅延結果に上書きされない）。
+    assert.equal(
+      state.finalValue,
+      "B1:B2",
+      "古いsubscribe Aの遅延した取得結果が、新しいsubscribe Bのstateを上書きしてしまった",
+    );
+    console.log(
+      "PASS: 追加必須（観客側subscribe世代と初回refetchAllの競合：古いAの遅延結果がBを上書きしない）",
+    );
+  }
+
   console.log("ALL LIVE_HOST_SNAPSHOTS CHECKS PASSED");
 }
 

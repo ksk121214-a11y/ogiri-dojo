@@ -188,9 +188,11 @@ let initInFlight: Promise<void> | null = null;
 // (2) その固定topic名を観客側の Postgres Changes 購読と共有しており、
 //     supabase.channel() が同一クライアント内で既存チャンネルを返すことで
 //     観客側の後付け購読がサーバーへ反映されない衝突が起きえた。
-// 対応：ホスト側の Broadcast チャンネルを廃止し、ホスト専用の SECURITY DEFINER RPC
-// host_send_bot_tsukkomi 経由で live_tsukkomi_events へ安全に INSERT する
-// （観客側の既存 Postgres Changes 購読へ届く）。
+// 対応：ホスト側の Broadcast チャンネルを廃止し、各ボット本人としてログイン済みの
+// クライアント（useLiveBotStoreのBotSession.client）から既存の一般参加者用RPC
+// send_tsukkomi を呼ぶ形にした。participant_idはDB側がauth.uid()から特定するため、
+// ホストクライアントが参加者IDを指定する余地自体が無く、一般参加者へのなりすましは
+// 構造的に不可能（観客側の既存 Postgres Changes 購読へそのまま届く）。
 let lastBotTsukkomiAt = 0;
 let pendingRevealAt: number | null = null; // 次の回答をrevealする予定時刻（ホスト内メモリのみ）
 // 回答受付フェーズの「本当の残り持ち時間」（ホスト内メモリのみ）。src/store/useLiveDemoStore.tsの
@@ -1257,8 +1259,9 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
   // （見た目の賑やかし。どのボットが送ったかは表示に使わない）。
   // 60秒の回答フェーズ中に数回程度発生する頻度を狙っている（2026-08-19：2%→5%に引き上げ）。
   // 発生確率(0.05)・間隔(1.5秒)・テンプレート・clap/stampの割合(1/3ずつ)は不変。
-  // 送信経路だけをホスト専用 RPC host_send_bot_tsukkomi へ変更し、観客側の既存
-  // Postgres Changes 購読（public.live_tsukkomi_events）へ安全に届くようにする。
+  // 送信は「ボット本人としてログイン済みのクライアント」から既存の send_tsukkomi を
+  // 呼ぶ（participant_idはDB側がauth.uid()から決めるため、ホストが参加者IDを
+  // 指定する必要がなく、一般参加者へのなりすましも構造的に不可能）。
   if (bots.length > 0 && now - lastBotTsukkomiAt > 1_500 && Math.random() < 0.05) {
     lastBotTsukkomiAt = now;
     const roll = Math.random();
@@ -1268,13 +1271,10 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
         : roll < 2 / 3
           ? ["stamp", "爆笑"]
           : ["clap", "👏"];
-    // 代理送信者はこの組のボット参加者（RPC が「対象ライブの実在する退場していない
-    // player 参加者・運営者本人でない」ことを DB 側で検証する）。
     const senderBot = bots[Math.floor(Math.random() * bots.length)];
-    void supabase
-      .rpc("host_send_bot_tsukkomi", {
+    void senderBot.client
+      .rpc("send_tsukkomi", {
         p_live_id: live.id,
-        p_participant_id: senderBot.participantId,
         p_kind: kind,
         p_text: text,
       })
