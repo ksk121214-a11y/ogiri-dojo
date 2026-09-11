@@ -428,6 +428,308 @@ end $$;
 
 reset role;
 
+-- ============================================================
+-- 再レビュー対応（追加修正）：submit_sns_answer/submit_sns_commentが親の
+-- is_hiddenを見ていなかった問題の回帰テスト。
+-- ============================================================
+
+insert into public.sns_topics (id, author_id, body) values
+  ('a7100000-0000-0000-0000-000000000004', 'a7000000-0000-0000-0000-00000000000a', 'topicD本文（削除済みお題テスト用）'),
+  ('a7100000-0000-0000-0000-000000000005', 'a7000000-0000-0000-0000-00000000000a', 'topicE本文（削除済み回答テスト用）'),
+  ('a7100000-0000-0000-0000-000000000006', 'a7000000-0000-0000-0000-00000000000a', 'topicF本文（管理者非表示テスト用）'),
+  ('a7100000-0000-0000-0000-000000000007', 'a7000000-0000-0000-0000-00000000000a', 'topicG本文（投稿と削除の競合テスト用、テスト16でdelete_own_sns_topicにより削除される）'),
+  ('a7100000-0000-0000-0000-000000000008', 'a7000000-0000-0000-0000-00000000000a', 'topicH本文（正常投稿の非退行テスト用）');
+insert into public.sns_answers (id, topic_id, author_id, body) values
+  ('a7200000-0000-0000-0000-000000000005', 'a7100000-0000-0000-0000-000000000005', 'a7000000-0000-0000-0000-00000000000b', 'answerE1本文（削除済み回答テスト用）'),
+  ('a7200000-0000-0000-0000-000000000006', 'a7100000-0000-0000-0000-000000000006', 'a7000000-0000-0000-0000-00000000000b', 'answerF1本文（管理者非表示テスト用・回答自体）'),
+  ('a7200000-0000-0000-0000-000000000008', 'a7100000-0000-0000-0000-000000000008', 'a7000000-0000-0000-0000-00000000000b', 'answerH1本文（正常投稿の非退行テスト用）');
+
+create temporary table _t0067_scratch (k text primary key, v text);
+
+-- ============================================================
+-- テスト13: 削除済みのお題には回答できない（TOPIC_NOT_FOUND）。寄合券も減らない。
+-- ============================================================
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000a', true); -- topicDの所有者
+  perform public.delete_own_sns_topic('a7100000-0000-0000-0000-000000000004');
+end $$;
+
+insert into _t0067_scratch (k, v)
+  select 'topicD_ticket_before', tickets_count::text from public.profiles where id = 'a7000000-0000-0000-0000-00000000000b';
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000b', true); -- 回答しようとする側（topicDの所有者ではない）
+  begin
+    perform public.submit_sns_answer('a7100000-0000-0000-0000-000000000004', 'テスト回答');
+    raise exception 'FAIL: 削除済みのお題へ回答できてしまった';
+  exception
+    when others then
+      if sqlerrm <> 'TOPIC_NOT_FOUND' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+  end;
+end $$;
+
+do $$
+declare
+  v_before int;
+  v_after int;
+begin
+  select v::int into v_before from _t0067_scratch where k = 'topicD_ticket_before';
+  select tickets_count into v_after from public.profiles where id = 'a7000000-0000-0000-0000-00000000000b';
+  if v_before <> v_after then
+    raise exception 'FAIL: 削除済みのお題への回答失敗で寄合券が変化した (before=%, after=%)', v_before, v_after;
+  end if;
+  raise notice 'PASS: 削除済みのお題には回答できない (TOPIC_NOT_FOUND)、寄合券も減らない';
+end $$;
+
+-- ============================================================
+-- テスト14: 削除済みの回答にはツッコミできない（ANSWER_NOT_FOUND）。寄合券も減らない。
+-- ============================================================
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000b', true); -- answerE1の所有者
+  perform public.delete_own_sns_answer('a7200000-0000-0000-0000-000000000005');
+end $$;
+
+insert into _t0067_scratch (k, v)
+  select 'answerE1_ticket_before', tickets_count::text from public.profiles where id = 'a7000000-0000-0000-0000-00000000000c';
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000c', true); -- ツッコもうとする側
+  begin
+    perform public.submit_sns_comment('a7200000-0000-0000-0000-000000000005', 'テストツッコミ');
+    raise exception 'FAIL: 削除済みの回答へツッコミできてしまった';
+  exception
+    when others then
+      if sqlerrm <> 'ANSWER_NOT_FOUND' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+  end;
+end $$;
+
+do $$
+declare
+  v_before int;
+  v_after int;
+begin
+  select v::int into v_before from _t0067_scratch where k = 'answerE1_ticket_before';
+  select tickets_count into v_after from public.profiles where id = 'a7000000-0000-0000-0000-00000000000c';
+  if v_before <> v_after then
+    raise exception 'FAIL: 削除済みの回答へのツッコミ失敗で寄合券が変化した (before=%, after=%)', v_before, v_after;
+  end if;
+  raise notice 'PASS: 削除済みの回答にはツッコミできない (ANSWER_NOT_FOUND)、寄合券も減らない';
+end $$;
+
+-- ============================================================
+-- テスト15: 削除RPCを経由せず管理者が直接is_hidden=trueにした親にも、
+--           一般ユーザーは投稿（回答・ツッコミ）できない。
+--           （submit_sns_answer/submit_sns_commentのis_hidden確認が、RPC発の
+--           非表示だけでなく管理者の直接非表示にも効くことを確認する）
+-- ============================================================
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000d', true); -- admin
+  update public.sns_topics
+    set is_hidden = true, hidden_reason = 'admin_test', hidden_by = 'a7000000-0000-0000-0000-00000000000d', hidden_at = now()
+    where id = 'a7100000-0000-0000-0000-000000000006';
+end $$;
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000c', true);
+  begin
+    perform public.submit_sns_answer('a7100000-0000-0000-0000-000000000006', 'テスト回答');
+    raise exception 'FAIL: 管理者が非表示にしたお題へ回答できてしまった';
+  exception
+    when others then
+      if sqlerrm <> 'TOPIC_NOT_FOUND' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+  end;
+  -- お題側が非表示のとき、配下の回答自体はis_hidden=falseのままでも
+  -- ツッコミできないこと（submit_sns_commentのお題側チェック）も確認する。
+  begin
+    perform public.submit_sns_comment('a7200000-0000-0000-0000-000000000006', 'テストツッコミ');
+    raise exception 'FAIL: 親のお題が非表示の回答へツッコミできてしまった';
+  exception
+    when others then
+      if sqlerrm <> 'ANSWER_NOT_FOUND' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+  end;
+end $$;
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000d', true); -- admin
+  update public.sns_topics set is_hidden = false, hidden_reason = null, hidden_by = null, hidden_at = null
+    where id = 'a7100000-0000-0000-0000-000000000006';
+  update public.sns_answers
+    set is_hidden = true, hidden_reason = 'admin_test', hidden_by = 'a7000000-0000-0000-0000-00000000000d', hidden_at = now()
+    where id = 'a7200000-0000-0000-0000-000000000006';
+end $$;
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000c', true);
+  begin
+    perform public.submit_sns_comment('a7200000-0000-0000-0000-000000000006', 'テストツッコミ2');
+    raise exception 'FAIL: 管理者が非表示にした回答へツッコミできてしまった';
+  exception
+    when others then
+      if sqlerrm <> 'ANSWER_NOT_FOUND' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+  end;
+end $$;
+reset role;
+do $$
+begin
+  raise notice 'PASS: 削除RPCを経由せず管理者が直接非表示にした親（お題・回答のどちらも）にも投稿できない';
+end $$;
+
+-- ============================================================
+-- テスト16（実際の競合）：submit_sns_answerが対象お題をFOR SHAREでロックして
+--           保持している間、delete_own_sns_topicはそのロック解放を待ってから
+--           でないと進めない。結果として、ロック解放後にdelete側が実行する
+--           カスケードが、保持中に新規作成された回答も正しく道連れで非表示に
+--           する（「表示されない子投稿」＝非表示になるはずの親を持つのに
+--           見える投稿、が残らない）ことを、dblinkで開いた別セッションを
+--           使って検証する。dblink拡張が使えない環境ではスキップする。
+-- ============================================================
+do $$
+declare
+  v_has_dblink boolean;
+begin
+  begin
+    create extension if not exists dblink;
+    v_has_dblink := true;
+  exception when others then
+    v_has_dblink := false;
+  end;
+
+  if not v_has_dblink then
+    raise notice 'SKIP: dblink拡張が利用できないため、投稿と削除の競合テストを省略';
+    return;
+  end if;
+
+  -- 別セッションから実際にsubmit_sns_answerを呼び、その最中（トランザクション
+  -- コミット前）にp_hold_secondsだけ止まる（＝FOR SHAREロックを保持し続ける）
+  -- ヘルパー。1回のトップレベル呼び出し＝1トランザクションであることを利用する。
+  create or replace function public._t0067_submit_answer_then_hold(
+    p_uid uuid,
+    p_topic_id uuid,
+    p_body text,
+    p_hold_seconds numeric
+  ) returns uuid
+  language plpgsql
+  as $f$
+  declare
+    v_answer public.sns_answers;
+  begin
+    perform set_config('myapp.uid', p_uid::text, true);
+    v_answer := public.submit_sns_answer(p_topic_id, p_body);
+    perform pg_sleep(p_hold_seconds);
+    return v_answer.id;
+  end;
+  $f$;
+end $$;
+
+do $$
+declare
+  v_conn text := 'dbname=' || current_database();
+  v_connected boolean := false;
+  v_started_at timestamptz;
+  v_elapsed_ms numeric;
+  v_new_answer_id uuid;
+  v_new_answer_hidden boolean;
+  v_new_answer_reason text;
+begin
+  if to_regprocedure('public._t0067_submit_answer_then_hold(uuid,uuid,text,numeric)') is null then
+    return; -- 直前のブロックでdblinkが使えずスキップ済み
+  end if;
+
+  begin
+    perform dblink_connect('t0067bg', v_conn);
+    v_connected := true;
+  exception when others then
+    raise notice 'SKIP: dblink接続に失敗したため、投稿と削除の競合テストを省略 (%)', sqlerrm;
+  end;
+
+  if v_connected then
+    -- 別セッションでtopicGへの回答投稿を開始し、コミット前に1.5秒保持する
+    -- （＝topicGのFOR SHAREロックを1.5秒間保持し続ける）。
+    perform dblink_send_query(
+      't0067bg',
+      format(
+        'select public._t0067_submit_answer_then_hold(%L::uuid, %L::uuid, %L, %s)',
+        'a7000000-0000-0000-0000-00000000000c', 'a7100000-0000-0000-0000-000000000007',
+        '競合テスト中の回答', 1.5
+      )
+    );
+    perform pg_sleep(0.3); -- 別セッションが実際にFOR SHAREを取るまで少し待つ
+
+    -- 本セッション（topicGの所有者）がtopicGの削除を試みる。別セッションの
+    -- FOR SHAREロックが解放されるまでブロックされるはず。
+    v_started_at := clock_timestamp();
+    set local role authenticated;
+    perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000a', true);
+    perform public.delete_own_sns_topic('a7100000-0000-0000-0000-000000000007');
+    reset role;
+    v_elapsed_ms := extract(epoch from (clock_timestamp() - v_started_at)) * 1000;
+
+    -- 別セッションの結果（新規作成された回答のid）を受け取ってから切断する。
+    select ok into v_new_answer_id from dblink_get_result('t0067bg') as t(ok uuid);
+    perform dblink_disconnect('t0067bg');
+
+    if v_elapsed_ms < 800 then
+      raise exception
+        'FAIL: delete_own_sns_topicが別セッションのFOR SHAREロックを待たずに完了した（約%ms、ロックが効いていない疑い）',
+        round(v_elapsed_ms);
+    end if;
+
+    select is_hidden, hidden_reason into v_new_answer_hidden, v_new_answer_reason
+      from public.sns_answers where id = v_new_answer_id;
+    if not v_new_answer_hidden or v_new_answer_reason <> 'deleted_by_author_topic_removed' then
+      raise exception
+        'FAIL: ロック保持中に作成された回答が、お題削除のカスケードで非表示にならなかった（表示されない子投稿ではなく、削除漏れの子投稿が残った）';
+    end if;
+
+    raise notice
+      'PASS: 投稿(FOR SHARE)が親をロックしている間は削除(FOR UPDATE)と競合し（約%ms待機）、ロック解放後のカスケードで新規投稿も正しく非表示になる（デッドロックも発生しない）',
+      round(v_elapsed_ms);
+  end if;
+end $$;
+
+do $$
+begin
+  drop function if exists public._t0067_submit_answer_then_hold(uuid, uuid, text, numeric);
+end $$;
+
+-- ============================================================
+-- テスト17: 既存の正常な回答・ツッコミ投稿（非表示になっていない親）は
+--           引き続き成功する（今回の強化による非退行の確認）。
+-- ============================================================
+do $$
+declare
+  v_answer public.sns_answers;
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7000000-0000-0000-0000-00000000000c', true);
+  v_answer := public.submit_sns_answer('a7100000-0000-0000-0000-000000000008', '通常の回答テスト');
+  if v_answer.id is null then
+    raise exception 'FAIL: 正常なお題への回答が失敗した';
+  end if;
+
+  perform public.submit_sns_comment('a7200000-0000-0000-0000-000000000008', '通常のツッコミテスト');
+  raise notice 'PASS: 非表示になっていない親への回答・ツッコミ投稿は引き続き成功する';
+end $$;
+
+reset role;
+
+drop table _t0067_scratch;
 drop table _t0067_tickets_before;
 
 select 'ALL 0067 TESTS PASSED' as result;

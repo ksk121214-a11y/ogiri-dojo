@@ -15,11 +15,39 @@
 -- - 冪等性：対象行が既に非表示なら何もしない（UPDATE ... WHERE NOT is_hidden が
 --   0件更新になるだけ）。既に他の理由（運営者による非表示等）で隠れている子孫行の
 --   hidden_reason/hidden_byは上書きしない（NOT is_hiddenの行だけを対象にする）。
+--
+-- 2026-09-16（再レビュー対応・追加修正）：本番未適用のためこの0067自体を修正する
+-- （0068は作らない、0001〜0066は書き換えない）。
+-- 【問題】submit_sns_answer/submit_sns_comment（0061時点の実装）は「親レコードが
+-- 存在するか」だけを確認しており、is_hiddenを見ていなかった。そのため、別端末で
+-- 削除前の詳細画面を開いたまま投稿すると、削除済みのお題へ回答・削除済みの回答へ
+-- ツッコミが成立してしまい（寄合券は消費される一方、RLS強化により誰にも表示され
+-- ない「幽霊投稿」が残る）可能性があった。
+-- 【対応】submit_sns_answer/submit_sns_commentを、親（お題／お題+回答）をFOR SHARE
+-- でロックしてからis_hiddenを確認するように変更する（0061のロジック・grant/revoke
+-- 自体は維持し、親確認の部分だけを強化する）。FOR KEY SHAREではなくFOR SHAREを使う
+-- 理由：delete_own_sns_topic/answerが行う「is_hidden等（主キー以外）を書き換える
+-- 普通のUPDATE」はPostgresの内部分類ではNO KEY UPDATEであり、FOR KEY SHAREはNO KEY
+-- UPDATEと競合しない（＝ロックしたつもりで削除を止められない）。FOR SHAREはNO KEY
+-- UPDATEとも競合するため、削除処理と確実に直列化できる。
+-- ロック順序：submit_sns_commentは「お題→回答」の順でFOR SHAREを取る。これは
+-- delete_own_sns_topicが「お題をFOR UPDATE→配下の回答をUPDATE（内部的に行ロック）」
+-- という同じ順序で処理するのと揃えてあり、逆順ロックによるデッドロックを避ける。
+-- delete_own_sns_answerは回答のみをFOR UPDATEし、お題のロックを取らないため、
+-- submit_sns_comment（お題→回答）との間でも循環待ちは発生しない
+-- （delete_own_sns_answer側がお題のロックを一切必要としないため）。
+-- 親の確認・ロックは、寄合券消費（private.consume_ticket_for_user）より必ず前に
+-- 行い、ロック自体は関数の終わり（INSERT完了）までトランザクション内で保持される
+-- （PL/pgSQL関数呼び出し全体が1トランザクションのため、明示的なUNLOCKは不要）。
+-- 削除RPC自体は変更していないが、途中失敗後の再適用に強くするため
+-- create or replaceに統一し、この0067全体をBEGIN/COMMITで1トランザクションにする。
+
+begin;
 
 -- ============================================================
 -- 1) delete_own_sns_topic：自分のお題を削除する（回答・ツッコミも道連れで非表示）。
 -- ============================================================
-create function public.delete_own_sns_topic(p_topic_id uuid)
+create or replace function public.delete_own_sns_topic(p_topic_id uuid)
 returns void
 language plpgsql
 security definer set search_path = public
@@ -63,7 +91,7 @@ grant execute on function public.delete_own_sns_topic(uuid) to authenticated;
 -- ============================================================
 -- 2) delete_own_sns_answer：自分の回答を削除する（ツッコミも道連れで非表示）。
 -- ============================================================
-create function public.delete_own_sns_answer(p_answer_id uuid)
+create or replace function public.delete_own_sns_answer(p_answer_id uuid)
 returns void
 language plpgsql
 security definer set search_path = public
@@ -100,7 +128,7 @@ grant execute on function public.delete_own_sns_answer(uuid) to authenticated;
 -- ============================================================
 -- 3) delete_own_sns_comment：自分のツッコミを削除する（他の投稿には影響しない）。
 -- ============================================================
-create function public.delete_own_sns_comment(p_comment_id uuid)
+create or replace function public.delete_own_sns_comment(p_comment_id uuid)
 returns void
 language plpgsql
 security definer set search_path = public
@@ -166,3 +194,141 @@ create policy "sns_comments_select" on public.sns_comments for select
       )
     )
   );
+
+-- ============================================================
+-- 5) submit_sns_answer（0043・0061）を再強化：投稿先のお題をFOR SHAREでロックし、
+--    存在かつis_hidden=falseのときだけ投稿を許可する（削除済みのお題への回答を防ぐ）。
+--    0061のロジック（NOT_LOGGED_IN・利用停止確認・空文字/文字数制限・
+--    private.consume_ticket_for_user経由の券消費・INSERT・SECURITY DEFINER・
+--    search_path固定）はそのまま維持し、お題確認の部分だけを強化する。
+-- ============================================================
+create or replace function public.submit_sns_answer(p_topic_id uuid, p_body text)
+returns public.sns_answers
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_trimmed text;
+  v_suspended boolean;
+  v_ok boolean;
+  v_row public.sns_answers;
+  v_topic_hidden boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'NOT_LOGGED_IN';
+  end if;
+
+  -- 対象のお題をFOR SHAREでロックしてから存在・表示状態を確認する（寄合券消費より
+  -- 前）。delete_own_sns_topicのFOR UPDATEと競合するため、削除処理と直列化される
+  -- （このロックはINSERT完了まで、＝関数終了までトランザクション内で保持される）。
+  select is_hidden into v_topic_hidden from public.sns_topics where id = p_topic_id for share;
+  if not found or v_topic_hidden then
+    raise exception 'TOPIC_NOT_FOUND';
+  end if;
+
+  select (is_permanently_suspended or (suspended_until is not null and suspended_until > now()))
+    into v_suspended
+    from public.profiles where id = auth.uid();
+  if coalesce(v_suspended, false) then
+    raise exception 'ACCOUNT_SUSPENDED';
+  end if;
+
+  v_trimmed := trim(p_body);
+  if v_trimmed is null or char_length(v_trimmed) = 0 then
+    raise exception 'EMPTY_BODY';
+  end if;
+  if char_length(v_trimmed) > 300 then
+    raise exception 'BODY_TOO_LONG';
+  end if;
+
+  v_ok := private.consume_ticket_for_user(auth.uid());
+  if not v_ok then
+    raise exception 'NO_TICKETS';
+  end if;
+
+  insert into public.sns_answers (topic_id, author_id, body) values (p_topic_id, auth.uid(), v_trimmed)
+    returning * into v_row;
+
+  return v_row;
+end;
+$$;
+
+revoke execute on function public.submit_sns_answer(uuid, text) from public;
+revoke execute on function public.submit_sns_answer(uuid, text) from anon;
+grant execute on function public.submit_sns_answer(uuid, text) to authenticated;
+
+-- ============================================================
+-- 6) submit_sns_comment（0058・0061）を再強化：投稿先の回答とその親お題を
+--    「お題→回答」の順でFOR SHAREロックし、両方ともis_hidden=falseのときだけ
+--    投稿を許可する（削除済みの回答・削除済みのお題配下の回答へのツッコミを防ぐ）。
+--    0061のロジック自体はそのまま維持する。
+-- ============================================================
+create or replace function public.submit_sns_comment(p_answer_id uuid, p_body text)
+returns public.sns_comments
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_trimmed text;
+  v_suspended boolean;
+  v_ok boolean;
+  v_row public.sns_comments;
+  v_topic_id uuid;
+  v_topic_hidden boolean;
+  v_answer_hidden boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'NOT_LOGGED_IN';
+  end if;
+
+  -- どのお題をロックすべきかを知るためのtopic_id参照（topic_idは削除操作で
+  -- 一切書き換わらない列のため、ロック無しで読んでも競合状態にならない）。
+  select topic_id into v_topic_id from public.sns_answers where id = p_answer_id;
+  if v_topic_id is null then
+    raise exception 'ANSWER_NOT_FOUND';
+  end if;
+
+  -- ロック順は「お題→回答」（delete_own_sns_topicの処理順と揃え、逆順ロックに
+  -- よるデッドロックを避ける）。寄合券消費より前に両方を確認する。
+  select is_hidden into v_topic_hidden from public.sns_topics where id = v_topic_id for share;
+  if not found or v_topic_hidden then
+    raise exception 'ANSWER_NOT_FOUND';
+  end if;
+
+  select is_hidden into v_answer_hidden from public.sns_answers where id = p_answer_id for share;
+  if not found or v_answer_hidden then
+    raise exception 'ANSWER_NOT_FOUND';
+  end if;
+
+  select (is_permanently_suspended or (suspended_until is not null and suspended_until > now()))
+    into v_suspended
+    from public.profiles where id = auth.uid();
+  if coalesce(v_suspended, false) then
+    raise exception 'ACCOUNT_SUSPENDED';
+  end if;
+
+  v_trimmed := trim(p_body);
+  if v_trimmed is null or char_length(v_trimmed) = 0 then
+    raise exception 'EMPTY_BODY';
+  end if;
+  if char_length(v_trimmed) > 300 then
+    raise exception 'BODY_TOO_LONG';
+  end if;
+
+  v_ok := private.consume_ticket_for_user(auth.uid());
+  if not v_ok then
+    raise exception 'NO_TICKETS';
+  end if;
+
+  insert into public.sns_comments (answer_id, author_id, body) values (p_answer_id, auth.uid(), v_trimmed)
+    returning * into v_row;
+
+  return v_row;
+end;
+$$;
+
+revoke execute on function public.submit_sns_comment(uuid, text) from public;
+revoke execute on function public.submit_sns_comment(uuid, text) from anon;
+grant execute on function public.submit_sns_comment(uuid, text) to authenticated;
+
+commit;
