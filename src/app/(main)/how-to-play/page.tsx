@@ -53,18 +53,22 @@ export default function HowToPlayPage() {
           <PeopleTag label="観客" tone="ink" count={5} />
         </div>
         <p className="mt-2">
-          参加者：最大15人。舞台に立って回答するほか、自分の組の出番以外は採点も担当。
+          参加者：15人前後が目安。舞台に立って回答するほか、自分の組の出番以外は採点も担当。
           観客：人数制限なし。採点はできず、リアクションで観戦する立場です。
         </p>
       </StepCard>
 
-      <StepCard number="4" icon={null} title="5人×3組で勝負">
-        <div className="flex items-center gap-3">
+      <StepCard number="4" icon={null} title="参加人数に合わせて組分け">
+        <p className="text-[10px] font-bold text-[var(--ink)]/60">組分け例（3組の場合）</p>
+        <div className="mt-1 flex items-center gap-3">
           <PeopleTag label="1組" tone="accent" count={2} />
           <PeopleTag label="2組" tone="accent" count={2} />
           <PeopleTag label="3組" tone="accent" count={2} />
         </div>
-        <p className="mt-2">各組60秒。5人が回答し、残り10人が審査員。</p>
+        <p className="mt-2">
+          1組5人程度が目安。参加人数に応じて2〜4組に分かれ、各組60秒で回答します。
+          出番ではない組の参加者が審査員を担当します。
+        </p>
       </StepCard>
 
       <StepCard number="5" icon={null} title="回答・採点">
@@ -78,7 +82,7 @@ export default function HowToPlayPage() {
       </StepCard>
 
       <StepCard number="6" icon={<TrophyGlyph />} title="結果発表">
-        3組終了後に順位発表。順位に応じたボーナスポイントを獲得。
+        すべての組が終了したら順位発表。順位に応じたボーナスポイントを獲得。
       </StepCard>
 
       <Link

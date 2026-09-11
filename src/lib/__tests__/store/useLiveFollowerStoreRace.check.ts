@@ -23,6 +23,8 @@ import {
 } from "@/store/useLiveFollowerStore";
 import type { AnswerRow, LiveRow, ParticipantRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
 
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // ---- supabase.from(...) の最小限のモック ----
 // select/eq/order/limit/maybeSingleはすべて自分自身を返すチェーン可能な
 // ダミーで、実際のフィルタ条件は見ない（テーブル名だけで返す内容を決める）。
@@ -32,8 +34,18 @@ import type { AnswerRow, LiveRow, ParticipantRow, TopicRow, TurnRow } from "@/li
 // 最後にAを完了させる」という要求されたシナリオを、本物のrefreshTurnDerived/
 // refreshFinalResizedの内部で実際に発生するsupabase.from(...)呼び出しに対して
 // 再現する。
+// 2026-09-16（再レビュー対応・問題1、追加修正）：同一世代内の競合テストでは、
+// 「Aの最初のturn/topic/answers取得は即解決させつつ、Aが自分で呼ぶ
+// refreshFinalResult内部の取得（同じ"answers"テーブル）だけを保留する」必要が
+// あり、単純な時刻ベースのblockedフラグの切り替えでは、fetchTurnAndTopicが
+// 最初のturns解決後に発火する2段目のtopics呼び出しまで巻き込んでしまい
+// タイミングが安定しない。blockAnswersOnCallが設定されている間は、"answers"
+// テーブルへのN回目の呼び出し（呼び出し回数で決定的に識別できる）だけを
+// gatePromise待ちにし、他のテーブルは従来どおりblockedフラグに従う。
 let blocked = false;
 let cannedFor: (table: string) => { data: unknown; error: null };
+let answersCallCount = 0;
+let blockAnswersOnCall: number | null = null;
 let gatePromise: Promise<void>;
 let releaseGate: () => void;
 function resetGate() {
@@ -44,7 +56,13 @@ function resetGate() {
 resetGate();
 
 function makeQueryBuilder(table: string) {
-  const blockedAtCallTime = blocked;
+  let blockedAtCallTime: boolean;
+  if (table === "answers" && blockAnswersOnCall !== null) {
+    answersCallCount += 1;
+    blockedAtCallTime = answersCallCount === blockAnswersOnCall;
+  } else {
+    blockedAtCallTime = blocked;
+  }
   const cannedFn = cannedFor;
   const builder: PromiseLike<{ data: unknown; error: null }> & Record<string, unknown> = {
     select: () => builder,
@@ -276,6 +294,94 @@ async function main() {
     );
     console.log("PASS: refreshFinalResult単体もstillCurrent=falseならstateを変更しない");
   }
+
+  // 2026-09-16（再レビュー対応・問題1、追加修正）：同一購読世代内で
+  // refreshTurnDerivedが2回重なった場合の競合。A（先発）が通常のturn/topic/answers
+  // 取得と最初のsetStateを終えた後、refreshFinalResult内部の取得だけが保留になり、
+  // その間にB（後発、同じ購読世代）が開始して先に完了しfinalResultを反映する、
+  // というシナリオを、本番のrefreshTurnDerived/refreshFinalResultをそのまま
+  // 呼び出して検証する（購読世代（isCurrentGen）だけを見るガードでは検出できず、
+  // ownsRequest（購読世代＋同一世代内のrequestId）が必要な回帰）。
+  {
+    useLiveFollowerStore.setState({
+      live: baseLive,
+      myParticipant: participants[0],
+      participants,
+      participantNames: { [PARTICIPANT_ME]: "自分", [PARTICIPANT_OTHER]: "相手" },
+      groups: [],
+      currentTurn: null,
+      turnAnswers: [],
+      activeAnswer: null,
+      activeAnswerScores: [],
+      finalResult: null,
+      groupResult: null,
+    });
+    // このテストの間、購読世代は一貫して「同じ」ままにする（切り替えない）。
+    const sameGen = () => true;
+
+    // 1. 同じ購読世代でrefreshTurnDerived A（先発）を開始する。"answers"テーブルへの
+    //    2回目の呼び出し（＝Aが最初のsetStateの後、自分で呼ぶrefreshFinalResult
+    //    内部のfetchResolvedAnswersForLive）だけをgatePromise待ちにする。1回目の
+    //    呼び出し（＝fetchAnswersAndScoreForTurnによるturnAnswers取得）と、
+    //    turns/topics/answering_cuesは即解決させ、Aを通常どおり最初のsetStateまで
+    //    確実に進ませる（時刻ベースのフラグ切り替えだと、topicsの2段目呼び出しの
+    //    タイミングが安定しないため、呼び出し回数で決定的に識別する）。
+    resetGate();
+    answersCallCount = 0;
+    blockAnswersOnCall = 2;
+    blocked = false;
+    cannedFor = cannedA;
+    const call2A = refreshTurnDerived(sameGen);
+
+    // Aが最初のsetStateまで進み、refreshFinalResultの取得で止まるのを待つ。
+    await delay(20);
+    {
+      const s = useLiveFollowerStore.getState();
+      assert.equal(s.currentTurn?.id, TURN_ID_A, "Aが最初のturn/topic/answers取得・setStateを終えていない（テストの前提が崩れている）");
+      assert.equal(s.finalResult, null, "AのrefreshFinalResultがまだ完了していないはずなのにfinalResultが埋まっている");
+    }
+
+    // 4. refreshTurnDerived B（後発、同じ購読世代）を開始する。Bの取得はすべて
+    //    即座に解決させ、Bを先に完了させる。
+    cannedFor = cannedB;
+    blocked = false;
+    const call2B = refreshTurnDerived(sameGen);
+    const b2Ok = await call2B;
+    assert.equal(b2Ok, true, "同一世代内の後発B（refreshTurnDerived）が失敗した");
+    {
+      const s = useLiveFollowerStore.getState();
+      assert.equal(s.currentTurn?.id, TURN_ID_B, "Bの完了直後、currentTurnがBの値になっていない");
+      assert.equal(s.turnAnswers[0]?.id, "answer-b", "Bの完了直後、turnAnswersがBの値になっていない");
+      assert.equal(s.finalResult?.bestAnswer?.body, "回答B", "Bの完了直後、finalResultがBの値になっていない");
+    }
+
+    // 6. AのrefreshFinalResult取得を最後に完了させる（保留していたgateを解放）。
+    releaseGate();
+    const a2Ok = await call2A;
+    assert.equal(
+      a2Ok,
+      false,
+      "同一世代内でBに追い越された古いAのrefreshTurnDerivedがfalseを返さなかった（ownsRequestが効いていない）",
+    );
+
+    // 7. currentTurn・turnAnswers・activeAnswerScores・groupResult・finalResultの
+    //    いずれもBの値のまま（Aの遅れて完了したrefreshFinalResultで上書きされない）。
+    {
+      const s = useLiveFollowerStore.getState();
+      assert.equal(s.currentTurn?.id, TURN_ID_B, "同一世代内の古いAの遅延finalResultでcurrentTurnが変化した");
+      assert.equal(s.turnAnswers[0]?.id, "answer-b", "同一世代内の古いAの遅延finalResultでturnAnswersが変化した");
+      assert.equal(s.activeAnswerScores.length, 0, "同一世代内の古いAの遅延finalResultでactiveAnswerScoresが変化した");
+      assert.equal(s.groupResult, null, "同一世代内の古いAの遅延finalResultでgroupResultが変化した");
+      assert.equal(
+        s.finalResult?.bestAnswer?.body,
+        "回答B",
+        "同一世代内の古いA（先発）のrefreshFinalResultが、後発BのfinalResultを上書きした",
+      );
+    }
+  }
+  console.log(
+    "PASS: 同一購読世代内でrefreshTurnDerivedが重なっても、先発Aの遅延したrefreshFinalResultが後発Bのstateを上書きしない（ownsRequest）",
+  );
 
   console.log("ALL USE_LIVE_FOLLOWER_STORE_RACE CHECKS PASSED");
 }
