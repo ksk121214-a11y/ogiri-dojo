@@ -85,11 +85,8 @@ export default function HowToPlayPage() {
         すべての組が終了したら順位発表。順位に応じたボーナスポイントを獲得。
       </StepCard>
 
-      <div className="flex flex-col items-center gap-1 py-1 text-center">
-        <p className="font-sans text-[11px] font-bold tracking-wide text-[var(--ink)]/55">
-          お題提供
-        </p>
-        <p className="font-sans text-xs leading-relaxed text-[var(--ink)]/70">
+      <StepCard icon={null} title="お題提供">
+        <p>
           爆笑スタジアムで使用するすべてのお題は、
           <br />
           「癖の強いお題を出す大喜利」さんにご提供いただいています。
@@ -98,12 +95,12 @@ export default function HowToPlayPage() {
           href="https://x.com/kusenotuyoiodai"
           target="_blank"
           rel="noopener noreferrer"
-          className="font-sans text-xs font-bold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+          className="mt-1.5 inline-block font-sans text-xs font-bold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
           aria-label="「癖の強いお題を出す大喜利」さんのX（@kusenotuyoiodai）を新しいタブで開く"
         >
           X：@kusenotuyoiodai
         </a>
-      </div>
+      </StepCard>
 
       <Link
         href="/live-schedule"
@@ -123,16 +120,20 @@ function StepCard({
   title,
   children,
 }: {
-  number: string;
+  // 未指定の場合は番号なしのチケット（「お題提供」欄など、手順1〜6とは
+  // 別枠の補足情報を同じチケット意匠で見せたい場合）になる。
+  number?: string;
   icon: ReactNode;
   title: string;
   children: ReactNode;
 }) {
   return (
     <div className={`${stadiumStyles.stepTicket} ${stadiumStyles.grainPaper} flex items-start gap-3 px-5 py-4 text-[var(--ink)]`}>
-      <span className="w-9 shrink-0 font-sans text-4xl font-black leading-none text-[var(--accent)]">
-        {number}
-      </span>
+      {number && (
+        <span className="w-9 shrink-0 font-sans text-4xl font-black leading-none text-[var(--accent)]">
+          {number}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2.5">
           {icon && <span className="shrink-0 text-[var(--ink)]">{icon}</span>}
