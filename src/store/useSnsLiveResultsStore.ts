@@ -133,6 +133,9 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
     .from("lives")
     .select("id, official_sequence_number, title, ended_at, results_published")
     .eq("results_published", true)
+    // 0068追加：DB制約・RLS側で既にlive_mode='official'以外はresults_published=trueに
+    // なり得ないが、クライアント側でも同じ条件を明示して多層防御にする。
+    .eq("live_mode", "official")
     .eq("current_phase", "closed")
     .order("ended_at", { ascending: false, nullsFirst: false })
     .limit(PAGE_SIZE);
@@ -293,12 +296,20 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     }
     const result = resultData as LiveResultRow;
 
+    // 0068追加：一覧取得と同じく、DB制約・RLS側で既に保証されている
+    // live_mode='official'をクライアント側でも明示して多層防御にする。
+    // 万一test側のlive_idが渡ってきた場合はliveがnullになり、下の既存の
+    // null安全なフォールバック（sequenceNumber:0等）にそのまま合流する。
     const { data: liveData } = await supabase
       .from("lives")
       .select("id, official_sequence_number, title, ended_at, results_published")
       .eq("id", result.live_id)
+      .eq("live_mode", "official")
       .maybeSingle();
     const live = liveData as LiveRowLite | null;
+    if (!live) {
+      console.warn("[sns] 公開結果詳細に対応する本番ライブが見つかりません（live_mode不一致の疑い）", liveResultId);
+    }
 
     const { data: raData } = await supabase
       .from("sns_live_result_answers")

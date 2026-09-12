@@ -18,6 +18,7 @@
     "../../../lib/answeringCue.ts",
     "../../../lib/basePath.ts",
     "../../../lib/liveHostSnapshots.ts",
+    "../../../lib/liveReactionQueue.ts",
     "../../../lib/liveRoomSelectors.ts",
     "../../../lib/liveRoomTypes.ts",
     "../../../lib/supabase.ts",

@@ -130,12 +130,17 @@ interface LiveFollowerState {
   ) => Promise<{ ok: true } | { ok: false; silent: boolean; reason?: string }>;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
   // 0068追加：ツッコミ/拍手/爆笑の表示演出（src/lib/liveReactionQueue.tsの
-  // useTsukkomiReactionQueueフック）が、待機キューから自分が担当する種別の
-  // イベントを1件だけ取り出す。受信から3秒以上経過したイベントは表示せず
-  // 破棄する（predicateに関わらず、スキャンの過程で見つかった時点で捨てる）。
-  // この呼び出し・待機キューはライブ進行のstateと完全に独立しており、演出側の
-  // 遅延・例外がフェーズ進行・回答受付・採点に影響することはない。
-  claimReactionEvent: (predicate: (event: TsukkomiEvent) => boolean) => TsukkomiEvent | null;
+  // useTsukkomiReactionQueueフック／ReactionDisplayScheduler）が、待機キューから
+  // 自分が担当する種別のイベントを1件だけ取り出す。受信からTSUKKOMI_STALE_MS
+  // 以上経過したイベントは表示せず破棄する（predicateに関わらず、スキャンの
+  // 過程で見つかった時点で捨てる）。この呼び出し・待機キューはライブ進行の
+  // stateと完全に独立しており、演出側の遅延・例外がフェーズ進行・回答受付・
+  // 採点に影響することはない。
+  // nowは省略時Date.now()（本番の実際の呼び出しは全て省略する）。
+  // src/lib/liveReactionQueue.tsのReactionDisplayScheduler・
+  // src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.tsが、
+  // 実時間を待たずに手動で時刻を進めながら決定的に検証するために使う。
+  claimReactionEvent: (predicate: (event: TsukkomiEvent) => boolean, now?: number) => TsukkomiEvent | null;
 }
 
 // 2026-09-15（レビュー対応）：観客側の Realtime 購読はすべて Postgres Changes。
@@ -179,11 +184,18 @@ let lastTsukkomiSentAt = 0;
 // - TSUKKOMI_STALE_MS：受信からこの時間以上経過した待機中のイベントは、
 //   表示せずに破棄する（古いリアクションとして扱う。基準はクライアント側で
 //   キューに積んだ時刻）。
+//   2026-XX（Codexレビュー再対応）：以前は3000msだったが、
+//   src/lib/liveReactionQueue.tsで種別横断の同時表示数を合計
+//   TSUKKOMI_TOTAL_DISPLAY_MAX（目安12件）に絞ったことで、danmaku
+//   （表示4.2秒・同時最大10件）だけで20件のバーストが届いた場合、最後の方の
+//   イベントは表示枠が空くまで理論上5秒程度待たされうる（実測・詳細は
+//   liveReactionQueue.ts参照）。3000msのままだと表示前に破棄されてしまうため、
+//   実際の待ち時間の上限を安全に上回る値へ引き上げた。
 // - TSUKKOMI_PROCESSED_ID_CACHE_MAX：重複UUID判定用に保持するidの最大件数。
 //   無限に増え続けないよう、古いものから捨てる（Setは挿入順を保持するため、
 //   先頭＝最も古いものをvalues().next()で取り出せる）。
 export const TSUKKOMI_QUEUE_MAX = 30;
-export const TSUKKOMI_STALE_MS = 3_000;
+export const TSUKKOMI_STALE_MS = 7_000;
 export const TSUKKOMI_PROCESSED_ID_CACHE_MAX = 200;
 let processedTsukkomiIds = new Set<string>();
 
@@ -1130,10 +1142,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     });
   },
 
-  claimReactionEvent: (predicate) => {
+  claimReactionEvent: (predicate, now = Date.now()) => {
     const queue = get().tsukkomiQueue;
     if (queue.length === 0) return null;
-    const now = Date.now();
     let claimed: QueuedTsukkomiEvent | null = null;
     const next: QueuedTsukkomiEvent[] = [];
     for (const item of queue) {
@@ -1143,8 +1154,8 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         continue;
       }
       if (now - item.receivedAt > TSUKKOMI_STALE_MS) {
-        // 受信から3秒以上経過した待機イベントは、表示せずに破棄する
-        // （predicateの種別を問わず捨てる＝古いリアクションとして扱う）。
+        // 受信からTSUKKOMI_STALE_MS以上経過した待機イベントは、表示せずに
+        // 破棄する（predicateの種別を問わず捨てる＝古いリアクションとして扱う）。
         continue;
       }
       if (!claimed && predicate(item)) {

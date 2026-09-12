@@ -10,29 +10,21 @@
 -- "function public.<name>"で洗い出した「マイグレーション履歴上最新の」本体を基準に
 -- した上で、live_mode関連の分岐だけを追加している）。
 --
--- 0056/0063の流儀にならい、begin/commitで1トランザクションにまとめ、途中の安全確認
--- （do $$ ... raise exception $$）でどこか1つでも止まれば、それより前の変更も含めて
--- 何も反映されない（全部成功するか、全く反映されないかのどちらか）ようにする。
+-- 0056/0063の流儀にならい、begin/commitで1トランザクションにまとめ、途中のどこか
+-- 1つでもエラーで止まれば、それより前の変更も含めて何も反映されない（全部成功する
+-- か、全く反映されないかのどちらか）ようにする。
 begin;
 
 -- ============================================================
--- 0) 安全確認：既存のlives行にresults_published=trueのものが無いことを確認する。
+-- 0) （旧）安全確認は廃止し、実際の移行に置き換えた。
 -- ============================================================
--- 本マイグレーションは既存の約200行すべてをlive_mode='test'として扱い、後段で
--- 「live_mode='test'のライブはresults_published=trueにできない」というCHECK制約を
--- 追加する。もし過去に実際にSNS公開まで行われた行が1件でもあれば、その制約追加が
--- 失敗する（＝このマイグレーション全体がロールバックされ、何も変わらない）ため
--- 実害は無いが、原因を推測で決めつけず、事前に機械的に検出してここで明示的に
--- 停止し、人が事情を確認できるようにする。
-do $$
-declare
-  v_published_count int;
-begin
-  select count(*) into v_published_count from public.lives where results_published = true;
-  if v_published_count > 0 then
-    raise exception 'Found % existing live(s) with results_published=true. This migration marks ALL existing lives as live_mode=''test'' (per the requirement that ~200 prior verification lives are not official shows), which would conflict with the new constraint forbidding published results for test-mode lives. Resolve manually first (decide per-row whether it should become live_mode=''official'' with an official_sequence_number assigned via the official_live_counter, or have results_published unpublished) before re-running this migration. This migration made no changes.', v_published_count;
-  end if;
-end $$;
+-- 過去バージョンはここで「results_published=trueの既存行が1件でもあれば
+-- raise exceptionでマイグレーション全体を中止する」安全確認を行っていたが、
+-- レビュー対応により「既存の約200行は全て動作確認用のテストライブとして扱い、
+-- live_mode='test'・results_published=falseへ移行する」という要求そのものを
+-- 実行する方針に変更した。過去に付与済みのポイント・実績・point_history・
+-- 回答（answers）・sns_live_results等の行は、この移行では一切削除・変更しない
+-- （下記1)のUPDATEはpublic.livesテーブルの列だけを変更する）。
 
 -- ============================================================
 -- 1) lives.live_mode / lives.official_sequence_number を追加する。
@@ -46,14 +38,20 @@ alter table public.lives
 alter table public.lives
   add column official_sequence_number int;
 
--- 既存の約200行を明示的に移行する（過去の付与済みポイント・実績はこの移行だけでは
--- 減算・削除しない＝何もしない）。ADD COLUMN ... DEFAULT 'test'により新しい列は
+-- 既存の約200行を明示的に移行する（過去の付与済みポイント・実績・point_history・
+-- 回答・sns_live_results系のいずれもこの移行では一切削除・変更しない＝lives
+-- テーブルの列だけを更新する）。ADD COLUMN ... DEFAULT 'test'により新しい列は
 -- 既存行に対してもすでに'test'/NULLとして振る舞うが、意図を明示するため、また
 -- 将来この既定値だけに依存しない安全側の実装として、あえて明示的なUPDATEも行う
 -- （0行が変わる場合でもエラーにはならない）。
+-- results_published=falseへの一括更新も併せて行う（既存の約200件は全て動作確認用の
+-- テストライブとして扱い、SNS公開状態も解除する。下記2)の
+-- lives_results_published_official_only_check制約が、このUPDATEの直後に矛盾なく
+-- 追加できるようにするための前提でもある）。
 update public.lives
 set live_mode = 'test',
-    official_sequence_number = null
+    official_sequence_number = null,
+    results_published = false
 where true;
 
 -- ============================================================
@@ -552,6 +550,31 @@ create policy "sns_live_result_likes_insert_own" on public.sns_live_result_likes
     )
   );
 
+-- 0068追加（Codexレビュー対応）：sns_live_result_likes_selectは0031で
+-- `using (true)`（誰でも全行のuser_id・いいね履歴を読める）のまま定義され、
+-- 以降のマイグレーションでも一度も絞られていなかった。insert_own（上記）と
+-- 対称の条件に絞る：運営(is_host())は閲覧可能、一般ユーザーは「自分自身の
+-- いいね行」かつ「親回答(included=true)」かつ「親ライブがresults_published=true
+-- かつlive_mode='official'」の場合だけ閲覧可能にする。anonや他人はどの
+-- いいね行も読めない。
+drop policy if exists "sns_live_result_likes_select" on public.sns_live_result_likes;
+create policy "sns_live_result_likes_select" on public.sns_live_result_likes for select
+  using (
+    is_host()
+    or (
+      auth.uid() = user_id
+      and exists (
+        select 1 from public.sns_live_result_answers ra
+        join public.sns_live_results r on r.id = ra.live_result_id
+        join public.lives l on l.id = r.live_id
+        where ra.id = result_answer_id
+          and ra.included
+          and l.results_published
+          and l.live_mode = 'official'
+      )
+    )
+  );
+
 drop policy if exists "sns_live_result_comments_select" on public.sns_live_result_comments;
 create policy "sns_live_result_comments_select" on public.sns_live_result_comments for select
   using (
@@ -644,5 +667,229 @@ create policy "answers_select_own_revealed_host_or_published"
         and (p.id = answers.participant_id or answers.revealed_at is not null)
     )
   );
+
+-- ============================================================
+-- 10) ポイント監査・訂正処理：対象範囲をlive_mode='official'に絞り、
+--     表示ラベルの開催回数を本番専用番号(official_sequence_number)にする。
+-- ============================================================
+-- 現行本体は_compute_rank_reward_mismatches()が0056（191〜316行目）、
+-- fix_rank_reward_mismatches(uuid)が0057（55〜120行目）、これらより後に本体を
+-- 再定義しているファイルは無いことをgrepで確認済み。audit_rank_reward_mismatches()
+-- は_compute_rank_reward_mismatches()を呼ぶだけでロジック変更が無いため、
+-- 実体（0057、25〜53行目）はそのまま維持しCREATE OR REPLACEし直さない。
+--
+-- 変更点：
+-- (a) _compute_rank_reward_mismatches()内のtarget_lives CTEに
+--     `l.live_mode = 'official'`条件を追加する（0068のガードにより、
+--     テストライブのrank_rewards_appliedが true になることは元々無い設計だが、
+--     念のため多層防御として明示する）。
+-- (b) 同CTEのt_sequence_numberを、l.sequence_number（レガシー、test/official
+--     問わず増え続ける内部カウンター）ではなくl.official_sequence_number
+--     （本番だけの#0001始まりの番号）にする。戻り値の列名out_sequence_numberは
+--     互換性のため変更しない（中身だけが本番番号になる）。
+-- (c) fix_rank_reward_mismatches(uuid)内、point_historyラベル生成に使う
+--     開催回数も同様にl.official_sequence_numberへ変更する。
+-- (d) 同点順位処理・二重加算防止(rank_reward_corrections記録)・SQL Editorからの
+--     保守実行を許す`auth.uid() is not null and not is_host()`パターン・
+--     GRANT/REVOKE設定は、0056/0057からコピーミス無く寸分違わず維持する。
+-- (e) このCREATE OR REPLACEは「今後の監査・訂正の対象範囲」を絞るだけで、
+--     既存のprofiles/point_historyへの一括更新は一切行わない（過去のテスト
+--     ライブぶんのポイントはこの変更だけでは変わらない）。
+create or replace function public._compute_rank_reward_mismatches()
+returns table (
+  out_live_id uuid,
+  out_sequence_number int,
+  out_user_id uuid,
+  out_recorded_exists boolean,
+  out_recorded_gain int,
+  out_recorded_rank int,
+  out_correct_exists boolean,
+  out_correct_gain int,
+  out_correct_rank int,
+  out_gain_delta int
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  with target_lives as (
+    select l.id as t_live_id, l.official_sequence_number as t_sequence_number
+    from public.lives l
+    where l.rank_rewards_applied = true
+      and l.live_mode = 'official'
+  ),
+  player_totals as (
+    select
+      p.live_id as pt_live_id,
+      p.id as pt_participant_id,
+      p.user_id as pt_user_id,
+      coalesce(sum(a.score_total), 0)::int as pt_total_score
+    from public.participants p
+    left join public.answers a on a.participant_id = p.id and a.resolved = true
+    where p.role = 'player'
+      and p.live_id in (select tl.t_live_id from target_lives tl)
+    group by p.live_id, p.id, p.user_id
+  ),
+  ranked as (
+    select
+      pt.pt_live_id as rk_live_id,
+      pt.pt_user_id as rk_user_id,
+      pt.pt_total_score as rk_total_score,
+      (rank() over (partition by pt.pt_live_id order by pt.pt_total_score desc))::int as rk_rnk
+    from player_totals pt
+  ),
+  correct as (
+    select
+      rk.rk_live_id as cr_live_id,
+      rk.rk_user_id as cr_user_id,
+      10 + rk.rk_total_score
+        + (case rk.rk_rnk when 1 then 100 when 2 then 60 when 3 then 30 else 0 end) as cr_gain,
+      case when rk.rk_rnk <= 3 then rk.rk_rnk else null end as cr_rank_tier
+    from ranked rk
+  ),
+  -- 2026-09-06:「付与漏れ訂正時の二重加算・二重減算」対応。「訂正」行を
+  -- 除外せず、同じlive_id・user_idのpoint_history.pointsを全て合算する。
+  -- これが「今実際にprofilesへ反映されている合計」そのものになる。
+  recorded as (
+    select
+      ph.live_id as rd_live_id,
+      ph.user_id as rd_user_id,
+      sum(ph.points)::int as rd_total
+    from public.point_history ph
+    where ph.live_id in (select tl2.t_live_id from target_lives tl2)
+    group by ph.live_id, ph.user_id
+  ),
+  -- 2026-09-06:「correct側に存在しないユーザーの元順位を復元できない」対応。
+  -- 以前は「合計金額 - 参加10pt - 得点」から順位を逆算していたが、correctに
+  -- 存在しないユーザー（もう採点対象外＝total_scoreの基準が無い）は必ず
+  -- NULLになり、award_countを取り消せなかった。
+  -- 代わりに「そのlive_id・user_idについて最後に書き込まれたpoint_history
+  -- 行のラベル」から直接、現在反映されている順位を読み取る方式にする。
+  -- apply_live_rank_rewards（元の付与）・fix_rank_reward_mismatches（本関数の
+  -- 訂正、下で修正）のどちらも、その時点で確定した順位を必ずラベルに
+  -- 書き込むようにするため、最新の1行のラベルは常に「今実際にaward_countへ
+  -- 反映されている順位」と一致する。correctの有無・金額の逆算に依存しない
+  -- ため、どちらのケースでも取りこぼさない。
+  recorded_latest_label as (
+    select distinct on (ph.live_id, ph.user_id)
+      ph.live_id as rl_live_id,
+      ph.user_id as rl_user_id,
+      case
+        when ph.label like '%（1位）%' then 1
+        when ph.label like '%（2位）%' then 2
+        when ph.label like '%（3位）%' then 3
+        else null
+      end as rl_rank
+    from public.point_history ph
+    where ph.live_id in (select tl4.t_live_id from target_lives tl4)
+    order by ph.live_id, ph.user_id, ph.created_at desc, ph.id desc
+  ),
+  recorded_with_rank as (
+    select
+      r.rd_live_id,
+      r.rd_user_id,
+      r.rd_total,
+      rl.rl_rank as rd_rank
+    from recorded r
+    left join recorded_latest_label rl on rl.rl_live_id = r.rd_live_id and rl.rl_user_id = r.rd_user_id
+  )
+  select
+    coalesce(rr.rd_live_id, c.cr_live_id),
+    tl3.t_sequence_number,
+    coalesce(rr.rd_user_id, c.cr_user_id),
+    -- 2026-09-06: recorded_existsは「point_historyに何らかの行が
+    -- （元の付与行・訂正行を問わず）既に存在するか」を表す。live_countは
+    -- 「このlive_id・user_idの組み合わせに一度でも報酬が記録されたか」で
+    -- 判断すべきで、「元の付与行だけがあるか」に絞ると、訂正で初めて
+    -- 追加された人が将来また別の訂正の対象になった時に、live_countを
+    -- 再び+1してしまう（二重加算）。point_historyに行が有る=既に
+    -- カウント済み、という判定にすることでこれを避ける。
+    (rr.rd_user_id is not null),
+    coalesce(rr.rd_total, 0),
+    rr.rd_rank,
+    (c.cr_user_id is not null),
+    coalesce(c.cr_gain, 0),
+    c.cr_rank_tier,
+    coalesce(c.cr_gain, 0) - coalesce(rr.rd_total, 0)
+  from recorded_with_rank rr
+  full outer join correct c on c.cr_live_id = rr.rd_live_id and c.cr_user_id = rr.rd_user_id
+  join target_lives tl3 on tl3.t_live_id = coalesce(rr.rd_live_id, c.cr_live_id)
+  where coalesce(rr.rd_total, 0) <> coalesce(c.cr_gain, 0)
+     or coalesce(rr.rd_rank, 0) <> coalesce(c.cr_rank_tier, 0);
+end;
+$$;
+
+revoke execute on function public._compute_rank_reward_mismatches() from public;
+revoke execute on function public._compute_rank_reward_mismatches() from anon;
+revoke execute on function public._compute_rank_reward_mismatches() from authenticated;
+
+create or replace function public.fix_rank_reward_mismatches(p_live_id uuid)
+returns table (out_user_id uuid, out_delta int, out_live_count_delta int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+  v_live_count_delta int;
+begin
+  if auth.uid() is not null and not is_host() then
+    raise exception 'not authorized';
+  end if;
+
+  perform 1 from public.lives where id = p_live_id for update;
+
+  for rec in
+    select * from public._compute_rank_reward_mismatches() where out_live_id = p_live_id
+  loop
+    if rec.out_gain_delta = 0 then
+      continue;
+    end if;
+
+    v_live_count_delta := 0;
+    if not rec.out_recorded_exists and rec.out_correct_exists then
+      v_live_count_delta := 1;
+    elsif rec.out_recorded_exists and not rec.out_correct_exists then
+      v_live_count_delta := -1;
+    end if;
+
+    update public.profiles set
+      mastery_meter = mastery_meter + rec.out_gain_delta,
+      total_points = total_points + rec.out_gain_delta,
+      points_balance = points_balance + rec.out_gain_delta,
+      live_count = greatest(0, live_count + v_live_count_delta),
+      award_count_first = award_count_first
+        - (case when rec.out_recorded_rank = 1 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 1 then 1 else 0 end),
+      award_count_second = award_count_second
+        - (case when rec.out_recorded_rank = 2 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 2 then 1 else 0 end),
+      award_count_third = award_count_third
+        - (case when rec.out_recorded_rank = 3 then 1 else 0 end)
+        + (case when rec.out_correct_rank = 3 then 1 else 0 end)
+    where id = rec.out_user_id;
+
+    insert into public.point_history (user_id, live_id, points, mastery, label)
+    select rec.out_user_id, p_live_id, rec.out_gain_delta, rec.out_gain_delta,
+      '第' || l.official_sequence_number || '回ライブ ライブ報酬訂正'
+        || (case rec.out_correct_rank when 1 then '（1位）' when 2 then '（2位）' when 3 then '（3位）' else '' end)
+    from public.lives l where l.id = p_live_id;
+
+    insert into public.rank_reward_corrections (live_id, user_id, corrected_by, points_delta, live_count_delta)
+    values (p_live_id, rec.out_user_id, auth.uid(), rec.out_gain_delta, v_live_count_delta);
+
+    out_user_id := rec.out_user_id;
+    out_delta := rec.out_gain_delta;
+    out_live_count_delta := v_live_count_delta;
+    return next;
+  end loop;
+end;
+$$;
+
+grant execute on function public.fix_rank_reward_mismatches(uuid) to authenticated;
+revoke execute on function public.fix_rank_reward_mismatches(uuid) from public;
+revoke execute on function public.fix_rank_reward_mismatches(uuid) from anon;
 
 commit;

@@ -6,6 +6,11 @@
 // "@/..."エイリアスとSupabaseクライアントの実生成を含むため）。
 import assert from "node:assert/strict";
 
+import {
+  ReactionDisplayScheduler,
+  sharedReactionDisplayCounter,
+  TSUKKOMI_TOTAL_DISPLAY_MAX,
+} from "@/lib/liveReactionQueue";
 import { supabase } from "@/lib/supabase";
 import type { LiveRow } from "@/lib/liveRoomTypes";
 import {
@@ -25,7 +30,88 @@ const isDanmaku = (e: TsukkomiEvent) => !isLaugh(e);
 
 function resetAll() {
   resetTsukkomiReactionQueue();
+  sharedReactionDisplayCounter.reset();
   assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, 0, "resetTsukkomiReactionQueue後もキューが空になっていない");
+  assert.equal(sharedReactionDisplayCounter.get(), 0, "sharedReactionDisplayCounter.reset()後もカウンタが0になっていない");
+}
+
+// 実際の画面（TsukkomiDanmakuOverlay・LaughMarkOverlay）と同じ定数値。
+// tick間隔・表示時間はsrc/lib/liveReactionQueue.ts・各Overlayコンポーネントと
+// 揃えること（値がずれると、ここでの「取りこぼさない」検証の前提が崩れる）。
+const SIM_TICK_MS = 100;
+const SIM_DANMAKU_HOLD_MS = 4200; // TsukkomiDanmakuOverlayのSCROLL_DURATION_MS
+const SIM_LAUGH_HOLD_MS = 900; // LaughMarkOverlayのMARK_DURATION_MS
+const SIM_DANMAKU_MAX = 10; // TsukkomiDanmakuOverlayのMAX_CONCURRENT
+const SIM_LAUGH_MAX = 10; // LaughMarkOverlayのMAX_CONCURRENT
+
+// setInterval/setTimeoutを使わず、手動でnowMsを進めながら
+// 「tick→表示終了予定のあるものをremove→tick」を繰り返すシミュレータ。
+// 実際のTsukkomiDanmakuOverlay/LaughMarkOverlayが同時にマウントされている状況
+// （2つの独立したスケジューラが同じ共有カウンタを見る）を再現する。
+function runSchedulerSimulation(args: {
+  baseNow: number;
+  totalExpected: number;
+  maxSimMs: number;
+}): {
+  claimedDanmaku: TsukkomiEvent[];
+  claimedLaugh: TsukkomiEvent[];
+  maxSharedObserved: number;
+  maxDanmakuObserved: number;
+  maxLaughObserved: number;
+  danmakuScheduler: ReactionDisplayScheduler;
+  laughScheduler: ReactionDisplayScheduler;
+} {
+  const { baseNow, totalExpected, maxSimMs } = args;
+  const danmakuScheduler = new ReactionDisplayScheduler({
+    claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+    predicate: isDanmaku,
+    maxConcurrent: SIM_DANMAKU_MAX,
+  });
+  const laughScheduler = new ReactionDisplayScheduler({
+    claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+    predicate: isLaugh,
+    maxConcurrent: SIM_LAUGH_MAX,
+  });
+
+  const claimedDanmaku: TsukkomiEvent[] = [];
+  const claimedLaugh: TsukkomiEvent[] = [];
+  let maxSharedObserved = 0;
+  let maxDanmakuObserved = 0;
+  let maxLaughObserved = 0;
+
+  for (let elapsed = 0; elapsed <= maxSimMs; elapsed += SIM_TICK_MS) {
+    const now = baseNow + elapsed;
+    // 表示終了予定を過ぎたものを先に片付ける（実際のsetTimeoutによる
+    // remove()呼び出しに相当）。
+    for (const id of danmakuScheduler.collectDue(now)) danmakuScheduler.remove(id);
+    for (const id of laughScheduler.collectDue(now)) laughScheduler.remove(id);
+
+    const d = danmakuScheduler.tick(now, SIM_DANMAKU_HOLD_MS);
+    if (d) claimedDanmaku.push(d);
+    const l = laughScheduler.tick(now, SIM_LAUGH_HOLD_MS);
+    if (l) claimedLaugh.push(l);
+
+    maxSharedObserved = Math.max(maxSharedObserved, sharedReactionDisplayCounter.get());
+    maxDanmakuObserved = Math.max(maxDanmakuObserved, danmakuScheduler.displayedCount);
+    maxLaughObserved = Math.max(maxLaughObserved, laughScheduler.displayedCount);
+
+    if (
+      claimedDanmaku.length + claimedLaugh.length === totalExpected &&
+      useLiveFollowerStore.getState().tsukkomiQueue.length === 0
+    ) {
+      break;
+    }
+  }
+
+  return {
+    claimedDanmaku,
+    claimedLaugh,
+    maxSharedObserved,
+    maxDanmakuObserved,
+    maxLaughObserved,
+    danmakuScheduler,
+    laughScheduler,
+  };
 }
 
 async function main() {
@@ -120,12 +206,13 @@ async function main() {
   }
 
   // ============================================================
-  // 4. 受信から3秒(TSUKKOMI_STALE_MS)経過した待機イベントは、表示されずに破棄される。
+  // 4. 受信からTSUKKOMI_STALE_MS（現在の設定値）経過した待機イベントは、
+  //    表示されずに破棄される。
   // ============================================================
   {
     resetAll();
     const now = Date.now();
-    enqueueTsukkomiEvent("stale-1", "clap", "", now - (TSUKKOMI_STALE_MS + 500)); // 3.5秒前
+    enqueueTsukkomiEvent("stale-1", "clap", "", now - (TSUKKOMI_STALE_MS + 500)); // 期限+0.5秒前
     enqueueTsukkomiEvent("fresh-1", "clap", "", now); // 今
     assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, 2, "投入直後の件数が想定と違う");
 
@@ -133,7 +220,7 @@ async function main() {
     assert.ok(claimed, "新しい方のイベントが取り出せなかった");
     assert.equal(claimed!.id, "fresh-1", "古い(stale)イベントが先に取り出されてしまった（破棄されずに表示される経路に入っている）");
     assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, 0, "stale-1が破棄されずキューに残っている");
-    console.log("PASS: 受信から3秒経過した待機イベントは表示されずに破棄される");
+    console.log(`PASS: 受信からTSUKKOMI_STALE_MS(${TSUKKOMI_STALE_MS}ms)経過した待機イベントは表示されずに破棄される`);
   }
 
   // ============================================================
@@ -225,6 +312,176 @@ async function main() {
     await delay(20);
     assert.equal(rpcCallCount, 2, "クールダウン後の送信が行われなかった");
     console.log("PASS: 1人1秒の送信制限（フロント側のクールダウン）が維持されている");
+  }
+
+  // ============================================================
+  // 9. 【本丸】実際のスケジューラ相当（tick間隔100ms・danmaku表示4.2秒/
+  //    laugh表示0.9秒・種別横断の共有上限TSUKKOMI_TOTAL_DISPLAY_MAX・
+  //    TSUKKOMI_STALE_MS）を手動tickで再現し、20件の純danmakuバーストが
+  //    重複なく・取りこぼされずに全件表示処理されることを検証する。
+  //    以前のテスト（claimReactionEventを待ち時間なしでループ呼び出しするだけ）は
+  //    このタイミング起因の取りこぼしを検出できていなかった。
+  // ============================================================
+  {
+    resetAll();
+    const total = 20;
+    const baseNow = Date.now();
+    for (let i = 0; i < total; i++) {
+      enqueueTsukkomiEvent(`sched-${i}`, "clap", "", baseNow);
+    }
+    assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, total, "投入直後の件数が想定と違う");
+
+    const { claimedDanmaku, claimedLaugh, maxSharedObserved, maxDanmakuObserved, maxLaughObserved, danmakuScheduler, laughScheduler } =
+      runSchedulerSimulation({ baseNow, totalExpected: total, maxSimMs: 15_000 });
+
+    assert.equal(
+      claimedDanmaku.length + claimedLaugh.length,
+      total,
+      `20件の純danmakuバーストが全件処理されなかった（stale期限切れで失われた疑い。danmaku=${claimedDanmaku.length}, laugh=${claimedLaugh.length}）`,
+    );
+    // 純danmakuバーストなのでlaugh側が誤って取り出すことは無いはず。
+    assert.equal(claimedLaugh.length, 0, "laughのpredicateに一致しないはずのイベントがlaugh側で取り出された");
+    assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, 0, "全件処理後もキューにイベントが残っている");
+    // 重複なく1回ずつ：idの集合がユニークかつ想定件数と一致する。
+    const claimedIds = new Set(claimedDanmaku.map((e) => e.id));
+    assert.equal(claimedIds.size, total, "同じイベントが複数回取り出された（重複）");
+    assert.ok(
+      maxSharedObserved <= TSUKKOMI_TOTAL_DISPLAY_MAX,
+      `種別横断の同時表示数が共有上限(${TSUKKOMI_TOTAL_DISPLAY_MAX})を超えた(観測値=${maxSharedObserved})`,
+    );
+    assert.ok(maxDanmakuObserved <= SIM_DANMAKU_MAX, "danmaku単体の同時表示数が自分の上限を超えた");
+    assert.ok(maxLaughObserved <= SIM_LAUGH_MAX, "laugh単体の同時表示数が自分の上限を超えた");
+
+    danmakuScheduler.dispose();
+    laughScheduler.dispose();
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "シミュレーション終了後、共有カウンタが0に戻らない（リーク）");
+    console.log(
+      `PASS: 実際のスケジューラ相当(tick=${SIM_TICK_MS}ms)で20件の純danmakuバーストが取りこぼされず、種別横断の同時表示数も共有上限(${TSUKKOMI_TOTAL_DISPLAY_MAX})を超えない（最大観測=${maxSharedObserved}）`,
+    );
+  }
+
+  // ============================================================
+  // 10. danmaku/laughが混在するバースト（10件+10件=20件）でも、種別横断の
+  //     合計が共有上限を超えず、かつ全件が取りこぼされずに処理される。
+  // ============================================================
+  {
+    resetAll();
+    const danmakuCount = 10;
+    const laughCount = 10;
+    const baseNow = Date.now();
+    for (let i = 0; i < danmakuCount; i++) {
+      enqueueTsukkomiEvent(`mix-d-${i}`, "clap", "", baseNow);
+    }
+    for (let i = 0; i < laughCount; i++) {
+      enqueueTsukkomiEvent(`mix-l-${i}`, "stamp", "爆笑", baseNow);
+    }
+    const total = danmakuCount + laughCount;
+    assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, total, "混在バースト投入直後の件数が想定と違う");
+
+    const { claimedDanmaku, claimedLaugh, maxSharedObserved, danmakuScheduler, laughScheduler } = runSchedulerSimulation({
+      baseNow,
+      totalExpected: total,
+      maxSimMs: 15_000,
+    });
+
+    assert.equal(claimedDanmaku.length, danmakuCount, "混在バーストでdanmaku側の件数が想定と違う（取りこぼしの疑い）");
+    assert.equal(claimedLaugh.length, laughCount, "混在バーストでlaugh側の件数が想定と違う（取りこぼしの疑い）");
+    assert.equal(useLiveFollowerStore.getState().tsukkomiQueue.length, 0, "混在バースト全件処理後もキューにイベントが残っている");
+    assert.ok(
+      maxSharedObserved <= TSUKKOMI_TOTAL_DISPLAY_MAX,
+      `種別混在時の同時表示数合計が共有上限(${TSUKKOMI_TOTAL_DISPLAY_MAX})を超えた(観測値=${maxSharedObserved})`,
+    );
+
+    danmakuScheduler.dispose();
+    laughScheduler.dispose();
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "混在バースト終了後、共有カウンタが0に戻らない（リーク）");
+    console.log(
+      `PASS: danmaku/laugh混在バースト(${danmakuCount}+${laughCount}件)でも取りこぼしなく、共有上限(${TSUKKOMI_TOTAL_DISPLAY_MAX})を超えない（最大観測=${maxSharedObserved}）`,
+    );
+  }
+
+  // ============================================================
+  // 11. 100〜1000件規模の異常投入下でも、スケジューラを回し続けて有限時間で
+  //     完走する（画面が固まらない）こと、待機キュー・処理済みIDキャッシュの
+  //     上限（TSUKKOMI_QUEUE_MAX・TSUKKOMI_PROCESSED_ID_CACHE_MAX）が
+  //     守られたままであることを確認する（全件表示の保証は不要）。
+  // ============================================================
+  {
+    resetAll();
+    const floodCount = 500;
+    const baseNow = Date.now();
+    for (let i = 0; i < floodCount; i++) {
+      enqueueTsukkomiEvent(`sched-flood-${i}`, "clap", "", baseNow);
+    }
+    assert.ok(
+      useLiveFollowerStore.getState().tsukkomiQueue.length <= TSUKKOMI_QUEUE_MAX,
+      "異常投入直後から待機キューがTSUKKOMI_QUEUE_MAXを超えている",
+    );
+
+    const started = Date.now();
+    const { maxSharedObserved, danmakuScheduler, laughScheduler } = runSchedulerSimulation({
+      baseNow,
+      totalExpected: floodCount, // 全件処理は保証しないため、上限までシミュレーションを回すだけ
+      maxSimMs: 20_000,
+    });
+    const elapsedMs = Date.now() - started;
+
+    assert.ok(
+      useLiveFollowerStore.getState().tsukkomiQueue.length <= TSUKKOMI_QUEUE_MAX,
+      `異常投入後も待機キューが上限(${TSUKKOMI_QUEUE_MAX})を超えている`,
+    );
+    assert.ok(
+      maxSharedObserved <= TSUKKOMI_TOTAL_DISPLAY_MAX,
+      "異常投入下でも種別横断の同時表示数が共有上限を超えてはいけない",
+    );
+    // 「画面が固まらない」の代理指標：シミュレーション自体が明らかに異常な時間
+    // （5秒以上）かからないこと（手動tickのみで実時間の待機は発生しないため、
+    // 本来は非常に高速に終わるはず）。
+    assert.ok(elapsedMs < 5000, `500件規模のスケジューラ・シミュレーションに${elapsedMs}msかかった（フリーズの疑い）`);
+
+    danmakuScheduler.dispose();
+    laughScheduler.dispose();
+    sharedReactionDisplayCounter.reset();
+    console.log(
+      `PASS: 500件規模の異常投入下でもスケジューラは有限時間で完走し(${elapsedMs}ms)、待機キュー・共有上限のいずれも超過しない`,
+    );
+  }
+
+  // ============================================================
+  // 12. アンマウント相当の処理（scheduler.dispose()）後は、表示中アイテムが
+  //     無くなり共有カウンタも0に戻る（増減が対称でリークしない）。
+  //     実際のReactフック側は、これに加えてclearInterval/clearTimeoutで
+  //     以降のtick呼び出し自体を止める（src/lib/liveReactionQueue.tsの
+  //     disposedフラグ参照）。
+  // ============================================================
+  {
+    resetAll();
+    const baseNow = Date.now();
+    for (let i = 0; i < 5; i++) enqueueTsukkomiEvent(`unmount-${i}`, "clap", "", baseNow);
+
+    const scheduler = new ReactionDisplayScheduler({
+      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      predicate: isDanmaku,
+      maxConcurrent: SIM_DANMAKU_MAX,
+    });
+    for (let i = 0; i < 5; i++) scheduler.tick(baseNow, SIM_DANMAKU_HOLD_MS);
+    assert.equal(scheduler.displayedCount, 5, "5件claimした直後の表示中件数が想定と違う");
+    assert.equal(sharedReactionDisplayCounter.get(), 5, "5件claimした直後の共有カウンタが想定と違う");
+
+    scheduler.dispose(); // アンマウント相当
+    assert.equal(scheduler.displayedCount, 0, "dispose後も表示中件数が0に戻っていない");
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "dispose後も共有カウンタが0に戻っていない（リーク）");
+
+    // dispose後にキューへ新しいイベントを積んでも、（本番ではclearIntervalにより
+    // 呼ばれなくなるが）この破棄済みインスタンスへ誤って再度tickしてしまった
+    // 場合でも、内部状態は一貫している（0から正しく再カウントできる）ことを確認する。
+    enqueueTsukkomiEvent("after-dispose", "clap", "", baseNow);
+    const claimed = scheduler.tick(baseNow, SIM_DANMAKU_HOLD_MS);
+    assert.ok(claimed, "dispose後の新規イベントをtickで取り出せない");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "dispose後の再tickで共有カウンタが正しく1にならない");
+    scheduler.dispose();
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後も共有カウンタが0に戻らない");
+    console.log("PASS: アンマウント相当のdispose()で表示中アイテム・共有カウンタが対称にリセットされ、リークしない");
   }
 
   console.log("ALL USE_LIVE_FOLLOWER_STORE_REACTION_QUEUE CHECKS PASSED");

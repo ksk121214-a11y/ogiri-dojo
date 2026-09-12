@@ -131,11 +131,13 @@ export default function FinalResultView({
     ? data.myRank !== null && data.myRank <= 3
       ? liveMode === "official"
         ? `${APP_NAME}のライブで${data.myRank}位でした！獲得ポイント+${gain}pt\n#${APP_NAME}`
-        : `${APP_NAME}のライブで${data.myRank}位でした！\n#${APP_NAME}`
+        : `${APP_NAME}のテストライブで${data.myRank}位でした！\n#${APP_NAME}`
       : liveMode === "official"
         ? `${APP_NAME}のライブに参加しました！獲得ポイント+${gain}pt\n#${APP_NAME}`
-        : `${APP_NAME}のライブに参加しました！\n#${APP_NAME}`
-    : `${APP_NAME}のライブを観戦しました！\n#${APP_NAME}`;
+        : `${APP_NAME}のテストライブに参加しました！\n#${APP_NAME}`
+    : liveMode === "official"
+      ? `${APP_NAME}のライブを観戦しました！\n#${APP_NAME}`
+      : `${APP_NAME}のテストライブを観戦しました！\n#${APP_NAME}`;
 
   return (
     <div className="w-full max-w-md rounded-[28px] border-[5px] border-[#3b5bff] bg-white p-5 text-[#1a1a3a] shadow-[0_0_40px_rgba(59,91,255,0.45)]">
@@ -188,9 +190,11 @@ export default function FinalResultView({
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
-                  表彰ボーナス +{RANK_BONUS_POINTS_BY_RANK[rank] ?? 0}pt
-                </p>
+                {liveMode === "official" && (
+                  <p className="mt-2 font-sans text-sm font-bold text-[#3b5bff]">
+                    表彰ボーナス +{RANK_BONUS_POINTS_BY_RANK[rank] ?? 0}pt
+                  </p>
+                )}
               </motion.div>
             );
           })()}
