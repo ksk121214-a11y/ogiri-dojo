@@ -170,8 +170,9 @@ export default function LivePage() {
         {isTestLive && (
           <>
             <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
-              このライブはテストライブです。Xアカウントが無くてもゲストとして参加できます。
-              ただしポイント・段位・参加履歴は残りません。
+              ログインせずゲストとして参加できます。
+              <br />
+              ゲストは名前・アイコンの変更ができず、ポイントや参加履歴は残りません。
             </p>
             <button
               type="button"
