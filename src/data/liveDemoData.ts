@@ -105,7 +105,7 @@ export const BOT_ANSWER_POOL: string[] = [
 // 拍手・テンプレツッコミ（演出専用、スコア非加算 §4.4）
 export const TSUKKOMI_TEMPLATES = [
   "なんでやねん",
-  "そうはならんやろ",
+  "アホか！",
   "ちょっと待って",
-  "それは無理あるて",
+  "上手いこと言うな",
 ] as const;

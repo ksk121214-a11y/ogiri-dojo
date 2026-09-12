@@ -65,12 +65,18 @@ psql "${PSQL_ARGS[@]}" -f "$SHIM_FILE"
 echo "==> supabase_realtime publicationを作成（0001以降が参照するため）"
 psql "${PSQL_ARGS[@]}" -c "create publication supabase_realtime;" >/dev/null
 
-echo "==> migrationsを0001〜0067まで番号順に適用（0068は含まない、${MIGRATIONS_DIR}）"
+echo "==> migrationsを0001〜0067まで番号順に適用（0068以降は含まない、${MIGRATIONS_DIR}）"
 shopt -s nullglob
 for f in "$MIGRATIONS_DIR"/0*.sql; do
   base="$(basename "$f")"
-  # "0068_..." で始まるファイル（このファイル自体を含む）は適用しない。
-  if [[ "$base" == 0068_* ]]; then
+  # ファイル名先頭の4桁番号を数値比較する（"0068_..."で始まるファイル自体を含む）。
+  # 以前は"0068_*"という文字列前方一致だけで除外していたため、0069以降の新しい
+  # マイグレーションが追加されると（0068より後なのに）このループに混入して
+  # 「0068適用前の状態」より先に適用されてしまっていた（0068専用テストの前提が
+  # 崩れる）。番号を数値として67以下かどうかで判定することで、今後0070以降が
+  # 追加されても自動的にこのテストの対象から除外され続けるようにする。
+  num="${base%%_*}"
+  if (( 10#$num > 67 )); then
     continue
   fi
   echo "   - $base"

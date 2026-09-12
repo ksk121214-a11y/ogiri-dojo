@@ -487,8 +487,9 @@ async function main() {
 
   // ============================================================
   // 13. 【問題1回帰】本番フックが実際に使うrunReactionQueueTick（tick処理の実体）を
-  //     直接呼び出し、mapToDisplay相当の処理が例外を投げても共有枠がリークしない
-  //     ことを確認する。
+  //     直接呼び出し、mapToDisplay/scheduleTimer/registerTimerのいずれで例外が
+  //     起きても、共有枠だけでなく「画面に追加済みの表示項目」も正しく
+  //     ロールバックされることを確認する。
   // ============================================================
   {
     resetAll();
@@ -506,6 +507,7 @@ async function main() {
     let scheduleCalls = 0;
     let cancelCalls = 0;
     let registerCalls = 0;
+    let rollbackCalls = 0;
     let styleIndex = 0;
 
     const baseOptions = {
@@ -516,7 +518,18 @@ async function main() {
         styleIndex += 1;
       },
       onDisplay: (item: { id: string }) => displayed.push(item),
-      onFallbackExpire: () => {},
+      onFallbackExpire: (id: string) => {
+        const idx = displayed.findIndex((d) => d.id === id);
+        if (idx !== -1) displayed.splice(idx, 1);
+      },
+      // 例外時専用のロールバック：onDisplayで追加済みの表示項目を取り除く
+      // だけの責務に限定する（正常系のonFallbackExpireとは別カウンタで
+      // 呼び出し回数を検証し、責務が混同されていないことを確認する）。
+      onDisplayRollback: (id: string) => {
+        rollbackCalls++;
+        const idx = displayed.findIndex((d) => d.id === id);
+        if (idx !== -1) displayed.splice(idx, 1);
+      },
       scheduleTimer: (run: () => void) => {
         scheduleCalls++;
         return { run };
@@ -532,7 +545,7 @@ async function main() {
 
     assert.equal(sharedReactionDisplayCounter.get(), 0, "テスト開始前の共有カウンタが0でない");
 
-    // mapToDisplayが例外を投げるケース。
+    // 1. mapToDisplayが例外を投げるケース。
     runReactionQueueTick({
       ...baseOptions,
       now: baseNow,
@@ -543,6 +556,7 @@ async function main() {
 
     assert.equal(errors.length, 1, "mapToDisplay失敗時にonErrorが呼ばれていない");
     assert.equal(displayed.length, 0, "mapToDisplay失敗時にonDisplayが呼ばれてしまった");
+    assert.equal(rollbackCalls, 0, "mapToDisplay自体が失敗したケースでonDisplayRollbackが呼ばれてしまった（何も表示していないので不要なはず）");
     assert.equal(
       sharedReactionDisplayCounter.get(),
       0,
@@ -565,17 +579,21 @@ async function main() {
     assert.equal(registerCalls, 1, "正常表示時にregisterTimerが呼ばれていない");
 
     scheduler.remove("tick-throw-2");
+    displayed.length = 0;
     assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後の共有カウンタが0に戻らない");
     console.log(
-      "PASS: mapToDisplayが例外を投げても共有枠がリークせず、次tickで別のリアクションを正常に表示できる",
+      "PASS: mapToDisplayが例外を投げても共有枠・表示項目のいずれもリークせず、次tickで別のリアクションを正常に表示できる",
     );
 
-    // registerTimer呼び出し自体が失敗するケース（setTimeout登録の途中で例外が
-    // 起きた場合の代理シナリオ）でも、生成済みのタイマー(scheduleTimerの戻り値)を
-    // 必ずcancelTimerで破棄し、共有枠を解放すること。
+    // 2. registerTimer呼び出し自体が失敗するケース（setTimeout登録の途中で
+    //    例外が起きた場合の代理シナリオ）。onDisplayまで完了しているため、
+    //    「作成済みタイマーの破棄」「共有枠の解放」に加えて「画面に追加済みの
+    //    表示項目のロールバック」まで全て行われることを確認する。
     enqueueTsukkomiEvent("tick-throw-3", "clap", "", baseNow);
     scheduleCalls = 0;
     cancelCalls = 0;
+    rollbackCalls = 0;
+    const displayedCountBeforeThrow = displayed.length; // 0のはず
     runReactionQueueTick({
       ...baseOptions,
       now: baseNow,
@@ -591,12 +609,285 @@ async function main() {
       0,
       "registerTimerが例外を投げた後、共有カウンタが元の値(0)に戻っていない（リーク）",
     );
-    console.log(
-      "PASS: setTimeout登録(registerTimer)の途中で例外が起きても、生成済みタイマーが破棄され共有枠もリークしない",
+    assert.equal(rollbackCalls, 1, "registerTimer失敗時にonDisplayRollbackが呼ばれていない");
+    assert.equal(
+      displayed.length,
+      displayedCountBeforeThrow,
+      "registerTimer失敗時、onDisplayで追加された表示項目がロールバックされず画面に残っている",
     );
+    assert.ok(
+      !displayed.some((d) => d.id === "mapped-tick-throw-3-1"),
+      "registerTimer失敗時の表示項目がロールバックされず画面に残っている",
+    );
+    console.log(
+      "PASS: setTimeout登録(registerTimer)の途中で例外が起きても、生成済みタイマー・共有枠・表示項目のいずれもリークしない",
+    );
+
+    // 直後の次tickで、さらに別のリアクションを正常に表示できることを確認する
+    // （registerTimer失敗後も枠が塞がったままになっていないこと）。
+    enqueueTsukkomiEvent("tick-throw-4", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+    });
+    assert.equal(
+      displayed.some((d) => d.id === "mapped-tick-throw-4-2"),
+      true,
+      "registerTimer失敗の直後のtickで正常なリアクションが表示できなかった（枠が塞がったまま）",
+    );
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "registerTimer失敗直後の正常表示で共有カウンタが1になっていない");
+    console.log("PASS: registerTimer失敗の直後のtickでも、別のリアクションを正常に表示できる");
 
     scheduler.dispose();
     assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後も共有カウンタが0に戻らない");
+  }
+
+  // ============================================================
+  // 13b. 【問題2回帰】mapToDisplayが元イベント(claimed.id)とは異なる表示用IDを
+  //      返す場合でも、schedulerの管理は必ずclaimed.idに統一されており、
+  //      フォールバックタイマー発火後にscheduler側の表示中件数・共有カウンタが
+  //      正しく0に戻り、表示側も正しい表示用IDで画面から取り除かれることを
+  //      確認する。同じタイマーが多重に発火しても二重解放されないことも
+  //      あわせて確認する。
+  // ============================================================
+  {
+    resetAll();
+    const baseNow = Date.now();
+    enqueueTsukkomiEvent("mismatch-src-1", "clap", "", baseNow);
+
+    const scheduler = new ReactionDisplayScheduler({
+      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      predicate: isDanmaku,
+      maxConcurrent: SIM_DANMAKU_MAX,
+    });
+
+    const screenItems: { id: string }[] = [];
+    let styleIndex = 0;
+    let firedTimer: (() => void) | null = null;
+
+    runReactionQueueTick({
+      scheduler,
+      now: baseNow,
+      holdMs: SIM_DANMAKU_HOLD_MS,
+      getStyleIndex: () => styleIndex,
+      advanceStyleIndex: () => {
+        styleIndex += 1;
+      },
+      // 表示用IDはevent.id(=claimed.id)とは別物にする（本番のmapToDisplayは
+      // event.idをそのまま使うため通常は一致するが、この不整合を隠さず
+      // 検証するため、あえて別のIDを返す）。
+      mapToDisplay: (event) => ({ id: `display-${event.id}` }),
+      onDisplay: (item) => screenItems.push(item),
+      onFallbackExpire: (id) => {
+        const idx = screenItems.findIndex((s) => s.id === id);
+        if (idx !== -1) screenItems.splice(idx, 1);
+      },
+      onDisplayRollback: () => {
+        throw new Error("このテストのシナリオではonDisplayRollbackは呼ばれないはず");
+      },
+      scheduleTimer: (run) => {
+        firedTimer = run;
+        return {};
+      },
+      cancelTimer: () => {},
+      registerTimer: () => {},
+      onError: (e) => {
+        throw e as Error;
+      },
+    });
+
+    assert.equal(scheduler.displayedCount, 1, "claim直後のscheduler表示中件数が1になっていない");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "claim直後の共有カウンタが1になっていない");
+    assert.equal(screenItems.length, 1, "表示用アイテムが画面に追加されていない");
+    assert.equal(screenItems[0].id, "display-mismatch-src-1", "表示用アイテムのIDが想定と違う");
+
+    // TypeScriptの制御フロー解析は、scheduleTimerコールバック（別関数の中で
+    // 呼ばれるクロージャ）経由でのfiredTimerへの代入を追跡できないため、
+    // assert.ok(firedTimer)によるnarrowingではなく明示的なキャストで
+    // 呼び出し可能な関数を取り出す。
+    assert.equal(typeof firedTimer, "function", "フォールバックタイマーが登録されなかった");
+    const runFallbackTimer = firedTimer as unknown as () => void;
+    runFallbackTimer(); // フォールバックタイマー発火を模擬する（claimed.id !== displayItem.idの状態で）
+
+    assert.equal(
+      scheduler.displayedCount,
+      0,
+      "タイマー発火後、schedulerの表示中件数が0に戻っていない（IDの不一致でpendingから削除できていない疑い）",
+    );
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "タイマー発火後、共有カウンタが0に戻っていない（IDの不一致による共有枠リーク）",
+    );
+    assert.equal(screenItems.length, 0, "タイマー発火後、表示用IDの項目が画面から削除されていない");
+
+    // アニメーション完了とfallback timeoutが競合するケースの代理：同じタイマーが
+    // 誤って二重発火しても、共有カウンタが負数にならない（scheduler.removeが
+    // claimed.id基準で多重呼び出しに安全なガードを持つため）。
+    runFallbackTimer();
+    assert.ok(sharedReactionDisplayCounter.get() >= 0, "タイマー二重発火で共有カウンタが負数になった");
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "タイマー二重発火後も共有カウンタは0のままであるべき");
+
+    scheduler.dispose();
+    console.log(
+      "PASS: mapToDisplayが異なる表示用IDを返しても、scheduler管理はclaimed.idに統一され、タイマー発火（多重発火含む）後に共有枠・画面表示の両方が正しく解放される",
+    );
+  }
+
+  // ============================================================
+  // 13c. 【問題1再々発防止】onDisplay自体が例外を投げた場合／registerTimerが
+  //      登録途中で失敗した場合／rollbackコールバック自体が失敗した場合の
+  //      いずれでも、表示項目・タイマーマップ・共有枠のいずれもリークせず、
+  //      次のリアクションを正常に処理できることを確認する。
+  //      （前回のonDisplayRollbackはtimersマップを触っていなかったため、
+  //      ここでは実際のMapを使って検証する）。
+  // ============================================================
+  {
+    resetAll();
+    const baseNow = Date.now();
+
+    const scheduler = new ReactionDisplayScheduler({
+      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      predicate: isDanmaku,
+      maxConcurrent: SIM_DANMAKU_MAX,
+    });
+
+    const displayed2: { id: string }[] = [];
+    const timers2 = new Map<string, unknown>();
+    const errors2: unknown[] = [];
+    let styleIndex2 = 0;
+
+    const baseOptions2 = {
+      scheduler,
+      holdMs: SIM_DANMAKU_HOLD_MS,
+      getStyleIndex: () => styleIndex2,
+      advanceStyleIndex: () => {
+        styleIndex2 += 1;
+      },
+      onFallbackExpire: (id: string) => {
+        timers2.delete(id);
+        const idx = displayed2.findIndex((d) => d.id === id);
+        if (idx !== -1) displayed2.splice(idx, 1);
+      },
+      onDisplayRollback: (id: string) => {
+        timers2.delete(id);
+        const idx = displayed2.findIndex((d) => d.id === id);
+        if (idx !== -1) displayed2.splice(idx, 1);
+      },
+      scheduleTimer: (run: () => void) => ({ run }),
+      cancelTimer: () => {},
+      registerTimer: (id: string, timer: unknown) => {
+        timers2.set(id, timer);
+      },
+      onError: (e: unknown) => errors2.push(e),
+    };
+
+    // --- ケース1: onDisplay自体が例外を投げる ---
+    enqueueTsukkomiEvent("safety-onDisplay-throws", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions2,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      onDisplay: () => {
+        throw new Error("onDisplay自体が失敗した想定のテスト");
+      },
+    });
+    assert.equal(errors2.length, 1, "onDisplay失敗時にonErrorが呼ばれていない");
+    assert.equal(displayed2.length, 0, "onDisplay失敗時に表示項目が画面へ残っている");
+    assert.equal(timers2.size, 0, "onDisplay失敗時にタイマーマップへ登録が残っている");
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "onDisplay自体が失敗した後、共有カウンタが元の値(0)に戻っていない（リーク）",
+    );
+    assert.equal(scheduler.displayedCount, 0, "onDisplay自体が失敗した後、schedulerの表示中件数が0に戻っていない");
+    errors2.length = 0;
+
+    // 直後の次tickで、別のリアクションを正常にclaim・表示できることを確認する。
+    enqueueTsukkomiEvent("safety-onDisplay-recover", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions2,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      onDisplay: (item) => displayed2.push(item),
+    });
+    assert.equal(displayed2.length, 1, "onDisplay失敗の直後のtickで正常なリアクションが表示できなかった（枠が塞がったまま）");
+    assert.equal(timers2.size, 1, "正常表示時にタイマーマップへ登録されていない");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "正常表示後の共有カウンタが1になっていない");
+    scheduler.remove("safety-onDisplay-recover");
+    timers2.clear();
+    displayed2.length = 0;
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後の共有カウンタが0に戻らない");
+    console.log("PASS: onDisplay自体が例外を投げても表示・タイマー・共有枠がリークせず、次tickで正常に処理できる");
+
+    // --- ケース2: registerTimerが登録途中で失敗する（タイマーマップに
+    //     登録が残らないことを実際のMapで確認する） ---
+    enqueueTsukkomiEvent("safety-registerTimer-throws", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions2,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      onDisplay: (item) => displayed2.push(item),
+      registerTimer: () => {
+        throw new Error("registerTimer(timers.set相当)が失敗した想定のテスト");
+      },
+    });
+    assert.equal(displayed2.length, 0, "registerTimer失敗時、表示項目がロールバックされず画面に残っている");
+    assert.equal(timers2.size, 0, "registerTimer失敗時、タイマーマップに登録が残っている");
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "registerTimerが例外を投げた後、共有カウンタが元の値(0)に戻っていない（リーク）",
+    );
+    assert.equal(errors2.length, 1, "registerTimer失敗時にonErrorが呼ばれていない");
+    errors2.length = 0; // 次のケース3の集計に混ざらないようリセットする
+    console.log("PASS: registerTimerが登録途中で失敗してもタイマーマップに情報が残らない");
+
+    // --- ケース3: rollbackコールバック自体が失敗しても、共有枠の解放だけは
+    //     必ず実行される ---
+    enqueueTsukkomiEvent("safety-rollback-throws", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions2,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      onDisplay: (item) => displayed2.push(item),
+      registerTimer: () => {
+        throw new Error("registerTimerが失敗した想定のテスト（rollback連鎖用）");
+      },
+      onDisplayRollback: () => {
+        throw new Error("onDisplayRollback自体が失敗した想定のテスト");
+      },
+    });
+    // registerTimerの例外・onDisplayRollbackの例外の両方がonErrorへ報告される
+    // （どちらか一方が失敗しても、共有枠解放や他のステップの実行を妨げない）。
+    assert.equal(errors2.length, 2, "cleanup中の複数の例外がすべてonErrorへ報告されていない");
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "onDisplayRollback自体が失敗しても、共有枠の解放は必ず実行されるべき（リーク）",
+    );
+    assert.ok(sharedReactionDisplayCounter.get() >= 0, "共有カウンタが負数になった");
+    errors2.length = 0;
+    // rollback自体が失敗して表示項目が画面に残っていても（このコールバックの
+    // 単純な実装上の制約であり、共有枠のリークとは別問題）、次のリアクションは
+    // 正常に処理できることを確認する。
+    displayed2.length = 0;
+    enqueueTsukkomiEvent("safety-rollback-recover", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions2,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      onDisplay: (item) => displayed2.push(item),
+    });
+    assert.equal(displayed2.length, 1, "rollback失敗の直後のtickで正常なリアクションが表示できなかった");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "rollback失敗直後の正常表示で共有カウンタが1になっていない");
+    scheduler.remove("safety-rollback-recover");
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "最終的な後片付け後も共有カウンタが0に戻らない");
+    console.log("PASS: cleanup中のいずれか（registerTimer/rollback）が失敗しても共有枠の解放だけは必ず実行され、次tickで正常に処理できる");
+
+    scheduler.dispose();
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "最終的なdispose後も共有カウンタが0に戻らない");
   }
 
   // ============================================================

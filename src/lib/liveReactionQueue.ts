@@ -166,11 +166,20 @@ export interface RunReactionQueueTickOptions<T extends { id: string }> {
   getStyleIndex: () => number;
   advanceStyleIndex: () => void;
   // 表示開始時（claim成功＋mapToDisplay成功後）に呼ばれる。本番ではsetItemsで
-  // 画面に追加する。
-  onDisplay: (item: T) => void;
-  // 表示終了（fallbackタイマー発火）時に呼ばれる。本番ではtimersマップからの
-  // 削除・setItemsでの画面からの除去を行う。
-  onFallbackExpire: (id: string) => void;
+  // 画面に追加する。schedulerIdはscheduler側の管理キー（＝claimed.id）そのもの。
+  // mapToDisplayが返すitem.idがこれと異なる実装であっても、呼び出し元
+  // （フック）がid対応表を保守できるように渡す。
+  onDisplay: (item: T, schedulerId: string) => void;
+  // 表示終了（fallbackタイマー発火）時に呼ばれる。schedulerの解放は、この
+  // 呼び出しより前に必ずschedulerId（claimed.id）で行われている。呼び出し元は
+  // 表示用item.idを使って画面・タイマーマップから取り除く。
+  onFallbackExpire: (displayId: string) => void;
+  // claim成功・onDisplayまで完了した後、scheduleTimerまたはregisterTimerが
+  // 例外を投げた場合にだけ呼ばれる、表示のロールバック専用コールバック。
+  // 「画面に追加済みのdisplayItemを取り除く」だけに責務を限定し、共有枠の
+  // 解放・タイマー破棄はrunReactionQueueTick側が別途行う（正常系の
+  // onFallbackExpireと混同しない）。
+  onDisplayRollback: (displayId: string) => void;
   // 表示終了タイマーの生成・破棄・登録。本番ではsetTimeout/clearTimeout/
   // timers.setをそのまま渡す。テストからは実時間を待たない偽実装を注入できる。
   scheduleTimer: (run: () => void, ms: number) => unknown;
@@ -179,15 +188,51 @@ export interface RunReactionQueueTickOptions<T extends { id: string }> {
   onError: (e: unknown) => void;
 }
 
+// onError自体が例外を投げても、その先の後始末（scheduler解放・タイマー破棄・
+// 表示ロールバック）を止めないための保険。onErrorの失敗はこれ以上通知しようが
+// ないため黙殺する。
+function reportError(onError: (e: unknown) => void, e: unknown): void {
+  try {
+    onError(e);
+  } catch {
+    // 無視する：onError自体の失敗をさらに上へ伝播させない。
+  }
+}
+
+// actionを実行し、例外が起きたらonErrorへ報告した上で握りつぶす（呼び出し元へ
+// 再スローしない）。cleanup処理（scheduler解放・タイマー破棄・表示ロールバック）の
+// どの1ステップが失敗しても、他のステップの実行や呼び出し元（tickループ）への
+// 伝播を妨げないようにするための共通ヘルパー。
+function safely(onError: (e: unknown) => void, action: () => void): void {
+  try {
+    action();
+  } catch (e) {
+    reportError(onError, e);
+  }
+}
+
 // 1tickぶんの「claim→表示登録」処理の実体。useTsukkomiReactionQueueのuseEffect内
 // のtick関数はこれを呼ぶだけにする（React非依存の関数として切り出すことで、
 // src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.tsから、本番と
 // 全く同じ経路を、setInterval/setTimeoutの実時間待ちなしに決定的に検証できる）。
 //
+// schedulerの管理用ID（pendingへの登録・remove時の解放）は、常にclaimed.id
+// （下記schedulerId）に統一する。mapToDisplayが元イベントと異なるIDを返す
+// 実装であっても、schedulerへの登録・解放が食い違って共有枠がリークすることは
+// ない（表示用item.idはあくまで画面・タイマーマップの管理にのみ使う）。
+//
 // claim成功後（＝共有枠を確保済みの状態）にmapToDisplay・onDisplay・
-// scheduleTimer・registerTimerのいずれかで例外が起きた場合、必ず
-// scheduler.remove(claimed.id)で共有枠を解放する。生成済みのタイマーが
-// あればcancelTimerで必ず破棄する。
+// scheduleTimer・registerTimerのいずれで例外が起きても、安全側に倒して
+// 次の順序で必ず後始末する（各ステップは個別にtry/catchで囲み、途中の1つが
+// 失敗しても残りのステップは実行される。cleanup中の例外がtickの呼び出し元
+// ＝ライブ進行側へ伝播することは無い）：
+//   1. scheduler.remove(schedulerId)で共有枠を最優先で解放する
+//   2. onErrorへ例外を報告する
+//   3. 生成済みのタイマーがあればcancelTimerで破棄する
+//   4. mapToDisplayが成功していた（＝表示項目が生成されていた）場合、
+//      onDisplayが実際に画面へ反映できたかどうかによらず、
+//      onDisplayRollbackで画面から取り除く（onDisplayが例外の途中で
+//      一部だけ処理していた可能性を考慮し、安全側に倒す）。
 export function runReactionQueueTick<T extends { id: string }>(
   options: RunReactionQueueTickOptions<T>,
 ): void {
@@ -200,6 +245,7 @@ export function runReactionQueueTick<T extends { id: string }>(
     advanceStyleIndex,
     onDisplay,
     onFallbackExpire,
+    onDisplayRollback,
     scheduleTimer,
     cancelTimer,
     registerTimer,
@@ -212,33 +258,50 @@ export function runReactionQueueTick<T extends { id: string }>(
   try {
     claimed = scheduler.tick(now, holdMs);
   } catch (e) {
-    onError(e);
+    reportError(onError, e);
     return;
   }
   if (!claimed) return;
+  // schedulerの管理用IDはこの1tick処理を通じて必ずこの値（claimed.id）を使う。
+  const schedulerId = claimed.id;
 
+  let displayItem: T | undefined;
   let timer: unknown;
   let timerCreated = false;
   try {
-    const displayItem = mapToDisplay(claimed, getStyleIndex());
+    const item = mapToDisplay(claimed, getStyleIndex());
+    // mapToDisplayが成功した時点で「ロールバックが必要になりうる」対象とみなす。
+    // この後onDisplay自体が例外を投げた場合でも、部分的に副作用（例：id対応表への
+    // 登録）が発生している可能性があるため、安全側に倒してロールバック対象に含める。
+    displayItem = item;
     advanceStyleIndex();
-    onDisplay(displayItem);
+    onDisplay(item, schedulerId);
     timer = scheduleTimer(() => {
-      scheduler.remove(displayItem.id);
-      onFallbackExpire(displayItem.id);
+      // 正常なフォールバック終了時も、schedulerの解放（共有枠の解放）を
+      // 最優先で必ず実行し、onFallbackExpire側の失敗がそれを妨げないように
+      // 個別にtry/catchで囲む。schedulerの解放は必ずschedulerId（claimed.id）
+      // で行う。item.idを使うと、mapToDisplayが元イベントと異なるIDを返す
+      // ケースでpendingから削除できず、共有表示枠がリークする。
+      safely(onError, () => scheduler.remove(schedulerId));
+      safely(onError, () => onFallbackExpire(item.id));
     }, holdMs);
     timerCreated = true;
-    registerTimer(displayItem.id, timer);
+    registerTimer(item.id, timer);
   } catch (e) {
     // リアクション表示側の例外はここで握りつぶし、ライブ進行（フェーズ
-    // タイマー・回答受付・採点等）には一切影響させない。ただし共有枠は
-    // 必ず解放する（放置すると12件蓄積後に新規リアクションが一切
-    // claimされなくなるリークになるため）。remove()は多重呼び出しに対して
-    // 安全なガード付きのため、後続のonAnimationComplete/fallback timeoutと
-    // 競合しても二重減算されない。
-    onError(e);
-    scheduler.remove(claimed.id);
-    if (timerCreated) cancelTimer(timer);
+    // タイマー・回答受付・採点等）には一切影響させない。各後始末ステップを
+    // 個別にtry/catchで囲み、1つが失敗しても残りは必ず実行する。
+    // 1) 共有枠の解放を最優先で実行する（remove()は多重呼び出しに対して
+    //    安全なガード付きのため、後続のonAnimationComplete/fallback timeoutと
+    //    競合しても二重減算されない）。
+    safely(onError, () => scheduler.remove(schedulerId));
+    // 2) 例外そのものを呼び出し元へ報告する。
+    reportError(onError, e);
+    // 3) 生成済みのタイマーがあれば破棄する。
+    if (timerCreated) safely(onError, () => cancelTimer(timer));
+    // 4) mapToDisplayが成功していた場合は、onDisplayの成否によらず画面から
+    //    ロールバックする（安全側に倒す）。
+    if (displayItem) safely(onError, () => onDisplayRollback(displayItem!.id));
   }
 }
 
@@ -272,6 +335,12 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
   const mapRef = useRef(mapToDisplay);
   const fallbackTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const schedulerRef = useRef<ReactionDisplayScheduler | null>(null);
+  // 表示用item.id → scheduler管理用id(claimed.id)の対応表。mapToDisplayが
+  // 元イベントと異なるIDを返す実装であっても、外部（onAnimationComplete等）
+  // からdisplayItem.idでremove()された時にscheduler側を正しいIDで解放できる
+  // ようにする（本番のmapToDisplayはevent.idをそのまま使うため通常は同じ値に
+  // なるが、共通処理としてこの前提に依存しない）。
+  const schedulerIdByDisplayIdRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     predicateRef.current = predicate;
@@ -283,7 +352,9 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
 
   const remove = (id: string) => {
     setItems((prev) => prev.filter((it) => it.id !== id));
-    schedulerRef.current?.remove(id);
+    const schedulerId = schedulerIdByDisplayIdRef.current.get(id) ?? id;
+    schedulerIdByDisplayIdRef.current.delete(id);
+    schedulerRef.current?.remove(schedulerId);
     const timer = fallbackTimersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -294,6 +365,7 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
   useEffect(() => {
     let disposed = false;
     const timers = fallbackTimersRef.current;
+    const schedulerIdByDisplayId = schedulerIdByDisplayIdRef.current;
     // このインスタンス（danmaku担当・laugh担当それぞれ）専用のスケジューラを
     // 1つ作る。sharedCounterは省略してモジュール単位のシングルトンを使う
     // （＝他のuseTsukkomiReactionQueueインスタンスと合計上限を共有する）。
@@ -315,9 +387,27 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
         advanceStyleIndex: () => {
           styleIndexRef.current += 1;
         },
-        onDisplay: (item) => setItems((prev) => [...prev, item]),
+        onDisplay: (item, schedulerId) => {
+          schedulerIdByDisplayId.set(item.id, schedulerId);
+          setItems((prev) => [...prev, item]);
+        },
         onFallbackExpire: (id) => {
+          schedulerIdByDisplayId.delete(id);
           timers.delete(id);
+          if (disposed) return;
+          setItems((prev) => prev.filter((it) => it.id !== id));
+        },
+        onDisplayRollback: (id) => {
+          schedulerIdByDisplayId.delete(id);
+          // 通常はここに到達する時点でタイマーはまだ登録されていない
+          // （registerTimer自体が失敗した場合はtimers.set前に例外が飛ぶため）が、
+          // 「該当するタイマーマップの情報も削除する」という安全側の要件に
+          // 沿って、念のため明示的に消しておく（無ければ何もしない）。
+          const timer = timers.get(id);
+          if (timer) {
+            clearTimeout(timer);
+            timers.delete(id);
+          }
           if (disposed) return;
           setItems((prev) => prev.filter((it) => it.id !== id));
         },
@@ -341,6 +431,7 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
       clearInterval(interval);
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      schedulerIdByDisplayId.clear();
       scheduler.dispose();
       schedulerRef.current = null;
       setItems([]);
