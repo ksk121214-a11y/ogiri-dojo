@@ -48,7 +48,7 @@ function makeDeferred() {
 let confirmCallCount = 0;
 let confirmResult = true;
 (global as unknown as { window: unknown }).window = {
-  confirm: (_message: string) => {
+  confirm: () => {
     confirmCallCount += 1;
     return confirmResult;
   },
