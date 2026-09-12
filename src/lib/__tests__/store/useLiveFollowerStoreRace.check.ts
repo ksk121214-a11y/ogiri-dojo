@@ -137,6 +137,8 @@ const participants: ParticipantRow[] = [
     host_message: null,
     host_message_sent_at: null,
     kicked_at: null,
+    is_guest: false,
+    guest_number: null,
   },
   {
     id: PARTICIPANT_OTHER,
@@ -149,6 +151,8 @@ const participants: ParticipantRow[] = [
     host_message: null,
     host_message_sent_at: null,
     kicked_at: null,
+    is_guest: false,
+    guest_number: null,
   },
 ];
 

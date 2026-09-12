@@ -23,7 +23,11 @@ create schema if not exists auth;
 create table if not exists auth.users (
   id uuid primary key default gen_random_uuid(),
   raw_user_meta_data jsonb not null default '{}'::jsonb,
-  email text
+  email text,
+  -- 0070（ゲスト参加）：実際のSupabaseのauth.usersに実在する列。Supabaseの匿名
+  -- サインイン(signInAnonymously)で作られる行はtrueになる。テストでは
+  -- `insert into auth.users (id, is_anonymous) values (..., true)` で模す。
+  is_anonymous boolean not null default false
 );
 
 do $$

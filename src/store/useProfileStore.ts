@@ -20,6 +20,10 @@ export interface DojoProfile {
   // 正しく伝わるよう、useUserStore（ローカルのみ）ではなくprofilesに保存する。
   avatarIcon: string;
   avatarColor: string;
+  // 2026-09-12（ゲスト参加）：profiles.is_guestをそのまま反映する。ゲストは
+  // 名前設定モーダルを出さない・プロフィール編集UIを無効化する等の判定に使う
+  // （DB側のRLS/RPCが最終防御。ここはUI層の分かりやすさのための表示用）。
+  isGuest: boolean;
   // 2026-08-31（段位・ポイント・実績の実データ化）：一言コメントと、ライブ終了時に
   // apply_live_rank_rewards()（security definer関数）が加算する各種実績値。
   // これらはクライアントから直接updateできない列（bioのみ本人が自由に編集可）。
@@ -74,6 +78,7 @@ function toDojoProfile(row: {
   best_answer_count: number;
   tickets_count: number;
   tickets_next_recovery_at: string | null;
+  is_guest: boolean;
 }): DojoProfile {
   return {
     id: row.id,
@@ -99,6 +104,7 @@ function toDojoProfile(row: {
     bestAnswerCount: row.best_answer_count,
     ticketsCount: row.tickets_count,
     ticketsNextRecoveryAt: row.tickets_next_recovery_at,
+    isGuest: row.is_guest,
   };
 }
 
@@ -106,7 +112,7 @@ async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at",
+      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at, is_guest",
     )
     .eq("id", userId)
     .single();
@@ -121,6 +127,10 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   updateDisplayName: async (name) => {
     const userId = get().profile?.id;
     if (!userId) return { ok: false, reason: "ログインしていません" };
+    // 2026-09-12（ゲスト参加）：ゲストはprofiles_update_own（RLS）がUPDATE自体を
+    // 丸ごと拒否するため、ここで先に弾かないと「0件更新（エラー無し）」を
+    // 成功したかのように見せてしまう（DBには反映されず画面表示だけ変わる）。
+    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: "名前を入力してください" };
     if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
@@ -147,6 +157,7 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   updateAvatar: async (icon, color) => {
     const userId = get().profile?.id;
     if (!userId) return { ok: false, reason: "ログインしていません" };
+    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
 
     const { error } = await supabase
       .from("profiles")
@@ -161,6 +172,7 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   updateBio: async (bio) => {
     const userId = get().profile?.id;
     if (!userId) return { ok: false, reason: "ログインしていません" };
+    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
 
     const { error } = await supabase.from("profiles").update({ bio }).eq("id", userId);
     if (error) return { ok: false, reason: error.message };

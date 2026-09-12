@@ -13,6 +13,7 @@ import { MASTERY_GAIN } from "@/data/collectionData";
 import { APP_NAME } from "@/lib/appInfo";
 import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
+import { useAuthStore } from "@/store/useAuthStore";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -92,6 +93,7 @@ export default function FinalResultView({
   }, [data.ranking]);
   const totalSteps = podiumTiers.length;
   const profile = useProfileStore((s) => s.profile);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
 
   useEffect(() => {
     if (step > totalSteps) return;
@@ -263,6 +265,31 @@ export default function FinalResultView({
           )}
         </AnimatePresence>
       </div>
+
+      {/* 2026-09-12（ゲスト参加）：ゲストのままだと今回の参加は一切記録に残らない
+          （0068/0070の多層防御によりポイント・実績・履歴には反映されない）ため、
+          ライブ終了後にXログインへの案内を出す。匿名セッションとの意図しない
+          アップグレードを避けるため、signInWithX()は内部で必ずsignOut()してから
+          OAuthを開始する（useAuthStore.signInWithX参照）。 */}
+      {step > totalSteps && profile?.isGuest && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="mt-4 flex w-full flex-col items-center rounded-2xl bg-[#12101a] px-4 py-6 text-center"
+        >
+          <p className="font-sans text-xs text-white/80">
+            Xでログインすると、次回からポイント・称号・参加履歴を残せます。
+          </p>
+          <button
+            type="button"
+            onClick={() => signInWithX()}
+            className="mt-3 rounded-full bg-white px-5 py-2.5 font-sans text-sm font-bold text-[#12101a] transition hover:opacity-90"
+          >
+            Xでログイン
+          </button>
+        </motion.div>
+      )}
 
       {step > totalSteps && myEntry && profile && liveMode === "official" && (
         <motion.div

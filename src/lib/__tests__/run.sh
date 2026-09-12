@@ -150,4 +150,26 @@ else
 fi
 rm -rf "$SNS_DELETE_DIR"
 
+# src/lib/__tests__/store/useAuthStoreGuest.check.ts も同じ理由（useAuthStore.tsが
+# "@/..."エイリアス・実際のSupabaseクライアント生成を含む）で専用tsconfig経由にする。
+# 0070（ゲスト参加）のsignInAsGuestのsingle-flightガード・失敗時の日本語文言化を検証する。
+AUTH_GUEST_DIR="$(mktemp -d)"
+AUTH_GUEST_TSCONFIG="$SCRIPT_DIR/store/tsconfig.authGuest.json"
+AUTH_GUEST_ENTRY="$AUTH_GUEST_DIR/src/lib/__tests__/store/useAuthStoreGuest.check.js"
+
+echo "--- useAuthStoreGuest.check.ts ---"
+if npx tsc -p "$AUTH_GUEST_TSCONFIG" --outDir "$AUTH_GUEST_DIR" && [ -f "$AUTH_GUEST_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUTH_GUEST_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUTH_GUEST_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useAuthStoreGuest.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUTH_GUEST_DIR"
+
 exit $FAILED

@@ -14,7 +14,9 @@ export default function DisplayNameSetupModal() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!profile || profile.displayNameSet) return null;
+  // ゲストは名前を自己編集できない（DB側もprofiles_update_ownがRLSで拒否する）ため、
+  // このモーダルは一切出さない。
+  if (!profile || profile.displayNameSet || profile.isGuest) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

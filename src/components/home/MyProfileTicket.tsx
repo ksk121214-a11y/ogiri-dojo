@@ -130,10 +130,13 @@ export default function MyProfileTicket({
                 >
                   段位・実績を見る
                 </button>
+                {/* 2026-09-12（ゲスト参加）：DB側（profiles_update_own）が最終防御だが、
+                    ゲストにはそもそも編集モーダルを開かせない（UI層の分かりやすさ）。 */}
                 <button
                   type="button"
                   onClick={onOpenEdit}
-                  className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5`}
+                  disabled={profile?.isGuest}
+                  className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-40`}
                 >
                   <EditGlyph />
                   編集する

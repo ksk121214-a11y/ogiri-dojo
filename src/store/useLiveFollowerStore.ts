@@ -1033,7 +1033,9 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
             ? "このライブへの参加はできません。"
             : error.message.includes("ACCOUNT_SUSPENDED")
               ? "現在アカウントが利用停止中のため、ライブに参加できません。"
-              : error.message;
+              : error.message.includes("GUEST_OFFICIAL_NOT_ALLOWED")
+                ? "ゲストは本番ライブへ参加できません。Xでログインしてください。"
+                : error.message;
       set({ error: reason });
       return;
     }

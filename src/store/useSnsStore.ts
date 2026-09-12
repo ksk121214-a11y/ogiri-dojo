@@ -52,6 +52,9 @@ const SHOW_DUMMY_DATA = process.env.NODE_ENV !== "production";
 function mapSnsSubmitError(message: string | undefined): string {
   if (!message) return "投稿に失敗しました";
   if (message.includes("NOT_LOGGED_IN")) return "投稿にはログインが必要です";
+  // 0070（ゲスト参加）：submit_sns_topic/submit_sns_answer/submit_sns_commentが
+  // ゲスト（匿名）からの呼び出しを拒否した場合のエラーコード。
+  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。Xでログインしてください。";
   if (message.includes("NO_TICKETS")) return "寄合券が足りません。回復を待ってから投稿してください。";
   if (message.includes("EMPTY_BODY")) return "本文を入力してください";
   if (message.includes("BODY_TOO_LONG")) return "文字数が上限を超えています";
@@ -67,6 +70,9 @@ function mapSnsSubmitError(message: string | undefined): string {
 function mapSnsDeleteError(message: string | undefined): string {
   if (!message) return "削除に失敗しました";
   if (message.includes("NOT_LOGGED_IN")) return "削除にはログインが必要です";
+  // 0070（ゲスト参加）：delete_own_sns_answer/comment/topicがゲスト（匿名）からの
+  // 呼び出しを拒否した場合のエラーコード。
+  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。Xでログインしてください。";
   if (message.includes("NOT_OWNER")) return "自分の投稿だけ削除できます";
   if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
   if (message.includes("ANSWER_NOT_FOUND")) return "回答が見つかりませんでした";

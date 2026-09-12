@@ -101,6 +101,10 @@ export interface ParticipantRow {
   host_message: string | null;
   host_message_sent_at: string | null;
   kicked_at: string | null;
+  // 2026-09-12（ゲスト参加）：Xログイン無しで参加したゲストかどうか・
+  // 「ゲスト01」のような表示名に使う連番（0070、join_live内で採番）。
+  is_guest: boolean;
+  guest_number: number | null;
 }
 
 export type TurnStatus = "pending" | "active" | "done";

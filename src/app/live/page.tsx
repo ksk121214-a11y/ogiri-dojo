@@ -46,7 +46,10 @@ export default function LivePage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
+  const signInAsGuest = useAuthStore((s) => s.signInAsGuest);
+  const guestSigningIn = useAuthStore((s) => s.guestSigningIn);
   const profile = useProfileStore((s) => s.profile);
+  const [guestSignInError, setGuestSignInError] = useState<string | null>(null);
 
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -148,6 +151,12 @@ export default function LivePage() {
   if (authLoading) return <CenterMessage>読み込み中…</CenterMessage>;
 
   if (!authUser) {
+    // 2026-09-12（ゲスト参加）：テストライブ(live_mode==='test')のみ、Xアカウントを
+    // 持たない人もその場でゲスト（匿名）参加できるボタンを併せて表示する。
+    // 本番ライブ(live_mode==='official')・liveがまだ取得できていない場合は、
+    // 従来どおりXログインの案内だけを表示する（DB側のjoin_live/GUEST_OFFICIAL_NOT_ALLOWED
+    // と矛盾しないよう、そもそも公式ライブではゲストボタン自体を出さない）。
+    const isTestLive = live?.live_mode === "test";
     return (
       <CenterMessage>
         <p className="mb-4">参加するにはXログインが必要です。</p>
@@ -158,6 +167,29 @@ export default function LivePage() {
         >
           Xでログイン
         </button>
+        {isTestLive && (
+          <>
+            <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
+              このライブはテストライブです。Xアカウントが無くてもゲストとして参加できます。
+              ただしポイント・段位・参加履歴は残りません。
+            </p>
+            <button
+              type="button"
+              disabled={guestSigningIn}
+              onClick={async () => {
+                setGuestSignInError(null);
+                const result = await signInAsGuest();
+                if (!result.ok) setGuestSignInError(result.reason);
+              }}
+              className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown disabled:opacity-50"
+            >
+              {guestSigningIn ? "参加準備中…" : "ゲストとして参加"}
+            </button>
+            {guestSignInError && (
+              <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{guestSignInError}</p>
+            )}
+          </>
+        )}
       </CenterMessage>
     );
   }
