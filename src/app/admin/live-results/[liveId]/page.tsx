@@ -14,6 +14,7 @@ import { toLiveScheduleDate } from "@/lib/liveDateFormat";
 import { computeLiveResultCandidates, isPerfectAnswer } from "@/lib/liveResultsExtraction";
 import type { AnswerRow, LiveRow, ParticipantRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
 import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
+import { shouldFetchSnsLiveResultDetail, shouldShowSnsLiveResultPreview } from "@/lib/snsLiveResultPreview";
 import { supabase } from "@/lib/supabase";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
@@ -200,7 +201,13 @@ export default function AdminLiveResultDetailPage() {
     }
 
     setLoading(false);
-    fetchDetail(resultRow.id, true);
+    // テストライブはSNSに公開されずプレビューも表示しないため、無駄な
+    // fetchDetail呼び出しを送らない（liveRowはこの時点で取得済みの本物の
+    // live_modeを持つ。stateのliveはまだ確定していない可能性があるため
+    // liveRowを直接見る）。
+    if (shouldFetchSnsLiveResultDetail(liveRow.live_mode)) {
+      fetchDetail(resultRow.id, true);
+    }
   };
 
   useEffect(() => {
@@ -222,7 +229,9 @@ export default function AdminLiveResultDetailPage() {
       .select("id, live_result_id, answer_id, rank, included, source, likes")
       .eq("live_result_id", liveResult.id);
     setResultAnswers((data ?? []) as ResultAnswerRow[]);
-    fetchDetail(liveResult.id, true);
+    if (shouldFetchSnsLiveResultDetail(live?.live_mode)) {
+      fetchDetail(liveResult.id, true);
+    }
   };
 
   const handleToggleIncluded = async (row: ResultAnswerRow) => {
@@ -345,7 +354,9 @@ export default function AdminLiveResultDetailPage() {
         targetId: liveResult.id,
       });
       notifySuccess("運営コメントを保存しました。");
-      fetchDetail(liveResult.id, true);
+      if (shouldFetchSnsLiveResultDetail(live?.live_mode)) {
+        fetchDetail(liveResult.id, true);
+      }
     }
     setBusy(false);
   };
@@ -369,7 +380,9 @@ export default function AdminLiveResultDetailPage() {
         targetId: live.id,
       });
       notifySuccess(nextValue ? "SNSにライブ結果を公開しました。" : "SNSでの公開を解除しました。");
-      if (liveResult) fetchDetail(liveResult.id, true);
+      if (liveResult && shouldFetchSnsLiveResultDetail(live.live_mode)) {
+        fetchDetail(liveResult.id, true);
+      }
     }
     setPublishing(false);
   };
@@ -705,7 +718,11 @@ export default function AdminLiveResultDetailPage() {
       )}
 
       <AdminCard title="SNS上での表示プレビュー">
-        {previewDetail ? (
+        {!shouldShowSnsLiveResultPreview(live.live_mode) ? (
+          <p className="text-sm text-gray-500">
+            テストライブのためSNSには公開されず、表示プレビューもありません。
+          </p>
+        ) : previewDetail ? (
           <SnsLiveResultBody detail={previewDetail} readOnly />
         ) : (
           <p className="text-sm text-gray-500">プレビューを読み込み中…</p>

@@ -40,6 +40,7 @@ cd "$REPO_ROOT"
 SOURCE_FILES=(
   "$SCRIPT_DIR/../answeringCue.ts"
   "$SCRIPT_DIR/../liveHostSnapshots.ts"
+  "$SCRIPT_DIR/../snsLiveResultPreview.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。

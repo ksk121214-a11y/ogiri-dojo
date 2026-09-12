@@ -158,6 +158,90 @@ export class ReactionDisplayScheduler {
   }
 }
 
+export interface RunReactionQueueTickOptions<T extends { id: string }> {
+  scheduler: ReactionDisplayScheduler;
+  now: number;
+  holdMs: number;
+  mapToDisplay: (event: TsukkomiEvent, styleIndex: number) => T;
+  getStyleIndex: () => number;
+  advanceStyleIndex: () => void;
+  // 表示開始時（claim成功＋mapToDisplay成功後）に呼ばれる。本番ではsetItemsで
+  // 画面に追加する。
+  onDisplay: (item: T) => void;
+  // 表示終了（fallbackタイマー発火）時に呼ばれる。本番ではtimersマップからの
+  // 削除・setItemsでの画面からの除去を行う。
+  onFallbackExpire: (id: string) => void;
+  // 表示終了タイマーの生成・破棄・登録。本番ではsetTimeout/clearTimeout/
+  // timers.setをそのまま渡す。テストからは実時間を待たない偽実装を注入できる。
+  scheduleTimer: (run: () => void, ms: number) => unknown;
+  cancelTimer: (timer: unknown) => void;
+  registerTimer: (id: string, timer: unknown) => void;
+  onError: (e: unknown) => void;
+}
+
+// 1tickぶんの「claim→表示登録」処理の実体。useTsukkomiReactionQueueのuseEffect内
+// のtick関数はこれを呼ぶだけにする（React非依存の関数として切り出すことで、
+// src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.tsから、本番と
+// 全く同じ経路を、setInterval/setTimeoutの実時間待ちなしに決定的に検証できる）。
+//
+// claim成功後（＝共有枠を確保済みの状態）にmapToDisplay・onDisplay・
+// scheduleTimer・registerTimerのいずれかで例外が起きた場合、必ず
+// scheduler.remove(claimed.id)で共有枠を解放する。生成済みのタイマーが
+// あればcancelTimerで必ず破棄する。
+export function runReactionQueueTick<T extends { id: string }>(
+  options: RunReactionQueueTickOptions<T>,
+): void {
+  const {
+    scheduler,
+    now,
+    holdMs,
+    mapToDisplay,
+    getStyleIndex,
+    advanceStyleIndex,
+    onDisplay,
+    onFallbackExpire,
+    scheduleTimer,
+    cancelTimer,
+    registerTimer,
+    onError,
+  } = options;
+
+  // claim自体（scheduler.tick）で例外が起きた場合は共有枠を確保できていない
+  // ため、remove()は呼ばずログだけ残して抜ける。
+  let claimed: TsukkomiEvent | null = null;
+  try {
+    claimed = scheduler.tick(now, holdMs);
+  } catch (e) {
+    onError(e);
+    return;
+  }
+  if (!claimed) return;
+
+  let timer: unknown;
+  let timerCreated = false;
+  try {
+    const displayItem = mapToDisplay(claimed, getStyleIndex());
+    advanceStyleIndex();
+    onDisplay(displayItem);
+    timer = scheduleTimer(() => {
+      scheduler.remove(displayItem.id);
+      onFallbackExpire(displayItem.id);
+    }, holdMs);
+    timerCreated = true;
+    registerTimer(displayItem.id, timer);
+  } catch (e) {
+    // リアクション表示側の例外はここで握りつぶし、ライブ進行（フェーズ
+    // タイマー・回答受付・採点等）には一切影響させない。ただし共有枠は
+    // 必ず解放する（放置すると12件蓄積後に新規リアクションが一切
+    // claimされなくなるリークになるため）。remove()は多重呼び出しに対して
+    // 安全なガード付きのため、後続のonAnimationComplete/fallback timeoutと
+    // 競合しても二重減算されない。
+    onError(e);
+    scheduler.remove(claimed.id);
+    if (timerCreated) cancelTimer(timer);
+  }
+}
+
 export interface UseTsukkomiReactionQueueOptions<T extends { id: string }> {
   // このオーバーレイが表示を担当するイベントかどうか（例：爆笑だけ、爆笑以外）。
   predicate: (event: TsukkomiEvent) => boolean;
@@ -222,24 +306,30 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
 
     const tick = () => {
       if (disposed) return;
-      try {
-        const claimed = scheduler.tick(Date.now(), removeFallbackMs);
-        if (!claimed) return;
-        const displayItem = mapRef.current(claimed, styleIndexRef.current);
-        styleIndexRef.current += 1;
-        setItems((prev) => [...prev, displayItem]);
-        const fallback = setTimeout(() => {
-          timers.delete(displayItem.id);
-          scheduler.remove(displayItem.id);
+      runReactionQueueTick({
+        scheduler,
+        now: Date.now(),
+        holdMs: removeFallbackMs,
+        mapToDisplay: (event, styleIndex) => mapRef.current(event, styleIndex),
+        getStyleIndex: () => styleIndexRef.current,
+        advanceStyleIndex: () => {
+          styleIndexRef.current += 1;
+        },
+        onDisplay: (item) => setItems((prev) => [...prev, item]),
+        onFallbackExpire: (id) => {
+          timers.delete(id);
           if (disposed) return;
-          setItems((prev) => prev.filter((it) => it.id !== displayItem.id));
-        }, removeFallbackMs);
-        timers.set(displayItem.id, fallback);
-      } catch (e) {
-        // リアクション表示側の例外はここで握りつぶし、ライブ進行（フェーズ
-        // タイマー・回答受付・採点等）には一切影響させない。
-        console.warn("[tsukkomi] リアクション表示処理でエラーが発生しました", e);
-      }
+          setItems((prev) => prev.filter((it) => it.id !== id));
+        },
+        scheduleTimer: (run, ms) => setTimeout(run, ms),
+        cancelTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+        registerTimer: (id, timer) => timers.set(id, timer as ReturnType<typeof setTimeout>),
+        onError: (e) => {
+          // リアクション表示側の例外はここで握りつぶし、ライブ進行（フェーズ
+          // タイマー・回答受付・採点等）には一切影響させない。
+          console.warn("[tsukkomi] リアクション表示処理でエラーが発生しました", e);
+        },
+      });
     };
 
     const interval = setInterval(tick, tickMs);

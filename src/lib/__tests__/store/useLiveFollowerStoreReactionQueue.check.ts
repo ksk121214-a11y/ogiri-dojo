@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 
 import {
   ReactionDisplayScheduler,
+  runReactionQueueTick,
   sharedReactionDisplayCounter,
   TSUKKOMI_TOTAL_DISPLAY_MAX,
 } from "@/lib/liveReactionQueue";
@@ -482,6 +483,153 @@ async function main() {
     scheduler.dispose();
     assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後も共有カウンタが0に戻らない");
     console.log("PASS: アンマウント相当のdispose()で表示中アイテム・共有カウンタが対称にリセットされ、リークしない");
+  }
+
+  // ============================================================
+  // 13. 【問題1回帰】本番フックが実際に使うrunReactionQueueTick（tick処理の実体）を
+  //     直接呼び出し、mapToDisplay相当の処理が例外を投げても共有枠がリークしない
+  //     ことを確認する。
+  // ============================================================
+  {
+    resetAll();
+    const baseNow = Date.now();
+    enqueueTsukkomiEvent("tick-throw-1", "clap", "", baseNow);
+
+    const scheduler = new ReactionDisplayScheduler({
+      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      predicate: isDanmaku,
+      maxConcurrent: SIM_DANMAKU_MAX,
+    });
+
+    const displayed: { id: string }[] = [];
+    const errors: unknown[] = [];
+    let scheduleCalls = 0;
+    let cancelCalls = 0;
+    let registerCalls = 0;
+    let styleIndex = 0;
+
+    const baseOptions = {
+      scheduler,
+      holdMs: SIM_DANMAKU_HOLD_MS,
+      getStyleIndex: () => styleIndex,
+      advanceStyleIndex: () => {
+        styleIndex += 1;
+      },
+      onDisplay: (item: { id: string }) => displayed.push(item),
+      onFallbackExpire: () => {},
+      scheduleTimer: (run: () => void) => {
+        scheduleCalls++;
+        return { run };
+      },
+      cancelTimer: () => {
+        cancelCalls++;
+      },
+      registerTimer: () => {
+        registerCalls++;
+      },
+      onError: (e: unknown) => errors.push(e),
+    };
+
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "テスト開始前の共有カウンタが0でない");
+
+    // mapToDisplayが例外を投げるケース。
+    runReactionQueueTick({
+      ...baseOptions,
+      now: baseNow,
+      mapToDisplay: () => {
+        throw new Error("mapToDisplayが失敗した想定のテスト");
+      },
+    });
+
+    assert.equal(errors.length, 1, "mapToDisplay失敗時にonErrorが呼ばれていない");
+    assert.equal(displayed.length, 0, "mapToDisplay失敗時にonDisplayが呼ばれてしまった");
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "mapToDisplayが例外を投げた後、共有カウンタが元の値(0)に戻っていない（リーク）",
+    );
+    assert.equal(scheduler.displayedCount, 0, "mapToDisplayが例外を投げた後、schedulerの表示中件数が0に戻っていない");
+
+    // 直後の次tickで、別のリアクションを正常にclaim・表示できることを確認する
+    // （枠が塞がったままになっていないこと）。
+    enqueueTsukkomiEvent("tick-throw-2", "clap", "", baseNow);
+    runReactionQueueTick({
+      ...baseOptions,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+    });
+    assert.equal(displayed.length, 1, "エラー直後の次tickで正常なリアクションが表示できなかった（枠が塞がったまま）");
+    assert.equal(displayed[0].id, "mapped-tick-throw-2-0", "次tickで取り出されたイベント・styleIndexが想定と違う");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "正常表示後の共有カウンタが1になっていない");
+    assert.equal(scheduleCalls, 1, "正常表示時にscheduleTimerが呼ばれていない");
+    assert.equal(registerCalls, 1, "正常表示時にregisterTimerが呼ばれていない");
+
+    scheduler.remove("tick-throw-2");
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後の共有カウンタが0に戻らない");
+    console.log(
+      "PASS: mapToDisplayが例外を投げても共有枠がリークせず、次tickで別のリアクションを正常に表示できる",
+    );
+
+    // registerTimer呼び出し自体が失敗するケース（setTimeout登録の途中で例外が
+    // 起きた場合の代理シナリオ）でも、生成済みのタイマー(scheduleTimerの戻り値)を
+    // 必ずcancelTimerで破棄し、共有枠を解放すること。
+    enqueueTsukkomiEvent("tick-throw-3", "clap", "", baseNow);
+    scheduleCalls = 0;
+    cancelCalls = 0;
+    runReactionQueueTick({
+      ...baseOptions,
+      now: baseNow,
+      mapToDisplay: (event, idx) => ({ id: `mapped-${event.id}-${idx}` }),
+      registerTimer: () => {
+        throw new Error("registerTimer(timers.set相当)が失敗した想定のテスト");
+      },
+    });
+    assert.equal(scheduleCalls, 1, "registerTimer失敗ケースでもscheduleTimerは呼ばれているはず");
+    assert.equal(cancelCalls, 1, "registerTimer失敗時に生成済みタイマーがcancelTimerで破棄されていない");
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "registerTimerが例外を投げた後、共有カウンタが元の値(0)に戻っていない（リーク）",
+    );
+    console.log(
+      "PASS: setTimeout登録(registerTimer)の途中で例外が起きても、生成済みタイマーが破棄され共有枠もリークしない",
+    );
+
+    scheduler.dispose();
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "後片付け後も共有カウンタが0に戻らない");
+  }
+
+  // ============================================================
+  // 14. scheduler.remove(id)を同じidに対して複数回呼んでも、共有カウンタが
+  //     負数にならない（0未満に下がらない）。
+  // ============================================================
+  {
+    resetAll();
+    const baseNow = Date.now();
+    enqueueTsukkomiEvent("double-remove-1", "clap", "", baseNow);
+
+    const scheduler = new ReactionDisplayScheduler({
+      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      predicate: isDanmaku,
+      maxConcurrent: SIM_DANMAKU_MAX,
+    });
+    const claimed = scheduler.tick(baseNow, SIM_DANMAKU_HOLD_MS);
+    assert.ok(claimed, "テスト対象のイベントがclaimできなかった");
+    assert.equal(sharedReactionDisplayCounter.get(), 1, "claim直後の共有カウンタが1になっていない");
+
+    scheduler.remove(claimed!.id);
+    assert.equal(sharedReactionDisplayCounter.get(), 0, "1回目のremove後の共有カウンタが0になっていない");
+
+    // アニメーション完了とfallback timeoutの競合を想定し、同じidへ複数回removeする。
+    scheduler.remove(claimed!.id);
+    scheduler.remove(claimed!.id);
+    assert.equal(
+      sharedReactionDisplayCounter.get(),
+      0,
+      "同じidへの複数回remove呼び出しで共有カウンタが負数（または0以外）になった",
+    );
+    assert.ok(sharedReactionDisplayCounter.get() >= 0, "共有カウンタが負数になった");
+    console.log("PASS: 同じidへのremove()の複数回呼び出しでも共有カウンタは負数にならない（0止まり）");
   }
 
   console.log("ALL USE_LIVE_FOLLOWER_STORE_REACTION_QUEUE CHECKS PASSED");
