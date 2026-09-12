@@ -35,6 +35,38 @@ export default function MyStatsModal({
 
   if (!open) return null;
 
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストは段位・実績を一切持たない
+  // （0071でDB側も報酬付与から除外済み）ため、0/見習いを表示するのではなく
+  // 専用の案内に差し替える。
+  if (profile?.isGuest) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+        onClick={onClose}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="font-sans text-lg font-black">段位・実績</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="閉じる"
+              className={`${styles.pressable} rounded-full px-2 py-1 font-sans text-sm text-[var(--ink)]/70 hover:bg-[var(--ink)]/5`}
+            >
+              ✕
+            </button>
+          </div>
+          <p className="font-sans text-sm text-[var(--ink)]/70">
+            ゲスト参加中です。Xでログインすると段位・実績が記録されます。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const awardFirst = profile?.awardCountFirst ?? 0;
   const awardSecond = profile?.awardCountSecond ?? 0;
   const awardThird = profile?.awardCountThird ?? 0;

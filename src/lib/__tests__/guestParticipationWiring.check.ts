@@ -15,9 +15,13 @@ const authStore = readFileSync(join(process.cwd(), "src", "store", "useAuthStore
 
 // 1: /live は、未ログイン時のブロック内で live?.live_mode === "test" の場合だけ
 //    ゲスト参加ボタンを出す（公式ライブでは出さない）。
+// 2026-09-13（0070ゲスト参加レビュー対応）：未ログイン判定はresolveLiveScreenGate
+// （src/lib/liveGuestAccess.ts）経由の screenGate === "not-authenticated" に
+// 変更されている（authLoading/未ログイン/profile取得中/live取得中/認証済み
+// ゲストの本番ライブ、を1つの純粋関数にまとめたため）。
 {
-  const guardIdx = livePage.indexOf('if (!authUser) {');
-  assert.ok(guardIdx >= 0, "/live に !authUser の未ログイン分岐が見つからない");
+  const guardIdx = livePage.indexOf('if (screenGate === "not-authenticated") {');
+  assert.ok(guardIdx >= 0, "/live に screenGate===\"not-authenticated\"の未ログイン分岐が見つからない");
   const block = livePage.slice(guardIdx, guardIdx + 2000);
 
   assert.ok(
@@ -65,18 +69,43 @@ const authStore = readFileSync(join(process.cwd(), "src", "store", "useAuthStore
   console.log("PASS: useAuthStore.signInAsGuestはguestSigningInによるsingle-flightガードを持つ");
 }
 
-// 4: useAuthStore.signInWithXは、匿名セッションとの意図しないアップグレードを
-//    避けるため、signInWithOAuthより先にsignOut()を呼んでいる。
+// 4: useAuthStore.signInWithXは、isGuestSwitch:trueの場合だけ（＝ゲストからの
+//    切り替えだと呼び出し元が分かっている場合だけ）確認ダイアログを挟んだ上で
+//    signOut()してからsignInWithOAuthを呼ぶ。通常のXログイン利用者・未ログインからの
+//    呼び出しには無意味なsignOut()を走らせない（2026-09-13レビュー対応で変更）。
+//    実際の呼び出し回数・xSigningInの状態遷移はuseAuthStoreXSwitch.check.ts側で検証する。
 {
   const storeBodyIdx = authStore.indexOf("export const useAuthStore = create");
   assert.ok(storeBodyIdx >= 0, "useAuthStoreの実装本体が見つからない");
-  const fnIdx = authStore.indexOf("signInWithX:", storeBodyIdx);
+  const fnIdx = authStore.indexOf("signInWithX: async", storeBodyIdx);
   assert.ok(fnIdx >= 0, "useAuthStoreの実装本体にsignInWithXが定義されていない");
-  const fnBlock = authStore.slice(fnIdx, fnIdx + 800);
+  const fnBlock = authStore.slice(fnIdx, fnIdx + 1600);
+  const isGuestSwitchIfIdx = fnBlock.indexOf("if (isGuestSwitch) {");
+  const confirmIdx = fnBlock.indexOf("window.confirm(");
   const signOutIdx = fnBlock.indexOf("supabase.auth.signOut()");
   const oauthIdx = fnBlock.indexOf("supabase.auth.signInWithOAuth(");
-  assert.ok(signOutIdx >= 0 && oauthIdx > signOutIdx, "signInWithXがsignInWithOAuthより前にsignOut()を呼んでいない");
-  console.log("PASS: useAuthStore.signInWithXは匿名セッションとのリンクを避けるため必ず先にsignOut()する");
+  assert.ok(isGuestSwitchIfIdx >= 0, "signInWithXにisGuestSwitchによる分岐が無い");
+  assert.ok(
+    confirmIdx >= 0 && confirmIdx < signOutIdx,
+    "signInWithXがisGuestSwitch時にsignOutより前で確認ダイアログ(window.confirm)を出していない",
+  );
+  assert.ok(
+    signOutIdx >= 0 && signOutIdx < oauthIdx,
+    "signInWithXがsignInWithOAuthより前にsignOut()を呼んでいない",
+  );
+  // signOut()の呼び出しがisGuestSwitchのifブロック内（xSigningInガードの中）に
+  // あることを確認する（=常には呼ばれない）。
+  assert.ok(
+    isGuestSwitchIfIdx < signOutIdx,
+    "signOut()がisGuestSwitch分岐の外で呼ばれている（常にsignOutしてしまう可能性）",
+  );
+  assert.ok(
+    /xSigningIn: false,/.test(authStore) && /if \(get\(\)\.xSigningIn\) return/.test(fnBlock),
+    "signInWithXの先頭にxSigningInによる連打防止ガードが無い",
+  );
+  console.log(
+    "PASS: useAuthStore.signInWithXはisGuestSwitch:trueの場合だけ確認ダイアログ+signOutを挟んでからOAuthを開始する",
+  );
 }
 
 // 5: DisplayNameSetupModalはゲスト（profile.isGuest）には一切表示しない。
@@ -86,6 +115,34 @@ const authStore = readFileSync(join(process.cwd(), "src", "store", "useAuthStore
     "DisplayNameSetupModalがprofile.isGuestで早期returnしていない（ゲストにも名前設定モーダルが出てしまう）",
   );
   console.log("PASS: DisplayNameSetupModalはゲストには表示されない");
+}
+
+// 6（2026-09-13レビュー対応）：/live はresolveLiveScreenGateの結果を使い、
+//    profile取得中はauthLoadingと同じ扱いで待機し、認証済みゲストが本番ライブを
+//    開いた場合（official-guest-blocked）は専用の案内＋Xログイン導線を出す。
+{
+  assert.ok(
+    /import \{ resolveLiveScreenGate \} from "@\/lib\/liveGuestAccess";/.test(livePage),
+    "/liveがresolveLiveScreenGate(src/lib/liveGuestAccess.ts)をimportしていない",
+  );
+  assert.ok(
+    /screenGate === "auth-loading" \|\| screenGate === "profile-loading"/.test(livePage),
+    "/liveがprofileLoading中をauthLoadingと同じ扱いで待機していない",
+  );
+  const blockedIdx = livePage.indexOf('screenGate === "official-guest-blocked"');
+  assert.ok(blockedIdx >= 0, "/liveにofficial-guest-blockedの分岐が見つからない");
+  const blockedBlock = livePage.slice(blockedIdx, blockedIdx + 1200);
+  assert.ok(
+    /本番ライブへの参加にはXログインが必要です/.test(blockedBlock),
+    "official-guest-blocked画面に案内文言が見当たらない",
+  );
+  assert.ok(
+    /signInWithX\(\{ isGuestSwitch: true \}\)/.test(blockedBlock),
+    "official-guest-blocked画面のXログインボタンがisGuestSwitch:trueを渡していない",
+  );
+  console.log(
+    "PASS: /liveはprofile取得中を待機し、認証済みゲストの本番ライブ表示をofficial-guest-blockedでブロックする",
+  );
 }
 
 console.log("ALL GUEST_PARTICIPATION WIRING CHECKS PASSED");

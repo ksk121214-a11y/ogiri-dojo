@@ -261,7 +261,11 @@ begin
     ('answerer_uid', v_answerer_uid::text),
     ('judge_uid', v_judge_uid::text),
     ('answerer_participant', v_answerer_participant::text),
-    ('judge_participant', v_judge_participant::text);
+    ('judge_participant', v_judge_participant::text),
+    -- 2026-09-13レビュー対応：テスト12（ポイント不変確認）が組分け結果次第で
+    -- v_judge_uidになったりならなかったりする「このフロー専用のゲスト」の
+    -- UUIDを、役回りに関係なく明示的に固定して後から参照できるようにする。
+    ('guest_uid', 'b0000000-0000-0000-0000-00000000004a');
 
   raise notice '情報: このフローでは%が回答者、%が採点者の役回りになった',
     (case when v_answerer_uid = 'b0000000-0000-0000-0000-00000000004a' then 'ゲスト' else 'Xユーザー' end),
@@ -406,20 +410,31 @@ end $$;
 
 -- テスト12：テストライブ終了後もポイント・実績・point_historyが増えない（ゲストの
 --           参加を含めても既存0068の多層防御が効く）。
+-- 2026-09-13レビュー対応：v_judge_uidは組分け結果次第でゲストにもXユーザーにも
+-- なり得る（役回りに依存しない判定にすると「たまたまXユーザーが採点者になった
+-- 回だけ検証している」状態を見逃しかねない）。ここでは_t0070_flowに固定保存した
+-- guest_uid（このフロー専用のゲスト本人）を明示的に使い、ゲスト本人のポイントが
+-- 変化しないことを直接確認する（v_judge_uidの確認は既存の回帰確認としてそのまま残す）。
 do $$
 declare
   v_live_id uuid;
   v_judge_uid uuid;
+  v_guest_uid uuid;
   v_close_result record;
   v_ph_count int;
   v_before record;
   v_after record;
+  v_guest_before record;
+  v_guest_after record;
 begin
   select val::uuid into v_live_id from _t0070_flow where key = 'live_id';
   select val::uuid into v_judge_uid from _t0070_flow where key = 'judge_uid';
+  select val::uuid into v_guest_uid from _t0070_flow where key = 'guest_uid';
 
   select mastery_meter, total_points, points_balance, live_count into v_before
     from public.profiles where id = v_judge_uid;
+  select mastery_meter, total_points, points_balance, live_count into v_guest_before
+    from public.profiles where id = v_guest_uid;
 
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
@@ -441,12 +456,23 @@ begin
     raise exception 'FAIL: ゲストを含むテストライブ終了で段位・ポイントが変化した';
   end if;
 
+  -- ゲスト本人（役回りに関係なく固定UUID）のポイントも変化しないことを直接確認する。
+  select mastery_meter, total_points, points_balance, live_count into v_guest_after
+    from public.profiles where id = v_guest_uid;
+  if v_guest_before.mastery_meter <> v_guest_after.mastery_meter
+    or v_guest_before.total_points <> v_guest_after.total_points
+    or v_guest_before.points_balance <> v_guest_after.points_balance
+    or v_guest_before.live_count <> v_guest_after.live_count
+  then
+    raise exception 'FAIL: ゲスト本人（固定UUID）の段位・ポイントがテストライブ終了で変化した';
+  end if;
+
   select count(*) into v_ph_count from public.point_history where live_id = v_live_id;
   if v_ph_count <> 0 then
     raise exception 'FAIL: ゲストを含むテストライブなのにpoint_historyが% 件作られている', v_ph_count;
   end if;
 
-  raise notice 'PASS: ゲストを含むテストライブの終了でもポイント・実績・point_historyは一切変化しない';
+  raise notice 'PASS: ゲストを含むテストライブの終了でもポイント・実績・point_historyは一切変化しない（役回りに依存せずゲスト本人のUUIDで直接確認）';
 end $$;
 
 -- ============================================================

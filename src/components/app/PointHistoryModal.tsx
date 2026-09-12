@@ -61,7 +61,13 @@ export default function PointHistoryModal({
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
 
-  const listBody = !profile ? (
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストはポイントを一切獲得しないため、
+  // 残高0円・履歴無しを実データのように見せず、専用の案内に差し替える。
+  const listBody = profile?.isGuest ? (
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+      ゲスト参加中です。Xでログインするとポイントが記録されます。
+    </p>
+  ) : !profile ? (
     <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
       ログインするとライブで獲得したポイントの履歴がここに表示されます。
     </p>
@@ -95,13 +101,15 @@ export default function PointHistoryModal({
             </button>
           </div>
 
-          <div className={`${stadiumStyles.grainAccent} rounded-2xl p-4 text-center`}>
-            <p className="font-sans text-[11px] text-[var(--paper)]/80">現在のポイント残高</p>
-            <p className="mt-1 font-sans text-2xl font-black tabular-nums text-[var(--paper)]">
-              {points.toLocaleString()}
-              <span className="ml-1 text-sm font-normal text-[var(--paper)]/80">pt</span>
-            </p>
-          </div>
+          {!profile?.isGuest && (
+            <div className={`${stadiumStyles.grainAccent} rounded-2xl p-4 text-center`}>
+              <p className="font-sans text-[11px] text-[var(--paper)]/80">現在のポイント残高</p>
+              <p className="mt-1 font-sans text-2xl font-black tabular-nums text-[var(--paper)]">
+                {points.toLocaleString()}
+                <span className="ml-1 text-sm font-normal text-[var(--paper)]/80">pt</span>
+              </p>
+            </div>
+          )}
 
           <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
             {listBody}

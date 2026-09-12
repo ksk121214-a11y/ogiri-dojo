@@ -5,6 +5,7 @@ import { useState } from "react";
 import { CheckGlyph, FlagGlyph } from "@/components/home/icons";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 const REASON_OPTIONS = ["不適切な表現", "スパム", "なりすまし", "その他"] as const;
 
@@ -47,6 +48,12 @@ export default function ReportButton({
     const userId = useAuthStore.getState().user?.id;
     if (!userId) {
       window.alert("通報にはログインが必要です");
+      return;
+    }
+    // 2026-09-13（0070ゲスト参加レビュー対応）：reports_insert_own（RLS）が
+    // ゲストのINSERTを拒否するため、事前に弾いて「押せるのに拒否される」体験を避ける。
+    if (useProfileStore.getState().profile?.isGuest) {
+      window.alert("ゲストは通報できません。Xでログインしてください。");
       return;
     }
 

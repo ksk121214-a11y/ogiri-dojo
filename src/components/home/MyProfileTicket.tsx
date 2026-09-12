@@ -42,15 +42,25 @@ export default function MyProfileTicket({
   const authUser = useAuthStore((s) => s.user);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const profile = useProfileStore((s) => s.profile);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、名前「あなた」・
   // 段位「前座」・固定bio等）が実データであるかのように表示されていた問題を修正。
   // ログインしている場合のみ実データ（profiles）を出す。
+  // 2026-09-13（0070ゲスト参加レビュー対応）：authUserはゲストでもtruthyになるため、
+  // 「通常会員としてログイン中」かどうかはisGuestを除いて判定する。段位・フォロー数等の
+  // 実績表示はisMemberの場合のみ、ゲストは専用の案内に差し替える。
   const isLoggedIn = !!authUser;
-  const rank = getRankByMeter(isLoggedIn ? (profile?.masteryMeter ?? 0) : 0);
+  const isGuest = isLoggedIn && !!profile?.isGuest;
+  const isMember = isLoggedIn && !isGuest;
+  const rank = getRankByMeter(isMember ? (profile?.masteryMeter ?? 0) : 0);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
   const followerCount = useSnsStore((s) => s.myFollowerCount);
-  const displayName = isLoggedIn ? (profile?.displayName ?? "…") : "ログインしてください";
-  const bio = isLoggedIn ? (profile?.bio ?? "") : "";
+  const displayName = isGuest
+    ? "ゲスト参加中"
+    : isMember
+      ? (profile?.displayName ?? "…")
+      : "ログインしてください";
+  const bio = isMember ? (profile?.bio ?? "") : "";
 
   // 「次の回復まで◯分」の表示を実時間の経過に合わせて更新するための再描画
   // （profile自体はサーバー側の値のスナップショットなので、時間経過ぶんの見た目上の
@@ -101,27 +111,35 @@ export default function MyProfileTicket({
 
             <div className="border-t-2 border-dashed border-[var(--ink)]/25" aria-hidden />
 
-            <div className="flex items-center justify-center gap-4">
-              <Link href="/sns/u/me/following" className="flex items-center gap-1.5">
-                <span className="font-sans text-base font-bold tabular-nums text-[var(--ink)]">
-                  {followingAuthorIds.length}
+            {/* 2026-09-13（0070ゲスト参加レビュー対応）：フォロー中/フォロワー数は
+                会員専用の実績のため、ゲストには表示しない（案内文に差し替える）。 */}
+            {isMember ? (
+              <div className="flex items-center justify-center gap-4">
+                <Link href="/sns/u/me/following" className="flex items-center gap-1.5">
+                  <span className="font-sans text-base font-bold tabular-nums text-[var(--ink)]">
+                    {followingAuthorIds.length}
+                  </span>
+                  <span className="font-sans text-xs text-[var(--ink)]/70 hover:underline">フォロー中</span>
+                </Link>
+                <span className="text-[var(--ink)]/25" aria-hidden>
+                  |
                 </span>
-                <span className="font-sans text-xs text-[var(--ink)]/70 hover:underline">フォロー中</span>
-              </Link>
-              <span className="text-[var(--ink)]/25" aria-hidden>
-                |
-              </span>
-              <Link href="/sns/u/me/followers" className="flex items-center gap-1.5">
-                <span className="font-sans text-base font-bold tabular-nums text-[var(--ink)]">
-                  {followerCount ?? "…"}
-                </span>
-                <span className="font-sans text-xs text-[var(--ink)]/70 hover:underline">フォロワー</span>
-              </Link>
-            </div>
+                <Link href="/sns/u/me/followers" className="flex items-center gap-1.5">
+                  <span className="font-sans text-base font-bold tabular-nums text-[var(--ink)]">
+                    {followerCount ?? "…"}
+                  </span>
+                  <span className="font-sans text-xs text-[var(--ink)]/70 hover:underline">フォロワー</span>
+                </Link>
+              </div>
+            ) : isGuest ? (
+              <p className="text-center font-sans text-xs text-[var(--ink)]/70">
+                ゲスト参加中です。Xでログインするとご利用いただけます。
+              </p>
+            ) : null}
 
             {/* 「段位・実績を見る」が参考画像では1行に収まっているのに対し、text-smだと
                 この列幅では折り返ってしまっていたため、text-xs・px-2に詰めてnowrapにしている。 */}
-            {isLoggedIn ? (
+            {isMember ? (
               <div className="flex gap-1.5">
                 <button
                   type="button"
@@ -130,12 +148,9 @@ export default function MyProfileTicket({
                 >
                   段位・実績を見る
                 </button>
-                {/* 2026-09-12（ゲスト参加）：DB側（profiles_update_own）が最終防御だが、
-                    ゲストにはそもそも編集モーダルを開かせない（UI層の分かりやすさ）。 */}
                 <button
                   type="button"
                   onClick={onOpenEdit}
-                  disabled={profile?.isGuest}
                   className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-40`}
                 >
                   <EditGlyph />
@@ -143,13 +158,22 @@ export default function MyProfileTicket({
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => signInWithX()}
-                className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
-              >
-                Xでログイン
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setXLoginError(null);
+                    const result = await signInWithX({ isGuestSwitch: isGuest });
+                    if (!result.ok && result.reason) setXLoginError(result.reason);
+                  }}
+                  className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                >
+                  Xでログイン
+                </button>
+                {xLoginError && (
+                  <p className="text-center font-sans text-[10px] text-[var(--accent)]">{xLoginError}</p>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -31,6 +31,7 @@ export default function AppHeader() {
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const signOut = useAuthStore((s) => s.signOut);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
   const xScreenName =
     (authUser?.user_metadata?.user_name as string | undefined) ??
     (authUser?.user_metadata?.full_name as string | undefined);
@@ -46,7 +47,10 @@ export default function AppHeader() {
             爆笑スタジアム
           </Link>
           <div className="flex min-w-0 items-center gap-2">
-            {authUser && (
+            {/* 2026-09-13（0070ゲスト参加レビュー対応）：authUserはゲストでもtruthyに
+                なるため、段位・ポイントの表示はprofile?.isGuestを見て除外する
+                （ゲストには表示せず、後段のXログイン切り替えボタンだけを出す）。 */}
+            {authUser && !profile?.isGuest && (
               <button
                 type="button"
                 onClick={() => setHistoryOpen(true)}
@@ -61,28 +65,53 @@ export default function AppHeader() {
                 </span>
               </button>
             )}
-            {!authLoading && (
-              authUser ? (
-                <button
-                  type="button"
-                  onClick={() => signOut()}
-                  className="shrink-0 rounded-full border border-dojo-dark-brown/30 px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-light-brown sm:text-xs"
-                  title={xScreenName ? `@${xScreenName}` : undefined}
-                >
-                  ログアウト
-                </button>
+            {authUser && profile?.isGuest && (
+              <span className="shrink-0 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown sm:text-xs">
+                ゲスト参加中
+              </span>
+            )}
+            {!authLoading &&
+              (authUser ? (
+                profile?.isGuest ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setXLoginError(null);
+                      const result = await signInWithX({ isGuestSwitch: true });
+                      if (!result.ok && result.reason) setXLoginError(result.reason);
+                    }}
+                    className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
+                  >
+                    Xでログイン
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => signOut()}
+                    className="shrink-0 rounded-full border border-dojo-dark-brown/30 px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-light-brown sm:text-xs"
+                    title={xScreenName ? `@${xScreenName}` : undefined}
+                  >
+                    ログアウト
+                  </button>
+                )
               ) : (
                 <button
                   type="button"
-                  onClick={() => signInWithX()}
+                  onClick={async () => {
+                    setXLoginError(null);
+                    const result = await signInWithX();
+                    if (!result.ok && result.reason) setXLoginError(result.reason);
+                  }}
                   className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
                 >
                   Xでログイン
                 </button>
-              )
-            )}
+              ))}
           </div>
         </div>
+        {xLoginError && (
+          <p className="font-sans text-[10px] text-dojo-deep-crimson">{xLoginError}</p>
+        )}
         {/*
           スマホ幅では8項目が折り返して崩れないよう、折り返し（flex-wrap）ではなく
           横スクロール（overflow-x-auto + whitespace-nowrap）に統一する（第5ラウンドフィードバック）。

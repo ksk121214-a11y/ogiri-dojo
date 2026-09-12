@@ -8,6 +8,7 @@ import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -24,9 +25,11 @@ export default function SnsNewTopicPage() {
   const router = useRouter();
   const addTopic = useSnsStore((s) => s.addTopic);
   const profile = useProfileStore((s) => s.profile);
+  const signInWithX = useAuthStore((s) => s.signInWithX);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   const displayedTickets = profile
     ? computeDisplayedTickets(profile.ticketsCount, profile.ticketsNextRecoveryAt)
@@ -53,6 +56,37 @@ export default function SnsNewTopicPage() {
     // 事前生成されておらず直接遷移すると404になるため、投稿後は寄合帳トップに戻す。
     router.push("/mypage");
   };
+
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストはsubmit_sns_topic（DB）が
+  // GUEST_NOT_ALLOWEDで拒否するため、フォームを見せずに案内へ差し替える
+  // （「寄合券が0枚のため投稿できません」という誤解を招く表示を避ける）。
+  if (profile?.isGuest) {
+    return (
+      <StadiumPageShell contentTheme="kraft">
+        <SnsBackButton
+          fallbackHref="/mypage"
+          className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
+        />
+        <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-3 p-6 text-center`}>
+          <p className="font-sans text-sm text-[var(--ink)]/80">
+            ゲスト参加中です。Xでログインするとお題を投稿できます。
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              setXLoginError(null);
+              const result = await signInWithX({ isGuestSwitch: true });
+              if (!result.ok && result.reason) setXLoginError(result.reason);
+            }}
+            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+          >
+            Xでログイン
+          </button>
+          {xLoginError && <p className="font-sans text-xs text-[var(--accent)]">{xLoginError}</p>}
+        </div>
+      </StadiumPageShell>
+    );
+  }
 
   return (
     <StadiumPageShell contentTheme="kraft">

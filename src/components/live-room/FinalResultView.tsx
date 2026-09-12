@@ -73,6 +73,7 @@ export default function FinalResultView({
 }) {
   // ベストアンサーの発表ステップを廃止したため、1位分（従来のstep1〜3）から始める。
   const [step, setStep] = useState(1);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-03:「上位3順位に同点で4人以上いる場合、一部が表彰演出から漏れる」
   // 不具合の修正。以前はdata.ranking.slice(0,3)で配列の先頭3件（＝配列の"位置"）を
   // 固定で3人ぶんだけ発表していたため、例えば1位が2人同点だと3人目（実際には
@@ -269,8 +270,8 @@ export default function FinalResultView({
       {/* 2026-09-12（ゲスト参加）：ゲストのままだと今回の参加は一切記録に残らない
           （0068/0070の多層防御によりポイント・実績・履歴には反映されない）ため、
           ライブ終了後にXログインへの案内を出す。匿名セッションとの意図しない
-          アップグレードを避けるため、signInWithX()は内部で必ずsignOut()してから
-          OAuthを開始する（useAuthStore.signInWithX参照）。 */}
+          アップグレードを避けるため、isGuestSwitch:trueを渡す（useAuthStore.signInWithX
+          が確認ダイアログを挟んだ上で必要な場合だけsignOut()してからOAuthを開始する）。 */}
       {step > totalSteps && profile?.isGuest && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -283,11 +284,16 @@ export default function FinalResultView({
           </p>
           <button
             type="button"
-            onClick={() => signInWithX()}
+            onClick={async () => {
+              setXLoginError(null);
+              const result = await signInWithX({ isGuestSwitch: true });
+              if (!result.ok && result.reason) setXLoginError(result.reason);
+            }}
             className="mt-3 rounded-full bg-white px-5 py-2.5 font-sans text-sm font-bold text-[#12101a] transition hover:opacity-90"
           >
             Xでログイン
           </button>
+          {xLoginError && <p className="mt-2 font-sans text-xs text-[#ff8f8f]">{xLoginError}</p>}
         </motion.div>
       )}
 

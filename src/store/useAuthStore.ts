@@ -13,7 +13,12 @@ interface AuthState {
   // 2026-09-12（ゲスト参加）：ゲストとして参加ボタンの連打で複数回
   // signInAnonymously()を呼ばないようにするsingle-flightガード。
   guestSigningIn: boolean;
-  signInWithX: () => Promise<void>;
+  // 2026-09-13（0070ゲスト参加レビュー対応）：Xログインボタンの連打で複数回
+  // signInWithOAuth()を呼ばないようにするsingle-flightガード（signInAsGuestと同じ考え方）。
+  xSigningIn: boolean;
+  signInWithX: (
+    options?: { isGuestSwitch?: boolean },
+  ) => Promise<{ ok: true } | { ok: false; reason?: string }>;
   signInAsGuest: () => Promise<{ ok: true } | { ok: false; reason: string }>;
   signOut: () => Promise<void>;
 }
@@ -23,21 +28,53 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   user: null,
   loading: true,
   guestSigningIn: false,
+  xSigningIn: false,
 
-  signInWithX: async () => {
-    // 匿名セッションが有効なままsignInWithOAuthを開始すると、Supabase Authの
-    // 実装によっては同じauth.uid()のまま匿名ユーザーが本アカウントへ
-    // 「アップグレード」される（＝ゲストのprofiles行がそのまま本アカウント化
-    // される）ことがある。「ゲストのポイントを後付けしない」という要件と
-    // 衝突するため、必ず一度signOut()してからOAuthを開始し、匿名セッションとの
-    // 暗黙のリンクを起こさないようにする（Xログインは常に無関係な新規/別アカウント
-    // として扱う）。
-    await supabase.auth.signOut();
-    const redirectTo = `${window.location.origin}${BASE_PATH}/auth/callback/`;
-    await supabase.auth.signInWithOAuth({
-      provider: "x",
-      options: { redirectTo },
-    });
+  // 2026-09-13（0070ゲスト参加レビュー対応）：以前は「匿名セッションが有効なまま
+  // signInWithOAuthを開始すると、同じauth.uid()のまま匿名ユーザーが本アカウントへ
+  // 『アップグレード』される（＝ゲストのprofiles行がそのまま本アカウント化される）
+  // ことがある」という懸念から、呼び出し元を問わず常にsignOut()してから
+  // OAuthを開始していた。しかしこれだと、既にXログイン済みの利用者や
+  // 未ログイン状態からの呼び出し（＝匿名セッションが存在しないケース）にも
+  // 無意味なsignOut()が走ってしまう。
+  // isGuestSwitch（呼び出し元が「現在ゲストからXログインへ切り替えようとしている」
+  // ことを分かっている場合だけtrue）が指定された時だけ、切り替え前に確認ダイアログを
+  // 挟んだ上でsignOut()する。ゲストでない呼び出し（通常のXログイン・admin/host
+  // ログイン等）ではsignOut()を呼ばない。
+  signInWithX: async (options) => {
+    if (get().xSigningIn) return { ok: false, reason: "処理中です" };
+    const isGuestSwitch = options?.isGuestSwitch ?? false;
+
+    if (isGuestSwitch) {
+      const confirmed = window.confirm(
+        "ゲスト参加状態は終了し、今回の記録は引き継がれません。Xログインを開始しますか？",
+      );
+      if (!confirmed) return { ok: false };
+    }
+
+    set({ xSigningIn: true });
+    try {
+      if (isGuestSwitch) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) {
+          return { ok: false, reason: "ログインの切り替えに失敗しました。時間をおいて再度お試しください。" };
+        }
+      }
+
+      const redirectTo = `${window.location.origin}${BASE_PATH}/auth/callback/`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "x",
+        options: { redirectTo },
+      });
+      if (error) {
+        return { ok: false, reason: "Xログインを開始できませんでした。時間をおいて再度お試しください。" };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: "Xログインを開始できませんでした。時間をおいて再度お試しください。" };
+    } finally {
+      set({ xSigningIn: false });
+    }
   },
 
   signInAsGuest: async () => {

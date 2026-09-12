@@ -22,6 +22,7 @@ import TopicRevealView from "@/components/live-room/TopicRevealView";
 import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
+import { resolveLiveScreenGate } from "@/lib/liveGuestAccess";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -49,7 +50,9 @@ export default function LivePage() {
   const signInAsGuest = useAuthStore((s) => s.signInAsGuest);
   const guestSigningIn = useAuthStore((s) => s.guestSigningIn);
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
   const [guestSignInError, setGuestSignInError] = useState<string | null>(null);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -148,9 +151,25 @@ export default function LivePage() {
         ? Math.max(0, Math.ceil((new Date(live.phase_deadline).getTime() - now) / 1000))
         : null;
 
-  if (authLoading) return <CenterMessage>読み込み中…</CenterMessage>;
+  // 2026-09-13（0070ゲスト参加レビュー対応）：authLoading/未ログイン/profile取得中/
+  // ライブ取得中/認証済みゲストが本番ライブを開いた場合、のどれに該当するかを
+  // 純粋関数（テスト済み、src/lib/liveGuestAccess.ts）にまとめて判定する。
+  // profileLoading中に一瞬でも通常の参加画面（isGuest判定前）を出さないための
+  // ガードを、既存のauthLoading/liveLoadingと同じ扱いで追加している。
+  const screenGate = resolveLiveScreenGate({
+    authLoading,
+    isAuthenticated: !!authUser,
+    profileLoading,
+    liveLoading,
+    liveMode: live?.live_mode ?? null,
+    isGuest: !!profile?.isGuest,
+  });
 
-  if (!authUser) {
+  if (screenGate === "auth-loading" || screenGate === "profile-loading") {
+    return <CenterMessage>読み込み中…</CenterMessage>;
+  }
+
+  if (screenGate === "not-authenticated") {
     // 2026-09-12（ゲスト参加）：テストライブ(live_mode==='test')のみ、Xアカウントを
     // 持たない人もその場でゲスト（匿名）参加できるボタンを併せて表示する。
     // 本番ライブ(live_mode==='official')・liveがまだ取得できていない場合は、
@@ -162,11 +181,16 @@ export default function LivePage() {
         <p className="mb-4">参加するにはXログインが必要です。</p>
         <button
           type="button"
-          onClick={() => signInWithX()}
+          onClick={async () => {
+            setXLoginError(null);
+            const result = await signInWithX();
+            if (!result.ok && result.reason) setXLoginError(result.reason);
+          }}
           className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
         >
           Xでログイン
         </button>
+        {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
         {isTestLive && (
           <>
             <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
@@ -202,7 +226,7 @@ export default function LivePage() {
   // まだcurrentTurnが届いていない一瞬に「自分の組の出番ではない」と誤判定して
   // 観客画面になっていた（取得エラーで再試行中の場合も同様に、判定材料が
   // 揃うまでは絶対に舞台/観客を決めない）。
-  if (liveLoading) {
+  if (screenGate === "live-loading") {
     return (
       <CenterMessage>
         <p>{syncError ? "ライブ状態の取得に失敗しました" : "ライブ状態を復元中…"}</p>
@@ -220,6 +244,41 @@ export default function LivePage() {
             </button>
           </>
         )}
+      </CenterMessage>
+    );
+  }
+
+  // 2026-09-13（0070ゲスト参加レビュー対応）：認証済みゲスト（profile.isGuest）が
+  // 本番ライブ(live_mode==='official')を開いた場合、参加ボタン・役割変更・回答・
+  // 採点画面へは一切進ませず、Xログインの案内だけを表示する。DB側（join_live/
+  // GUEST_OFFICIAL_NOT_ALLOWED）と矛盾しない、フロント側の対応する案内。
+  if (screenGate === "official-guest-blocked") {
+    return (
+      <CenterMessage>
+        <p className="mb-2 font-sans text-base font-bold text-dojo-ink">
+          本番ライブへの参加にはXログインが必要です
+        </p>
+        <p className="mb-4 font-sans text-xs text-dojo-dark-brown/70">
+          ゲスト参加はテストライブのみご利用いただけます。
+        </p>
+        <button
+          type="button"
+          onClick={async () => {
+            setXLoginError(null);
+            const result = await signInWithX({ isGuestSwitch: true });
+            if (!result.ok && result.reason) setXLoginError(result.reason);
+          }}
+          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
+        >
+          Xでログイン
+        </button>
+        {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
+        <Link
+          href="/"
+          className="mt-4 block font-sans text-xs text-dojo-dark-brown/70 underline"
+        >
+          ホームに戻る
+        </Link>
       </CenterMessage>
     );
   }

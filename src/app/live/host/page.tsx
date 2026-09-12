@@ -84,6 +84,7 @@ export default function LiveHostPage() {
   const [closing, setClosing] = useState(false);
   const [beginningGame, setBeginningGame] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
   // 2026-08-31:「素材準備中の表示はプレイヤー画面ではなく司会コンソールに出す」要望で、
   // お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込みをここで行う
@@ -112,9 +113,17 @@ export default function LiveHostPage() {
     return (
       <CenterMessage>
         <p className="mb-4">司会コンソールを開くにはXログインが必要です。</p>
-        <AdminButton variant="primary" onClick={() => signInWithX()}>
+        <AdminButton
+          variant="primary"
+          onClick={async () => {
+            setXLoginError(null);
+            const result = await signInWithX();
+            if (!result.ok && result.reason) setXLoginError(result.reason);
+          }}
+        >
           Xでログイン
         </AdminButton>
+        {xLoginError && <p className="mt-3 text-xs text-red-600">{xLoginError}</p>}
       </CenterMessage>
     );
   }

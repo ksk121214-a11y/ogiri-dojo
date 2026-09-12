@@ -217,11 +217,20 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
               : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
           }`}
         />
-        {noTicket && (
+        {/* 2026-09-13（0070ゲスト参加レビュー対応）：ゲストの寄合券は常に0枚
+            （0071でDB側も強制）だが、「回復を待てば投稿できる」ような誤解を
+            避けるため、専用の文言に差し替える。 */}
+        {profile?.isGuest ? (
           <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
-            寄合券が0枚のためツッコめません。
-            {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
+            ゲストはツッコめません。Xでログインしてください。
           </p>
+        ) : (
+          noTicket && (
+            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+              寄合券が0枚のためツッコめません。
+              {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
+            </p>
+          )
         )}
         {submitError && (
           <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>

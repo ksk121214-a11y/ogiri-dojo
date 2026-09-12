@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { BellGlyph } from "@/components/home/icons";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 interface NotificationRow {
   id: string;
@@ -23,6 +24,7 @@ interface NotificationRow {
 // 下部ナビ等と同じhomeClick音が鳴る（付けなければ既定のpageTurn音になる）。
 export default function NotificationBell() {
   const authUser = useAuthStore((s) => s.user);
+  const isGuest = useProfileStore((s) => !!s.profile?.isGuest);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -45,7 +47,9 @@ export default function NotificationBell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
 
-  if (!authUser) return null;
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストは通知（ポイント獲得・運営ベスト等の
+  // 会員専用イベント）を受け取らないため、ベル自体を表示しない。
+  if (!authUser || isGuest) return null;
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 

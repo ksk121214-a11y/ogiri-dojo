@@ -41,6 +41,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../answeringCue.ts"
   "$SCRIPT_DIR/../liveHostSnapshots.ts"
   "$SCRIPT_DIR/../snsLiveResultPreview.ts"
+  "$SCRIPT_DIR/../liveGuestAccess.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -171,5 +172,28 @@ else
   FAILED=1
 fi
 rm -rf "$AUTH_GUEST_DIR"
+
+# src/lib/__tests__/store/useAuthStoreXSwitch.check.ts も同じ理由（useAuthStore.tsが
+# "@/..."エイリアス・実際のSupabaseクライアント生成を含む）で専用tsconfig経由にする。
+# 0071（0070ゲスト参加レビュー対応）のsignInWithXの新仕様（isGuestSwitch時だけ確認
+# ダイアログ+signOut・xSigningInのsingle-flightガード・失敗時の日本語文言化）を検証する。
+AUTH_XSWITCH_DIR="$(mktemp -d)"
+AUTH_XSWITCH_TSCONFIG="$SCRIPT_DIR/store/tsconfig.authXSwitch.json"
+AUTH_XSWITCH_ENTRY="$AUTH_XSWITCH_DIR/src/lib/__tests__/store/useAuthStoreXSwitch.check.js"
+
+echo "--- useAuthStoreXSwitch.check.ts ---"
+if npx tsc -p "$AUTH_XSWITCH_TSCONFIG" --outDir "$AUTH_XSWITCH_DIR" && [ -f "$AUTH_XSWITCH_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUTH_XSWITCH_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUTH_XSWITCH_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useAuthStoreXSwitch.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUTH_XSWITCH_DIR"
 
 exit $FAILED

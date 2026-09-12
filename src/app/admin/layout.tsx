@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import AdminButton from "@/components/admin/AdminButton";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
@@ -15,6 +17,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
+  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   if (authLoading || profileLoading) {
     return <CenterMessage>読み込み中…</CenterMessage>;
@@ -24,9 +27,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return (
       <CenterMessage>
         <p className="mb-4">管理画面を開くにはXログインが必要です。</p>
-        <AdminButton variant="primary" onClick={() => signInWithX()} className="px-5 py-2.5 text-sm">
+        <AdminButton
+          variant="primary"
+          onClick={async () => {
+            setXLoginError(null);
+            const result = await signInWithX();
+            if (!result.ok && result.reason) setXLoginError(result.reason);
+          }}
+          className="px-5 py-2.5 text-sm"
+        >
           Xでログイン
         </AdminButton>
+        {xLoginError && <p className="mt-3 text-xs text-red-600">{xLoginError}</p>}
       </CenterMessage>
     );
   }

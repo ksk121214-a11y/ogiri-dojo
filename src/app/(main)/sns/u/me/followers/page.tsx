@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import GuestMemberGate from "@/components/app/GuestMemberGate";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
@@ -43,17 +44,19 @@ export default function MyFollowersPage() {
         </h1>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {followerIds === null ? (
-          <p className="text-center font-sans text-xs text-[var(--ink)]/70">読み込み中…</p>
-        ) : followerIds.length === 0 ? (
-          <p className="text-center font-sans text-xs text-[var(--ink)]/70">
-            まだ誰にもフォローされていません。
-          </p>
-        ) : (
-          followerIds.map((id) => <SnsFollowListRow key={id} authorId={id} />)
-        )}
-      </div>
+      <GuestMemberGate>
+        <div className="flex flex-col gap-2">
+          {followerIds === null ? (
+            <p className="text-center font-sans text-xs text-[var(--ink)]/70">読み込み中…</p>
+          ) : followerIds.length === 0 ? (
+            <p className="text-center font-sans text-xs text-[var(--ink)]/70">
+              まだ誰にもフォローされていません。
+            </p>
+          ) : (
+            followerIds.map((id) => <SnsFollowListRow key={id} authorId={id} />)
+          )}
+        </div>
+      </GuestMemberGate>
     </StadiumPageShell>
   );
 }

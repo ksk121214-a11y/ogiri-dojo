@@ -659,6 +659,11 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     if (!userId) {
       return { ok: false, message: "いいねするにはログインが必要です。" };
     }
+    // 2026-09-13（0070ゲスト参加レビュー対応）：sns_answer_likes_insert_own（RLS）が
+    // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
+    if (useProfileStore.getState().profile?.isGuest) {
+      return { ok: false, message: "ゲストはいいねできません。Xでログインしてください。" };
+    }
     if (get().likePending[answerId]) return { ok: false };
 
     const alreadyLiked = get().likedAnswerIds.includes(answerId);
@@ -706,6 +711,11 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = useAuthStore.getState().user?.id;
     if (!userId) {
       return { ok: false, message: "フォローするにはログインが必要です。" };
+    }
+    // 2026-09-13（0070ゲスト参加レビュー対応）：sns_follows_insert_own（RLS）が
+    // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
+    if (useProfileStore.getState().profile?.isGuest) {
+      return { ok: false, message: "ゲストはフォローできません。Xでログインしてください。" };
     }
     if (get().followPending[authorId]) return { ok: false };
 

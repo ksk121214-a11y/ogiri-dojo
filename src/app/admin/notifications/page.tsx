@@ -121,7 +121,13 @@ export default function AdminNotificationsPage() {
 
   useEffect(() => {
     const loadCount = async () => {
-      const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true });
+      // 2026-09-13（0070ゲスト参加レビュー対応）：配信対象・人数のどちらからも
+      // ゲスト（profiles.is_guest=true）を除外する（ゲストは通知ベル自体を
+      // 表示しないため配信しても届かない上、人数表示が水増しされてしまう）。
+      const { count } = await supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("is_guest", false);
       setUserCount(count ?? 0);
     };
     loadCount();
@@ -143,7 +149,10 @@ export default function AdminNotificationsPage() {
     if (!confirmed) return;
 
     setSending(true);
-    const { data: profiles, error: profilesError } = await supabase.from("profiles").select("id");
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("is_guest", false);
     if (profilesError || !profiles) {
       setSending(false);
       notifyError(profilesError?.message ?? "ユーザー一覧の取得に失敗しました");

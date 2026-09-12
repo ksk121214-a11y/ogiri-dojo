@@ -1,5 +1,6 @@
 "use client";
 
+import GuestMemberGate from "@/components/app/GuestMemberGate";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowListRow from "@/components/sns/SnsFollowListRow";
@@ -23,16 +24,18 @@ export default function MyFollowingPage() {
         </h1>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {followingAuthorIds.length === 0 && (
-          <p className="text-center font-sans text-xs text-[var(--ink)]/70">
-            まだ誰もフォローしていません。寄合帳で気になる演者を探してみましょう。
-          </p>
-        )}
-        {followingAuthorIds.map((id) => (
-          <SnsFollowListRow key={id} authorId={id} />
-        ))}
-      </div>
+      <GuestMemberGate>
+        <div className="flex flex-col gap-2">
+          {followingAuthorIds.length === 0 && (
+            <p className="text-center font-sans text-xs text-[var(--ink)]/70">
+              まだ誰もフォローしていません。寄合帳で気になる演者を探してみましょう。
+            </p>
+          )}
+          {followingAuthorIds.map((id) => (
+            <SnsFollowListRow key={id} authorId={id} />
+          ))}
+        </div>
+      </GuestMemberGate>
     </StadiumPageShell>
   );
 }
