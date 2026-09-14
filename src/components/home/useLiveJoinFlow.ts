@@ -210,12 +210,28 @@ export function useLiveJoinFlow() {
       return;
     }
 
+    // 2026-09-15（本番不具合対応）：ゲスト観客対応により「一度もログイン/匿名
+    // 認証していない」訪問者がこのボタンに到達できるようになった。その場合、
+    // 以下のgetUser()は「セッションが壊れている」のではなく単に「まだ何も
+    // 認証していない」だけなのに、従来はどちらも同じ「ログイン状態を確認
+    // できませんでした」エラーにしていた（本番で実際に踏まれたバグ）。
+    // 一度も認証していない訪問者は、エラーを出さずに/liveへそのまま送り、
+    // Xログイン／ゲスト観戦の選択はそちら（resolveLiveScreenGate）に委ねる
+    // （入場記録setLiveEntryにはuser.idが必須なため、この分岐では呼ばない）。
+    if (!useAuthStore.getState().user) {
+      router.push("/live");
+      inFlightRef.current = false;
+      return;
+    }
+
     setStatus("checking");
     setError(null);
 
     // 1. ログイン状態を確認する。getSession()はローカルに保持しているトークンを
     //    返すだけだが、getUser()は実際にSupabaseへ問い合わせて検証するため、
-    //    通信の成功/失敗が意味を持つ。
+    //    通信の成功/失敗が意味を持つ。ここに到達するのは「一度は認証していた
+    //    はず」の場合のみなので、それでも失敗するなら実際にセッションが
+    //    壊れている（トークン失効等）ケースとして扱ってよい。
     const { data, error: authError } = await supabase.auth.getUser();
     if (authError || !data.user) {
       setError("ログイン状態を確認できませんでした。もう一度お試しください");
