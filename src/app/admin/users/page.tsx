@@ -53,9 +53,13 @@ export default function AdminUsersPage() {
   useEffect(() => {
     const load = async () => {
       const [{ data: profiles }, { data: reportRows }, { data: warnRows }, { data: kickRows }] = await Promise.all([
+        // 2026-09-13（0070ゲスト参加レビュー対応）：ゲスト（匿名参加者）は
+        // 会員管理の対象外（警告・利用停止等の会員向け機能を持たない）のため、
+        // 一覧そのものから除外する。
         supabase
           .from("profiles")
           .select("id, display_name, created_at, role, is_permanently_suspended, suspended_until")
+          .eq("is_guest", false)
           .order("created_at", { ascending: false }),
         supabase.from("reports").select("target_author_id").not("target_author_id", "is", null),
         supabase.from("user_sanctions").select("user_id").eq("type", "warning"),

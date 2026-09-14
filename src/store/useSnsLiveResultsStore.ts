@@ -8,10 +8,12 @@
 // （PAGE_SIZE件ずつカーソル取得、pendingマップ、失敗時ロールバック）を踏襲している。
 import { create } from "zustand";
 
+import { isGuestUser } from "@/lib/guestStatus";
 import { toLiveScheduleDate } from "@/lib/liveDateFormat";
-import type { AnswerRow, ParticipantRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
+import type { AnswerRow, TopicRow, TurnRow } from "@/lib/liveRoomTypes";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 import type {
   SnsLiveResultAnswerCard,
@@ -110,6 +112,11 @@ interface SnsLiveResultsState {
   likedResultAnswerIds: string[];
   likePending: Record<string, boolean>;
   commentPending: Record<string, boolean>;
+  // 2026-09-13（再々レビュー対応）：認証userIdが変わるたびに+1する世代カウンター。
+  // detailsのauthorId="me"変換・commentsの「me」判定・likedResultAnswerIdsは
+  // 「誰が見ているか」に依存する値のため、取得中に別の利用者へ切り替わっていたら
+  // 遅れて届いた結果を反映しないためのガードに使う（useSnsStore.tsと同じ設計）。
+  generation: number;
 
   init: () => Promise<void>;
   loadMore: () => Promise<void>;
@@ -178,10 +185,18 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
   const podiumParticipantIds = [
     ...new Set(podiumRows.map((ra) => answerById.get(ra.answer_id)?.participant_id).filter((v): v is string => !!v)),
   ];
+  // 2026-09-13（3回目レビュー対応）：participantsテーブル自体は本人・司会/運営の
+  // 行しか直接SELECTできなくなったため（0072）、掲載確定済みの公開結果に限って
+  // participant_id→user_idを解決する安全なRPCへ切り替える。
   const { data: participantsData } = podiumParticipantIds.length
-    ? await supabase.from("participants").select("id, user_id").in("id", podiumParticipantIds)
-    : { data: [] as { id: string; user_id: string }[] };
-  const userIdByParticipantId = new Map((participantsData ?? []).map((p) => [p.id, p.user_id]));
+    ? await supabase.rpc("sns_result_participant_user_ids", { p_participant_ids: podiumParticipantIds })
+    : { data: [] as { participant_id: string; user_id: string }[] | null };
+  const userIdByParticipantId = new Map(
+    ((participantsData ?? []) as { participant_id: string; user_id: string }[]).map((p) => [
+      p.participant_id,
+      p.user_id,
+    ]),
+  );
   const profileIds = [...new Set([...userIdByParticipantId.values()])];
   await resolveAuthorNamesIntoSnsStore(profileIds);
   const realAuthorNames = useSnsStore.getState().realAuthorNames;
@@ -255,6 +270,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   likedResultAnswerIds: [],
   likePending: {},
   commentPending: {},
+  generation: 0,
 
   init: async () => {
     if (get().loaded) return;
@@ -279,6 +295,11 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   fetchDetail: async (liveResultId, force = false) => {
     if (!force && get().details[liveResultId]) return;
     if (get().detailLoading[liveResultId]) return;
+    // 2026-09-13（再々レビュー対応）：この呼び出し開始時点の世代を記録し、
+    // 取得完了時に世代が変わっていたら（＝取得中に別ユーザーへ切り替わった）
+    // detailsへ書き込まない（authorId="me"変換・コメントの「me」判定・
+    // いいね済み状態が古い利用者基準のまま反映されるのを防ぐ）。
+    const myGeneration = get().generation;
     set((s) => ({ detailLoading: { ...s.detailLoading, [liveResultId]: true } }));
 
     const { data: resultData } = await supabase
@@ -287,11 +308,19 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
       .eq("id", liveResultId)
       .maybeSingle();
     if (!resultData) {
-      set((s) => {
-        const rest = { ...s.detailLoading };
-        delete rest[liveResultId];
-        return { detailLoading: rest };
-      });
+      // 2026-09-13（再々レビュー2回目対応）：世代が変わっていたら（＝取得中に
+      // 別ユーザーへ切り替わった）、このliveResultId向けのdetailLoadingを
+      // 一切触れずに終了する。切替後の新しい世代が同じliveResultIdへの
+      // fetchDetail()を既に開始していた場合、その新しいpendingフラグを
+      // この古い処理が誤って消してしまわないようにするため（所有権を失った
+      // 処理は、pendingの解除も含めて一切stateを変更しない）。
+      if (get().generation === myGeneration) {
+        set((s) => {
+          const rest = { ...s.detailLoading };
+          delete rest[liveResultId];
+          return { detailLoading: rest };
+        });
+      }
       return;
     }
     const result = resultData as LiveResultRow;
@@ -336,11 +365,19 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
       : { data: [] as Pick<TopicRow, "id" | "body">[] };
     const topicBodyById = new Map((topicsData ?? []).map((t) => [t.id, t.body]));
 
+    // 2026-09-13（3回目レビュー対応）：participantsテーブル自体は本人・司会/運営の
+    // 行しか直接SELECTできなくなったため（0072）、掲載確定済みの公開結果に限って
+    // participant_id→user_idを解決する安全なRPCへ切り替える。
     const participantIds = [...new Set(answers.map((a) => a.participant_id))];
     const { data: participantsData } = participantIds.length
-      ? await supabase.from("participants").select("id, user_id").in("id", participantIds)
-      : { data: [] as Pick<ParticipantRow, "id" | "user_id">[] };
-    const userIdByParticipantId = new Map((participantsData ?? []).map((p) => [p.id, p.user_id]));
+      ? await supabase.rpc("sns_result_participant_user_ids", { p_participant_ids: participantIds })
+      : { data: [] as { participant_id: string; user_id: string }[] | null };
+    const userIdByParticipantId = new Map(
+      ((participantsData ?? []) as { participant_id: string; user_id: string }[]).map((p) => [
+        p.participant_id,
+        p.user_id,
+      ]),
+    );
 
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const authorIdOf = (participantId: string): string => {
@@ -448,6 +485,18 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
       comments: commentsByRaId,
     };
 
+    if (get().generation !== myGeneration) {
+      // 2026-09-13（再々レビュー2回目対応）：取得中に別ユーザーへ切り替わって
+      // いたら、このdetailは古い利用者基準のauthorId="me"変換を含むため反映
+      // しない。以前はここでdetailLoading[liveResultId]を無条件に消していたが、
+      // 切替後の新しい世代が同じliveResultIdへのfetchDetail()を既に開始して
+      // いた場合、その新しいpendingフラグ（true）をこの古い処理が誤って消して
+      // しまい、新しい処理が「pending中」のはずなのに完了前にpendingが解除
+      // されたように見えてしまう不具合があった。所有権（世代）を失った処理は
+      // pendingの解除も含めて一切stateを変更しない（reset時点で既にdetailLoading
+      // 自体が空にされているため、ここで消さなくても取りこぼしは無い）。
+      return;
+    }
     set((s) => {
       const rest = { ...s.detailLoading };
       delete rest[liveResultId];
@@ -460,9 +509,20 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   },
 
   toggleLike: async (resultAnswerId) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, message: "いいねするにはログインが必要です。" };
+    // 2026-09-13（再レビュー対応）：sns_live_result_likes_insert_own（RLS）が
+    // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する
+    // （useSnsStore.tsのtoggleLike/toggleFollowと同じ方針）。
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, message: "ゲストはいいねできません。Xでログインしてください。" };
+    }
     if (get().likePending[resultAnswerId]) return { ok: false };
+    // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
+    // 遅れて届いたこの結果を新しい利用者のlikedResultAnswerIds/detailsへ
+    // 反映しない。
+    const myGeneration = get().generation;
 
     const alreadyLiked = get().likedResultAnswerIds.includes(resultAnswerId);
     const applyDelta = (delta: number) => {
@@ -507,6 +567,8 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
           .eq("user_id", userId)
       : await supabase.from("sns_live_result_likes").insert({ result_answer_id: resultAnswerId, user_id: userId });
 
+    if (get().generation !== myGeneration) return { ok: false };
+
     set((s) => {
       const rest = { ...s.likePending };
       delete rest[resultAnswerId];
@@ -528,9 +590,17 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   },
 
   addComment: async (resultAnswerId, body) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, message: "コメントするにはログインが必要です。" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, message: "ゲストはコメントできません。Xでログインしてください。" };
+    }
     if (get().commentPending[resultAnswerId]) return { ok: false };
+    // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
+    // このコメントのauthorId:"me"は古い利用者基準のため新しい利用者のdetailsへ
+    // 反映しない。
+    const myGeneration = get().generation;
     set((s) => ({ commentPending: { ...s.commentPending, [resultAnswerId]: true } }));
 
     const { data, error } = await supabase
@@ -538,6 +608,15 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
       .insert({ result_answer_id: resultAnswerId, author_id: userId, body })
       .select()
       .single();
+
+    if (get().generation !== myGeneration) {
+      // 2026-09-13（再々レビュー2回目対応）：所有権（世代）を失った処理は
+      // pendingの解除も含めて一切stateを変更しない。切替後の新しい世代が
+      // 同じresultAnswerIdへのコメント投稿を既に開始していた場合、その
+      // pendingフラグをこの古い処理が誤って消してしまわないようにするため
+      // （resetForUserSwitch側で既にcommentPendingは空にされている）。
+      return { ok: false };
+    }
 
     set((s) => {
       const rest = { ...s.commentPending };
@@ -572,3 +651,62 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     return { ok: true };
   },
 }));
+
+// 2026-09-13（再々レビュー対応）：認証userIdが変わるたび（ゲスト→Xログイン、
+// 会員A→会員B、ログアウトを含む）に、detailsのauthorId="me"変換・コメントの
+// 「me」判定・いいね済み状態（likedResultAnswerIds）を作り直す。summaries
+// （1〜3位のプレイヤー名等）は「誰が見ているか」に依存しないため、そのまま
+// 保持する（クリア・再取得は不要）。detailsを空にすれば、開いている詳細画面
+// （SnsLiveResultDetail.tsx）の既存useEffectが自動的にfetchDetail()を再実行し、
+// 新しい利用者向けの内容へ作り直される（このファイル自身がinit()を呼び直す
+// 必要は無い）。
+// 2026-09-13（再々レビュー2回目対応）：以前はuseAuthStore.subscribeのコールバック内で
+// 初めてlastSeenUserIdを設定していたため、「認証が既に確定した状態（loading:false）
+// でこのモジュールが読み込まれた」場合、その時点の実際の認証userIdを一度も
+// 観測しないまま「まだ未確定」の扱いになっていた。その状態でfetchDetail()が
+// 実行されて会員Aのdetails・いいね状態が溜まった後、最初のアカウント切替
+// （A→B）が発生すると、その切替が「初期値の確定」として処理されてしまい
+// （lastSeenUserId===undefinedの分岐に入りresetされない）、Aのdetails・
+// いいね済み状態が残ったままBの画面に漏れる可能性があった。
+// useSnsStore.tsのhandleAuthSettledと同じ設計にし、モジュール読み込み時点で
+// 既にauthUserStoreのセッションが確定していれば、その場でlastSeenUserIdを
+// 現在値に合わせる（この最初の観測ではresetしない＝まだ何もfetchしていない
+// 状態のresetは無意味なため）。以後の「実際にuserIdが変わった」タイミングから
+// 確実にgenerationを進めてリセットする。
+if (typeof window !== "undefined") {
+  // undefined＝まだ一度も認証状態を観測していない（起動直後）ことを表す。
+  let lastSeenUserId: string | null | undefined;
+  const handleAuthSettled = (userId: string | null) => {
+    if (lastSeenUserId === undefined) {
+      lastSeenUserId = userId;
+      return;
+    }
+    if (userId === lastSeenUserId) return;
+    lastSeenUserId = userId;
+    useSnsLiveResultsStore.setState((s) => ({
+      generation: s.generation + 1,
+      details: {},
+      detailLoading: {},
+      likedResultAnswerIds: [],
+      likePending: {},
+      commentPending: {},
+    }));
+  };
+
+  const authState = useAuthStore.getState();
+  if (!authState.loading) {
+    handleAuthSettled(authState.user?.id ?? null);
+  } else {
+    const unsubscribeInitial = useAuthStore.subscribe((state) => {
+      if (!state.loading) {
+        unsubscribeInitial();
+        handleAuthSettled(state.user?.id ?? null);
+      }
+    });
+  }
+
+  useAuthStore.subscribe((state) => {
+    if (state.loading) return; // セッション確定前の中間状態は無視する。
+    handleAuthSettled(state.user?.id ?? null);
+  });
+}

@@ -34,13 +34,17 @@ on conflict do nothing;
 create temporary table _t0070_ctx (key text primary key, live_id uuid, participant_id uuid);
 
 -- ============================================================
--- セッション1（テスト2・テスト3前半）：公式ライブでは、匿名ゲストは参加拒否
---          （GUEST_OFFICIAL_NOT_ALLOWED）、Xログイン利用者は従来どおり参加できる。
+-- セッション1（テスト2・テスト3前半、2026-09-13ゲスト観客対応で全面書き換え）：
+--          公式ライブでも、匿名ゲストは観客(audience)として参加できる。
+--          プレイヤー希望は公式・テストどちらでも拒否される(GUEST_AUDIENCE_ONLY)。
+--          Xログイン利用者は従来どおり参加できる。
 -- ============================================================
 do $$
 declare
   v_live_id uuid;
+  v_test_live_id uuid;
   v_failed boolean := false;
+  v_row public.participants;
 begin
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
@@ -59,6 +63,25 @@ begin
     raise exception 'FAIL: 匿名ユーザーのprofiles.is_guestがtrueになっていない（handle_new_user()の複製漏れ）';
   end if;
 
+  -- 匿名ゲストは公式ライブへ観客(audience)として参加できる
+  -- （最終仕様：ゲストは本番・テストどちらも観客として視聴できる）。
+  set local role authenticated;
+  perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000001a', true);
+  select * into v_row from public.join_live(v_live_id, 'audience', null);
+  reset role;
+  if v_row.is_guest is not true
+    or v_row.role <> 'audience'
+    or v_row.preferred_role <> 'audience'
+    or v_row.group_id is not null
+  then
+    raise exception 'FAIL: 匿名ゲストが公式ライブへ観客として正しく参加できていない(is_guest=%, role=%, preferred_role=%, group_id=%)',
+      v_row.is_guest, v_row.role, v_row.preferred_role, v_row.group_id;
+  end if;
+  raise notice 'PASS: 匿名ゲストは公式ライブへ観客(audience)として参加できる';
+
+  -- 匿名ゲストは公式ライブへプレイヤー希望では参加できない(GUEST_AUDIENCE_ONLY、
+  -- 旧仕様のGUEST_OFFICIAL_NOT_ALLOWEDは廃止された)。
+  v_failed := false;
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000001a', true);
   begin
@@ -66,7 +89,7 @@ begin
     v_failed := false;
   exception
     when others then
-      if sqlerrm = 'GUEST_OFFICIAL_NOT_ALLOWED' then
+      if sqlerrm = 'GUEST_AUDIENCE_ONLY' then
         v_failed := true;
       else
         reset role;
@@ -75,10 +98,11 @@ begin
   end;
   reset role;
   if not v_failed then
-    raise exception 'FAIL: 匿名ゲストが公式ライブへ参加できてしまった';
+    raise exception 'FAIL: 匿名ゲストが公式ライブへプレイヤー希望で参加できてしまった';
   end if;
+  raise notice 'PASS: 匿名ゲストは公式ライブへプレイヤー希望では参加できない(GUEST_AUDIENCE_ONLY)';
 
-  -- Xログイン利用者は従来どおり公式ライブへ参加できる。
+  -- Xログイン利用者は従来どおり公式ライブへプレイヤー希望で参加できる。
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000b', true);
   perform public.join_live(v_live_id, 'player', null);
@@ -90,9 +114,43 @@ begin
   ) then
     raise exception 'FAIL: Xログイン利用者が公式ライブへ参加できていない、またはis_guest/guest_numberが不正';
   end if;
+  raise notice 'PASS: Xログイン利用者は公式ライブへプレイヤー希望で従来どおり参加できる';
 
   update public.lives set current_phase = 'closed' where id = v_live_id;
-  raise notice 'PASS: 公式ライブは匿名ゲストを拒否し(GUEST_OFFICIAL_NOT_ALLOWED)、Xログイン利用者は従来どおり参加できる';
+
+  -- 同じ匿名ゲストは、テストライブへもプレイヤー希望では参加できない
+  -- （GUEST_AUDIENCE_ONLYはlive_modeを問わない）。テストライブへの通常の
+  -- observer参加自体はセッション2で別途確認する。
+  set local role authenticated;
+  perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
+  select live_id into v_test_live_id from public.create_live_preparation(
+    now(), '0070テスト-testライブ(player拒否確認)', 20, 1,
+    array['b0100000-0000-0000-0000-000000000003']::uuid[], 'test'
+  );
+  reset role;
+  update public.lives set current_phase = 'opening' where id = v_test_live_id;
+
+  v_failed := false;
+  set local role authenticated;
+  perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000001a', true);
+  begin
+    perform public.join_live(v_test_live_id, 'player', null);
+    v_failed := false;
+  exception
+    when others then
+      if sqlerrm = 'GUEST_AUDIENCE_ONLY' then
+        v_failed := true;
+      else
+        reset role;
+        raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm;
+      end if;
+  end;
+  reset role;
+  if not v_failed then
+    raise exception 'FAIL: 匿名ゲストがテストライブへプレイヤー希望で参加できてしまった';
+  end if;
+  update public.lives set current_phase = 'closed' where id = v_test_live_id;
+  raise notice 'PASS: 匿名ゲストはテストライブへもプレイヤー希望では参加できない(GUEST_AUDIENCE_ONLY、live_modeを問わない)';
 end $$;
 
 -- ============================================================
@@ -121,16 +179,18 @@ begin
   update public.lives set current_phase = 'opening' where id = v_live_id;
   insert into _t0070_ctx (key, live_id) values ('test_live', v_live_id);
 
-  -- テスト1：匿名ゲストはテストライブへ参加でき、is_guest=true・guest_number=1になる。
+  -- テスト1：匿名ゲストはテストライブへ観客(audience)として参加でき、
+  -- is_guest=true・guest_number=1になる（ゲストはaudience以外で参加できない
+  -- ため、以降このファイルではゲストのjoin_live呼び出しは常に'audience'を使う）。
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000001a', true);
-  select * into v_row from public.join_live(v_live_id, 'player', null);
+  select * into v_row from public.join_live(v_live_id, 'audience', null);
   reset role;
   if v_row.is_guest is not true or v_row.guest_number <> 1 then
     raise exception 'FAIL: ゲストがテストライブへ参加してもis_guest=true・guest_number=1にならなかった(is_guest=%, guest_number=%)', v_row.is_guest, v_row.guest_number;
   end if;
   insert into _t0070_ctx (key, live_id, participant_id) values ('guest1_participant', v_live_id, v_row.id);
-  raise notice 'PASS: 匿名ゲストはテストライブへ参加でき、is_guest=true・guest_number=1が付与される';
+  raise notice 'PASS: 匿名ゲストはテストライブへ観客として参加でき、is_guest=true・guest_number=1が付与される';
 
   -- テスト3後半：Xログイン利用者はテストライブでも従来どおり参加でき、is_guest=falseになる。
   set local role authenticated;
@@ -146,7 +206,7 @@ begin
   -- テスト4：同じゲストの再joinでparticipantが増えず、guest_number・is_guestも変わらない。
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000001a', true);
-  select * into v_row from public.join_live(v_live_id, 'player', null);
+  select * into v_row from public.join_live(v_live_id, 'audience', null);
   reset role;
   if v_row.is_guest is not true or v_row.guest_number <> 1 then
     raise exception 'FAIL: 再joinでゲストのis_guest/guest_numberが変化した(is_guest=%, guest_number=%)', v_row.is_guest, v_row.guest_number;
@@ -166,9 +226,9 @@ begin
 
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000002a', true);
-  select * into v_row2 from public.join_live(v_live_id, 'player', null);
+  select * into v_row2 from public.join_live(v_live_id, 'audience', null);
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000003a', true);
-  select * into v_row3 from public.join_live(v_live_id, 'player', null);
+  select * into v_row3 from public.join_live(v_live_id, 'audience', null);
   reset role;
   if v_row2.guest_number <> 2 or v_row3.guest_number <> 3 then
     raise exception 'FAIL: 複数ゲストの採番が連番になっていない(2人目=%, 3人目=%)', v_row2.guest_number, v_row3.guest_number;
@@ -195,10 +255,15 @@ begin
 end $$;
 
 -- ============================================================
--- セッション3（テスト7・8・9・12・13の一部）：回答・採点の本人限定確認
---          （ゲスト・Xユーザーどちらの役回りになっても成立することを、実際の
---          ランダム組分け結果に依存せず動的に判定して検証する）、退場後の拒否、
---          テストライブ終了時のポイント不変。
+-- セッション3（テスト7・8・9・12・13の一部、2026-09-13ゲスト観客対応で調整）：
+--          回答・採点の本人限定確認（Xユーザーがどちらの役回りになっても成立
+--          することを、実際のランダム組分け結果に依存せず動的に判定して検証
+--          する）、退場後の拒否、テストライブ終了時のポイント不変。
+--          最終仕様でゲストはプレイヤーに一切なれなくなったため、回答者・
+--          採点者はXユーザー2名（xuser2・xuser3）に変更し、同じライブへ観客
+--          として参加する専用のゲストを別途1名加えて、公式ライブと同様に
+--          「ゲスト観客がいてもライブの進行・終了に支障が無いこと」も
+--          あわせて確認する。
 -- ============================================================
 create temporary table _t0070_flow (key text primary key, val text);
 
@@ -213,6 +278,9 @@ declare
   v_answer_id uuid;
   v_failed boolean := false;
 begin
+  insert into auth.users (id, is_anonymous) values ('b0000000-0000-0000-0000-00000000000d', false)
+    on conflict do nothing; -- xuser3（このフロー専用に追加した2人目のプレイヤー役）
+
   set local role authenticated;
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
@@ -223,12 +291,17 @@ begin
   update public.lives set current_phase = 'opening' where id = v_live_id;
 
   insert into auth.users (id, is_anonymous) values ('b0000000-0000-0000-0000-00000000004a', true)
-    on conflict do nothing; -- このフロー専用のゲスト
+    on conflict do nothing; -- このフロー専用のゲスト（観客として参加、プレイヤーにはしない）
 
   set local role authenticated;
+  -- ゲストは観客(audience)としてのみこのライブに参加できる（プレイヤーには
+  -- 一切なれない、GUEST_AUDIENCE_ONLY）。「公式ライブにゲスト観客がいても
+  -- 進行・終了できる」ことの確認をテストライブでも兼ねる。
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000004a', true);
-  perform public.join_live(v_live_id, 'player', null);
+  perform public.join_live(v_live_id, 'audience', null);
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000c', true); -- xuser2
+  perform public.join_live(v_live_id, 'player', null);
+  perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000d', true); -- xuser3
   perform public.join_live(v_live_id, 'player', null);
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   perform public.randomize_groups(v_live_id);
@@ -262,14 +335,13 @@ begin
     ('judge_uid', v_judge_uid::text),
     ('answerer_participant', v_answerer_participant::text),
     ('judge_participant', v_judge_participant::text),
-    -- 2026-09-13レビュー対応：テスト12（ポイント不変確認）が組分け結果次第で
-    -- v_judge_uidになったりならなかったりする「このフロー専用のゲスト」の
-    -- UUIDを、役回りに関係なく明示的に固定して後から参照できるようにする。
+    -- 2026-09-13（ゲスト観客対応）：テスト12（ポイント不変確認）で使う、
+    -- このライブへ観客として参加させた専用ゲストのUUID（プレイヤーには
+    -- 一切なれないため、回答者・採点者の役回りとは無関係に固定で使う）。
     ('guest_uid', 'b0000000-0000-0000-0000-00000000004a');
 
-  raise notice '情報: このフローでは%が回答者、%が採点者の役回りになった',
-    (case when v_answerer_uid = 'b0000000-0000-0000-0000-00000000004a' then 'ゲスト' else 'Xユーザー' end),
-    (case when v_judge_uid = 'b0000000-0000-0000-0000-00000000004a' then 'ゲスト' else 'Xユーザー' end);
+  raise notice '情報: このフローではxuser2/xuser3のどちらかが回答者(uid=%)、もう一方が採点者(uid=%)の役回りになった（ゲストは観客として同席するのみでプレイヤーにはならない）',
+    v_answerer_uid, v_judge_uid;
 
   -- 回答者本人としての回答投稿は成功する。
   set local role authenticated;
@@ -329,6 +401,60 @@ begin
   if not v_failed then
     raise exception 'FAIL: 他人のparticipant_idを使った採点のなりすましが成功してしまった';
   end if;
+  raise notice 'PASS: 回答者・採点者は自分の参加者IDでのみ回答・採点でき、他人へのなりすましは拒否される';
+
+  -- 2026-09-13（ゲスト観客対応）：同じライブに観客として同席しているゲストは、
+  -- 自分自身のparticipant_idを使っても回答・採点のどちらもできない
+  -- （is_guest_user()の直接チェック＋そもそもrole='player'になれないため二重に拒否される）。
+  declare
+    v_guest_participant uuid;
+  begin
+    select id into v_guest_participant from public.participants
+      where live_id = v_live_id and user_id = 'b0000000-0000-0000-0000-00000000004a';
+
+    v_failed := false;
+    set local role authenticated;
+    perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000004a', true);
+    begin
+      insert into public.answers (turn_id, participant_id, seq, body)
+        values (v_turn_a, v_guest_participant, 3, 'ゲストが送ろうとした回答');
+      v_failed := false;
+    exception
+      when others then
+        if sqlerrm like '%row-level security%' then
+          v_failed := true;
+        else
+          reset role;
+          raise exception 'FAIL: 想定外のエラー内容(ゲストの回答INSERT, %)', sqlerrm;
+        end if;
+    end;
+    reset role;
+    if not v_failed then
+      raise exception 'FAIL: 観客として同席しているゲストが回答をINSERTできてしまった';
+    end if;
+
+    v_failed := false;
+    set local role authenticated;
+    perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000004a', true);
+    begin
+      insert into public.scores (answer_id, judge_participant_id, points)
+        values (v_answer_id, v_guest_participant, 3);
+      v_failed := false;
+    exception
+      when others then
+        if sqlerrm like '%row-level security%' then
+          v_failed := true;
+        else
+          reset role;
+          raise exception 'FAIL: 想定外のエラー内容(ゲストの採点INSERT, %)', sqlerrm;
+        end if;
+    end;
+    reset role;
+    if not v_failed then
+      raise exception 'FAIL: 観客として同席しているゲストが採点をINSERTできてしまった';
+    end if;
+    raise notice 'PASS: 観客として同席しているゲストは、自分自身のparticipant_idでも回答INSERT・採点INSERTのどちらもできない';
+  end;
 
   -- テスト9（kick_participant）のため、採点が確定済み（resolved=true）の状態に
   -- しておく（運営の確定操作の代理、superuser実行）。kick_participantは
@@ -336,8 +462,6 @@ begin
   -- 禁止する」仕様(0054)のため、これをしておかないと後続のkick_participantが
   -- ok=falseを返すだけで実際には退場させられない。
   update public.answers set resolved = true, score_total = 2, judge_count = 1 where id = v_answer_id;
-
-  raise notice 'PASS: 回答者・採点者は自分の参加者IDでのみ回答・採点でき、他人へのなりすましは拒否される（ゲスト・Xユーザーいずれの役回りでも成立）';
 end $$;
 
 -- テスト9：退場後は回答・再参加が拒否される（対象はこのフローの回答者）。

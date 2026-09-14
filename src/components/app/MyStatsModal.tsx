@@ -1,6 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { getNextRank, getRankByMeter } from "@/data/collectionData";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 import styles from "@/components/home/StadiumHome.module.css";
@@ -26,7 +30,31 @@ export default function MyStatsModal({
   onClose: () => void;
 }) {
   const profile = useProfileStore((s) => s.profile);
-  const masteryMeter = profile?.masteryMeter ?? 0;
+  const profileLoading = useProfileStore((s) => s.loading);
+  const authUser = useAuthStore((s) => s.user);
+  const authUserId = authUser?.id ?? null;
+  // 2026-09-13（再々レビュー対応）：モーダルが開いた（open:falseからtrueへ変わった）
+  // 時点のauthUserIdを保持し、開いている間にidが変わったら（会員A→会員B・
+  // ゲストへの切り替え等）即座に閉じる（読み取り専用のモーダルだが、要求どおり
+  // 編集モーダルと同じ「所有userIdを保持し、変わったら閉じる」挙動に揃える）。
+  // Reactの「レンダー中にpropの変化を見てstateを調整する」パターン
+  // （https://react.dev/learn/you-might-not-need-an-effect の
+  // Adjusting some state when a prop changes）を使い、専用のuseEffectは持たない。
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [openedForUserId, setOpenedForUserId] = useState<string | null>(open ? authUserId : null);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) setOpenedForUserId(authUserId);
+  }
+  useEffect(() => {
+    if (open && openedForUserId !== null && authUserId !== openedForUserId) onClose();
+  }, [open, authUserId, openedForUserId, onClose]);
+
+  // 2026-09-13（再々レビュー対応）：本人確認できた状態（isConfirmedMember）のときだけ
+  // 実データを表示する。profileが古い利用者のまま一瞬残っている・authUserとprofileの
+  // idが不一致・取得中、のいずれでも実績を表示せず0/見習い相当のフォールバックにする。
+  const isMember = isConfirmedMember({ authUser, profile, profileLoading });
+  const masteryMeter = isMember ? (profile?.masteryMeter ?? 0) : 0;
   const rank = getRankByMeter(masteryMeter);
   const nextRank = getNextRank(masteryMeter);
   const progressRatio = nextRank
@@ -38,7 +66,7 @@ export default function MyStatsModal({
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストは段位・実績を一切持たない
   // （0071でDB側も報酬付与から除外済み）ため、0/見習いを表示するのではなく
   // 専用の案内に差し替える。
-  if (profile?.isGuest) {
+  if (isGuestUser(authUser, profile)) {
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
@@ -67,9 +95,12 @@ export default function MyStatsModal({
     );
   }
 
-  const awardFirst = profile?.awardCountFirst ?? 0;
-  const awardSecond = profile?.awardCountSecond ?? 0;
-  const awardThird = profile?.awardCountThird ?? 0;
+  // 2026-09-13（再々レビュー対応）：isMemberがfalseの間（本人確認できない・
+  // アカウント切り替え直後の一瞬を含む）は、前の利用者の実績が居残って見えないよう
+  // 全て0にフォールバックする（profile自体がまだ古い利用者のままの場合の保険）。
+  const awardFirst = isMember ? (profile?.awardCountFirst ?? 0) : 0;
+  const awardSecond = isMember ? (profile?.awardCountSecond ?? 0) : 0;
+  const awardThird = isMember ? (profile?.awardCountThird ?? 0) : 0;
 
   return (
     <div
@@ -92,7 +123,7 @@ export default function MyStatsModal({
           </button>
         </div>
 
-        {!profile && (
+        {!isMember && (
           <p className="font-sans text-[11px] text-[var(--ink)]/60">
             ログインするとライブの実績がここに記録されます。
           </p>
@@ -113,11 +144,11 @@ export default function MyStatsModal({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <StatCard label="累計ポイント" value={`${(profile?.totalPoints ?? 0).toLocaleString()}pt`} />
-          <StatCard label="ポイント残高" value={`${(profile?.pointsBalance ?? 0).toLocaleString()}pt`} />
-          <StatCard label="参加回数" value={`${profile?.liveCount ?? 0}回`} />
+          <StatCard label="累計ポイント" value={`${(isMember ? profile?.totalPoints ?? 0 : 0).toLocaleString()}pt`} />
+          <StatCard label="ポイント残高" value={`${(isMember ? profile?.pointsBalance ?? 0 : 0).toLocaleString()}pt`} />
+          <StatCard label="参加回数" value={`${isMember ? profile?.liveCount ?? 0 : 0}回`} />
           <StatCard label="表彰回数" value={`${awardFirst + awardSecond + awardThird}回`} />
-          <StatCard label="ベストアンサー" value={`${profile?.bestAnswerCount ?? 0}回`} />
+          <StatCard label="ベストアンサー" value={`${isMember ? profile?.bestAnswerCount ?? 0 : 0}回`} />
         </div>
 
         <div>

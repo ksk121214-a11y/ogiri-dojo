@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { CheckGlyph, FlagGlyph } from "@/components/home/icons";
+import { isGuestUser } from "@/lib/guestStatus";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
@@ -34,6 +35,13 @@ export default function ReportButton({
   snapshotBody?: string;
 }) {
   const [reported, setReported] = useState(false);
+  const authUser = useAuthStore((s) => s.user);
+  const profile = useProfileStore((s) => s.profile);
+
+  // 2026-09-13（再々レビュー対応）：ゲストは通報できない仕様（reports_insert_own、
+  // 0070でRLSがゲストのINSERTを拒否済み）のため、押せるのに拒否される通報ボタン
+  // 自体を表示しない（閲覧は引き続き許可されたまま、UIだけ読み取り専用にする）。
+  if (isGuestUser(authUser, profile)) return null;
 
   const handleReport = async () => {
     if (!targetType || !targetId) {
@@ -45,14 +53,15 @@ export default function ReportButton({
       return;
     }
 
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) {
       window.alert("通報にはログインが必要です");
       return;
     }
     // 2026-09-13（0070ゲスト参加レビュー対応）：reports_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いて「押せるのに拒否される」体験を避ける。
-    if (useProfileStore.getState().profile?.isGuest) {
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
       window.alert("ゲストは通報できません。Xでログインしてください。");
       return;
     }

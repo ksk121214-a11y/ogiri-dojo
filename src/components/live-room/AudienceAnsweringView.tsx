@@ -195,6 +195,11 @@ export default function AudienceAnsweringView() {
   const judgingTimeUp = judgingRemainingMs <= 0;
 
   const handleScore = async (points: 0 | 1 | 2 | 3) => {
+    // 2026-09-13（ゲスト観客対応）：採点ボタン自体はcanJudge=falseの間
+    // ScoreButtons側で表示されないが（isJudge判定）、ゲスト・観客が採点処理を
+    // 一切呼べないことをこのハンドラ自身でも明示的に保証する（UIの非表示だけに
+    // 頼らない多層防御）。
+    if (!canJudge) return;
     if (!displayedAnswer) return;
     const answerId = displayedAnswer.id;
     // 2026-09-06:「採点を連打・同時押しするとDBの生エラーが赤字表示される」対応。

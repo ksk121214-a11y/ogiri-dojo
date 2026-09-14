@@ -15,6 +15,8 @@ import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
+import { isGuestUser } from "@/lib/guestStatus";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -37,6 +39,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const addComment = useSnsStore((s) => s.addComment);
   const fetchAnswerById = useSnsStore((s) => s.fetchAnswerById);
   const profile = useProfileStore((s) => s.profile);
+  const authUser = useAuthStore((s) => s.user);
 
   const [body, setBody] = useState("");
   const [likePending, setLikePending] = useState(false);
@@ -97,6 +100,9 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
 
   const liked = likedAnswerIds.includes(answer.id);
   const overLimit = body.length > MAX_LENGTH;
+  // 2026-09-13（再々レビュー対応）：ゲストはツッコめない・いいねできない仕様のため、
+  // 投稿入力欄・送信ボタン・いいねボタン自体を表示しない（閲覧は引き続き許可する）。
+  const isGuest = isGuestUser(authUser, profile);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,19 +173,29 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           {answer.body}
         </p>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={likePending}
-            onClick={handleToggleLike}
-            className={`flex w-fit items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
-              liked
-                ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
-                : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
-            }`}
-          >
-            <HeartGlyph filled={liked} />
-            <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
-          </button>
+          {isGuest ? (
+            // 2026-09-13（再々レビュー対応）：ゲストはいいねできない仕様のため、
+            // 操作可能な見た目のボタンではなく件数だけの静的表示にする
+            // （閲覧は引き続き許可する）。
+            <span className="flex w-fit items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/50">
+              <HeartGlyph filled={liked} />
+              <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={likePending}
+              onClick={handleToggleLike}
+              className={`flex w-fit items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
+                liked
+                  ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
+                  : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
+              }`}
+            >
+              <HeartGlyph filled={liked} />
+              <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
+            </button>
+          )}
           {likeError && (
             <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>
           )}
@@ -202,54 +218,53 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         )}
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)]`}
-      >
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="ツッコミを入力..."
-          rows={2}
-          className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-base text-[var(--ink)] outline-none ${
-            overLimit
-              ? "border-[var(--accent)] focus:border-[var(--accent)]"
-              : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
-          }`}
-        />
-        {/* 2026-09-13（0070ゲスト参加レビュー対応）：ゲストの寄合券は常に0枚
-            （0071でDB側も強制）だが、「回復を待てば投稿できる」ような誤解を
-            避けるため、専用の文言に差し替える。 */}
-        {profile?.isGuest ? (
-          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
-            ゲストはツッコめません。Xでログインしてください。
-          </p>
-        ) : (
-          noTicket && (
+      {isGuest ? (
+        <p
+          className={`${stadiumStyles.grainPaper} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
+        >
+          ゲストはツッコめません。Xでログインしてください。
+        </p>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)]`}
+        >
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="ツッコミを入力..."
+            rows={2}
+            className={`w-full rounded-lg border bg-[var(--paper-muted)] p-3 font-sans text-base text-[var(--ink)] outline-none ${
+              overLimit
+                ? "border-[var(--accent)] focus:border-[var(--accent)]"
+                : "border-[var(--ink)]/20 focus:border-[var(--accent)]"
+            }`}
+          />
+          {noTicket && (
             <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
               寄合券が0枚のためツッコめません。
               {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
             </p>
-          )
-        )}
-        {submitError && (
-          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
-        )}
-        <div className="flex items-center justify-between gap-2">
-          <span
-            className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
-          >
-            {body.length} / {MAX_LENGTH}
-          </span>
-          <button
-            type="submit"
-            disabled={!body.trim() || overLimit || noTicket || submitting}
-            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
-          >
-            {submitting ? "送信中…" : "ツッコむ（寄合券を1枚使う）"}
-          </button>
-        </div>
-      </form>
+          )}
+          {submitError && (
+            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
+            >
+              {body.length} / {MAX_LENGTH}
+            </span>
+            <button
+              type="submit"
+              disabled={!body.trim() || overLimit || noTicket || submitting}
+              className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {submitting ? "送信中…" : "ツッコむ（寄合券を1枚使う）"}
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="flex flex-col gap-2">
         <h2 className="font-sans text-sm font-bold text-[var(--ink)]">

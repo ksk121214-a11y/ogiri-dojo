@@ -322,7 +322,10 @@ export default function AdminLiveResultDetailPage() {
       p_answer_id: answerId,
     });
     if (error) {
-      notifyError(error.message);
+      // 2026-09-13（再レビュー対応）：set_sns_live_result_manager_bestのDB例外
+      // （テストライブ・回答IDの整合性チェック失敗等）をそのまま画面へ出さず、
+      // 生のDB/プログラム文言を含まない固定の日本語メッセージへ変換する。
+      notifyError("運営ベストを設定できませんでした。回答とライブの状態を確認してください。");
     } else {
       setLiveResult({ ...liveResult, manager_best_answer_id: answerId });
       await logAdminAction({

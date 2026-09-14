@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -22,12 +23,20 @@ export default function AppHeader() {
   const pathname = usePathname();
   const [historyOpen, setHistoryOpen] = useState(false);
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
   const authUser = useAuthStore((s) => s.user);
+  // 2026-09-13（0070ゲスト参加レビュー対応）：authUser.is_anonymous / profile.isGuestの
+  // どちらかでもtrueならゲスト（src/lib/guestStatus.ts、profile取得前・取得失敗でも
+  // 匿名ユーザーを取り違えないfail-safe判定）。段位・ポイントは「認証済み・匿名でない・
+  // profile取得済み・isGuestでない」の全てが揃った確定会員（isConfirmedMember）にのみ表示し、
+  // profile取得中は一瞬たりとも通常会員の見た目（既定値の段位・0pt等）を出さない。
+  const guest = isGuestUser(authUser, profile);
+  const member = isConfirmedMember({ authUser, profile, profileLoading });
   // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、段位「前座」・
   // ポイント5000pt等）が実データであるかのように表示されていた問題を修正。
   // ログインしている場合のみ実データ（profiles）を出す。
-  const rank = getRankByMeter(authUser ? (profile?.masteryMeter ?? 0) : 0);
-  const displayName = authUser ? (profile?.displayName ?? "…") : null;
+  const rank = getRankByMeter(member ? (profile?.masteryMeter ?? 0) : 0);
+  const displayName = member ? (profile?.displayName ?? "…") : null;
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const signOut = useAuthStore((s) => s.signOut);
@@ -47,10 +56,10 @@ export default function AppHeader() {
             爆笑スタジアム
           </Link>
           <div className="flex min-w-0 items-center gap-2">
-            {/* 2026-09-13（0070ゲスト参加レビュー対応）：authUserはゲストでもtruthyに
-                なるため、段位・ポイントの表示はprofile?.isGuestを見て除外する
-                （ゲストには表示せず、後段のXログイン切り替えボタンだけを出す）。 */}
-            {authUser && !profile?.isGuest && (
+            {/* 2026-09-13（0070ゲスト参加レビュー対応）：段位・ポイントは確定会員
+                （isConfirmedMember）にのみ表示する（profile取得中・取得失敗・ゲストの
+                いずれでも通常会員の見た目を出さない）。 */}
+            {member && (
               <button
                 type="button"
                 onClick={() => setHistoryOpen(true)}
@@ -65,14 +74,14 @@ export default function AppHeader() {
                 </span>
               </button>
             )}
-            {authUser && profile?.isGuest && (
+            {guest && (
               <span className="shrink-0 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown sm:text-xs">
                 ゲスト参加中
               </span>
             )}
             {!authLoading &&
               (authUser ? (
-                profile?.isGuest ? (
+                guest ? (
                   <button
                     type="button"
                     onClick={async () => {

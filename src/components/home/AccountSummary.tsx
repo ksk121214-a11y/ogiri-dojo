@@ -5,6 +5,7 @@ import { useState } from "react";
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -83,9 +84,10 @@ export default function AccountSummary() {
   }
 
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストは通常会員のような段位・ポイント
-  // 表示にせず、「ゲスト参加中」＋Xログイン導線に差し替える（authUserはゲストでも
-  // truthyになるため、profile?.isGuestを別途見て判定する）。
-  if (profile?.isGuest) {
+  // 表示にせず、「ゲスト参加中」＋Xログイン導線に差し替える。authUser.is_anonymousも
+  // 併せて見る共通関数（src/lib/guestStatus.ts）を使うため、profile取得前・取得失敗の
+  // 匿名ユーザーも即座にゲストとして扱える（下のprofile未確定ガードを待たない）。
+  if (isGuestUser(authUser, profile)) {
     return (
       <section className={`${styles.grainPaper} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
@@ -110,7 +112,24 @@ export default function AccountSummary() {
     );
   }
 
-  const displayName = profile?.displayName ?? (profileLoading ? "…" : "名無しの演者");
+  // 2026-09-13（再レビュー対応）：ゲストではないと分かった後も、profile取得が
+  // 完了する（isConfirmedMemberがtrueになる）までは、段位「見習い」・累計0pt等の
+  // 既定値を実データであるかのように表示しない（通常のXユーザーでも、profile取得の
+  // 一瞬だけ0pt・見習いが実データのように見えてしまっていた）。
+  if (!isConfirmedMember({ authUser, profile, profileLoading })) {
+    return (
+      <section
+        className={`${styles.grainPaper} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]/40`}
+        aria-hidden
+      >
+        <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
+        <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-[var(--ink)]/10" />
+        <div className="h-4 flex-1 animate-pulse rounded bg-[var(--ink)]/10" />
+      </section>
+    );
+  }
+
+  const displayName = profile?.displayName ?? "名無しの演者";
   const rank = getRankByMeter(profile?.masteryMeter ?? 0);
   const totalPoints = profile?.totalPoints ?? 0;
   const pointsBalance = profile?.pointsBalance ?? 0;

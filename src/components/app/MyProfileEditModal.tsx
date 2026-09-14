@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
 import { AVATAR_ICON_PRESETS, getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
-import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
+import { isConfirmedMember } from "@/lib/guestStatus";
+import { useAuthStore } from "@/store/useAuthStore";
+import { DISPLAY_NAME_MAX_LENGTH, useProfileStore, type DojoProfile } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
 import AvatarGlyph from "@/components/app/AvatarGlyph";
@@ -14,37 +16,94 @@ const NAME_MAX_LENGTH = DISPLAY_NAME_MAX_LENGTH;
 const BIO_MAX_LENGTH = 80;
 
 // マイページの演者名カードから開く編集モーダル。
-// アイコンの絵柄・色・一言コメントはローカル（useUserStore）のダミー項目、
-// 名前だけは実際のログイン名（useProfileStore、Supabaseのprofiles.display_name）を更新する。
-// ログイン前（profileが無い状態）はダミーのdisplayNameをその場で変える簡易フォールバックにしている。
+// 2026-09-13（再々レビュー2回目対応）：以前は未ログイン・ゲスト・profile未取得の
+// 場合でもuseUserStore（ローカルのみのダミー項目）を直接書き換える簡易フォールバック
+// 経路を持っていたが、ゲストはプロフィール編集を一切行えない仕様（今回の確定仕様）
+// のため、この経路を完全に削除した。isConfirmedMember（認証済み・匿名でない・
+// profile取得済み・authUserとprofileのidが一致）でない間は、フォーム自体を
+// 表示・送信しない。
 // 呼び出し元が開いている間だけマウントする前提のコンポーネント（開くたびに現在値で再マウントされる）。
-// 2026-08-28: マイページ本体（Stadiumテーマ）に合わせ、旧dojoテーマの見た目から
-// チケット言語（.grainPaper／.pressable等）を使ったデザインに刷新。
-// あわせて、絵柄違いのアイコン素材（大喜利素材2）から選べるアイコン選択UIを追加し、
-// 色プリセットは「黒赤青緑」の4色に絞った。
 export default function MyProfileEditModal({
   onClose,
 }: {
   onClose: () => void;
 }) {
-  const user = useUserStore((s) => s.user);
-  const updateLocalBio = useUserStore((s) => s.updateBio);
-  const updateAvatarColor = useUserStore((s) => s.updateAvatarColor);
-  const updateAvatarIcon = useUserStore((s) => s.updateAvatarIcon);
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
+  const authUser = useAuthStore((s) => s.user);
+  const authUserId = authUser?.id ?? null;
+  // 2026-09-13（再レビュー対応）：モーダルを開いた（＝マウントした）時点の
+  // authUserIdを保持し、以降このidが変わったら（会員A→会員B・ゲストへの切り替え等）
+  // 即座に閉じる。開いたままのAの入力値がBのprofileへ送信されるのを防ぐ
+  // （store側のguardOwnProfileUpdate/isStillSameOwnerと合わせた多層防御）。
+  const [openedForUserId] = useState(authUserId);
+  useEffect(() => {
+    if (authUserId !== openedForUserId) onClose();
+  }, [authUserId, openedForUserId, onClose]);
+
+  const isMember = isConfirmedMember({ authUser, profile, profileLoading });
+
+  // 2026-09-13（再々レビュー2回目対応）：確定会員でない間（ゲスト・未ログイン・
+  // profile取得中・authUserとprofileのid不一致のいずれか）は、フォーム自体を
+  // 一切表示・送信しない。openedForUserIdの変化を待たずとも、profileが一時的に
+  // 不整合になった場合にも安全側へ倒す。
+  if (!isMember || !profile) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+        onClick={onClose}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        >
+          <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
+          <p className="font-sans text-sm text-[var(--ink)]/70">
+            ログインするとプロフィールを編集できます。
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`${styles.pressable} rounded-xl px-5 py-2.5 font-sans text-sm font-bold text-[var(--ink)]/70 transition hover:bg-[var(--ink)]/5`}
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <MyProfileEditForm profile={profile} openedForUserId={openedForUserId} onClose={onClose} />
+  );
+}
+
+// isMember確定後にだけマウントされるフォーム本体。マウント時点のprofileの値を
+// そのままuseStateの初期値に使えるため（isMemberがtrueの間、profileは常に
+// 本人の実データ）、以前のような「未ログイン時はuseUserStoreのダミー値に
+// フォールバック」という分岐は不要になる。
+function MyProfileEditForm({
+  profile,
+  openedForUserId,
+  onClose,
+}: {
+  profile: DojoProfile;
+  openedForUserId: string | null;
+  onClose: () => void;
+}) {
   const updateDisplayName = useProfileStore((s) => s.updateDisplayName);
   const updateAvatar = useProfileStore((s) => s.updateAvatar);
   const updateBio = useProfileStore((s) => s.updateBio);
+  const updateAvatarColor = useUserStore((s) => s.updateAvatarColor);
+  const updateAvatarIcon = useUserStore((s) => s.updateAvatarIcon);
+  const updateLocalBio = useUserStore((s) => s.updateBio);
 
-  // 2026-09-01: ログイン中（profileが存在する）場合は、名前・アイコン・一言コメントの
-  // 初期値を必ず実データ（profiles）から取る。未ログイン時のみuseUserStoreの
-  // ダミー値にフォールバックする（ローカルでしか使わない簡易編集用）。
-  const currentName = profile ? (profile.displayName ?? "") : user.displayName;
-
-  const [color, setColor] = useState(profile ? (profile.avatarColor ?? user.avatarColor) : user.avatarColor);
-  const [icon, setIcon] = useState(profile ? (profile.avatarIcon ?? user.avatarIcon) : user.avatarIcon);
-  const [name, setName] = useState(currentName);
-  const [bio, setBio] = useState(profile ? (profile.bio ?? "") : user.bio);
+  const [color, setColor] = useState(profile.avatarColor);
+  const [icon, setIcon] = useState(profile.avatarIcon);
+  const [name, setName] = useState(profile.displayName);
+  const [bio, setBio] = useState(profile.bio);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -60,41 +119,44 @@ export default function MyProfileEditModal({
       setError(`名前は${NAME_MAX_LENGTH}文字以内にしてください`);
       return;
     }
+    // 2026-09-13（再々レビュー2回目対応）：開いたユーザーIDと現在のユーザーIDが
+    // 一致することを、送信直前にも改めて確認する（開いている間に閉じる効果が
+    // まだ効いていない一瞬の間に送信ボタンが押された場合の最後の砦）。
+    // これより前にはuseUserStore・Supabaseのどちらも一切書き換えない。
+    if (useAuthStore.getState().user?.id !== openedForUserId) {
+      setError("アカウントが切り替わったため保存できません");
+      return;
+    }
     setSubmitting(true);
     setError(null);
 
+    // 2026-08-29:「ライブ中、自分のアイコンが相手の画面ではランダムなアイコンに
+    // なる」対応。アイコンの絵柄・色・一言コメントはuseUserStore（このブラウザ
+    // にしか保存されない、ライブ中の自分表示用）にも反映する。所有者確認より
+    // 後にだけ行う（切り替わっていたら実行しない）。
     updateAvatarColor(color);
     updateAvatarIcon(icon);
     updateLocalBio(bio.trim());
 
-    if (profile) {
-      // 2026-08-29:「ライブ中、自分のアイコンが相手の画面ではランダムなアイコンに
-      // なる」対応。アイコンの絵柄・色はこれまでuseUserStore（このブラウザにしか
-      // 保存されない）だけに保存していたため、他の参加者からは見えなかった。
-      // ログイン中はSupabase（profiles）にも保存し、他の参加者にも公開する。
-      const avatarResult = await updateAvatar(icon, color);
-      if (!avatarResult.ok) {
-        setSubmitting(false);
-        setError(avatarResult.reason);
-        return;
-      }
-      const result = await updateDisplayName(trimmedName);
-      if (!result.ok) {
-        setSubmitting(false);
-        setError(result.reason);
-        return;
-      }
-      // 2026-08-31: 一言コメントもSupabase（profiles.bio）へ保存し、他ユーザーの
-      // プロフィールからも見られるようにする。
-      const bioResult = await updateBio(bio.trim());
-      if (!bioResult.ok) {
-        setSubmitting(false);
-        setError(bioResult.reason);
-        return;
-      }
-    } else {
-      // 未ログイン時はダミーストアの名前だけその場で書き換える。
-      useUserStore.setState((s) => ({ user: { ...s.user, displayName: trimmedName } }));
+    const avatarResult = await updateAvatar(icon, color);
+    if (!avatarResult.ok) {
+      setSubmitting(false);
+      setError(avatarResult.reason);
+      return;
+    }
+    const result = await updateDisplayName(trimmedName);
+    if (!result.ok) {
+      setSubmitting(false);
+      setError(result.reason);
+      return;
+    }
+    // 2026-08-31: 一言コメントもSupabase（profiles.bio）へ保存し、他ユーザーの
+    // プロフィールからも見られるようにする。
+    const bioResult = await updateBio(bio.trim());
+    if (!bioResult.ok) {
+      setSubmitting(false);
+      setError(bioResult.reason);
+      return;
     }
 
     setSubmitting(false);

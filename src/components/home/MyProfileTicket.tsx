@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import { getRankByMeter } from "@/data/collectionData";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { MAX_TICKETS, computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -42,16 +43,23 @@ export default function MyProfileTicket({
   const authUser = useAuthStore((s) => s.user);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、名前「あなた」・
   // 段位「前座」・固定bio等）が実データであるかのように表示されていた問題を修正。
   // ログインしている場合のみ実データ（profiles）を出す。
-  // 2026-09-13（0070ゲスト参加レビュー対応）：authUserはゲストでもtruthyになるため、
-  // 「通常会員としてログイン中」かどうかはisGuestを除いて判定する。段位・フォロー数等の
-  // 実績表示はisMemberの場合のみ、ゲストは専用の案内に差し替える。
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲスト判定はauthUser.is_anonymousも
+  // 併せて見る共通関数（src/lib/guestStatus.ts）を使う。段位・フォロー数・寄合券等の
+  // 実績表示は「確定会員（isConfirmedMember、profile取得済みでisGuestでない）」の
+  // 場合のみ出し、ゲスト・未ログイン・profile取得中はすべて専用の案内に差し替える
+  // （取得中に既定値を通常会員の実データであるかのように見せない）。
   const isLoggedIn = !!authUser;
-  const isGuest = isLoggedIn && !!profile?.isGuest;
-  const isMember = isLoggedIn && !isGuest;
+  const isGuest = isGuestUser(authUser, profile);
+  const isMember = isConfirmedMember({ authUser, profile, profileLoading });
+  // 認証済み・匿名でもない（＝いずれ確実にisMemberになる）が、まだprofile取得が
+  // 済んでいない一瞬だけの状態。この間は会員UIもXログインボタンも出さず、
+  // 読み込み中の表示に留める（既定値を実データのように見せない）。
+  const isLoadingMember = isLoggedIn && !isGuest && !isMember;
   const rank = getRankByMeter(isMember ? (profile?.masteryMeter ?? 0) : 0);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
   const followerCount = useSnsStore((s) => s.myFollowerCount);
@@ -59,7 +67,9 @@ export default function MyProfileTicket({
     ? "ゲスト参加中"
     : isMember
       ? (profile?.displayName ?? "…")
-      : "ログインしてください";
+      : isLoggedIn
+        ? "…"
+        : "ログインしてください";
   const bio = isMember ? (profile?.bio ?? "") : "";
 
   // 「次の回復まで◯分」の表示を実時間の経過に合わせて更新するための再描画
@@ -79,7 +89,11 @@ export default function MyProfileTicket({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className={styles.profileCardRow}>
+      {/* 2026-09-13（0070ゲスト参加レビュー対応）：.profileCardRowは半券ぶんの
+          固定92px列を常に確保するグリッドのため、半券自体を出さないゲスト・未ログイン・
+          profile取得中はこのグリッドを使わず、本体カードが単独で全幅を使うようにする
+          （さもないと右側に92px分の空白が残ってしまう）。 */}
+      <div className={isMember ? styles.profileCardRow : "relative"}>
         {/* 本体：独立した紙（左のみ角丸、右は半券との境目でシャープな直角）。 */}
         <div className={`${styles.profileCardMain} ${styles.grainPaper}`}>
           <div className={`${styles.scallopDivider} ${styles.scallopKraft}`} aria-hidden />
@@ -99,11 +113,15 @@ export default function MyProfileTicket({
                 >
                   {displayName}
                 </p>
-                <span
-                  className={`${styles.grainAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
-                >
-                  段位：{rank.label}
-                </span>
+                {/* 2026-09-13（0070ゲスト参加レビュー対応）：段位はゲスト・未ログイン・
+                    profile取得中には一切表示しない（確定会員isMemberの場合のみ）。 */}
+                {isMember && (
+                  <span
+                    className={`${styles.grainAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
+                  >
+                    段位：{rank.label}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -135,6 +153,8 @@ export default function MyProfileTicket({
               <p className="text-center font-sans text-xs text-[var(--ink)]/70">
                 ゲスト参加中です。Xでログインするとご利用いただけます。
               </p>
+            ) : isLoadingMember ? (
+              <div className="h-5 w-full animate-pulse rounded bg-[var(--ink)]/10" aria-hidden />
             ) : null}
 
             {/* 「段位・実績を見る」が参考画像では1行に収まっているのに対し、text-smだと
@@ -157,6 +177,8 @@ export default function MyProfileTicket({
                   編集する
                 </button>
               </div>
+            ) : isLoadingMember ? (
+              <div className="h-[42px] w-full animate-pulse rounded-xl bg-[var(--ink)]/10" aria-hidden />
             ) : (
               <>
                 <button
@@ -178,26 +200,33 @@ export default function MyProfileTicket({
           </div>
         </div>
 
-        <TicketStubColumn count={ticketCount} />
+        {/* 2026-09-13（0070ゲスト参加レビュー対応）：寄合券の半券は確定会員にのみ表示する
+            （ゲスト・未ログイン・profile取得中はカードの高さを合わせるためだけの空欄を
+            出さない＝そもそも半券自体を描画しない）。 */}
+        {isMember && <TicketStubColumn count={ticketCount} />}
       </div>
 
-      {/* 寄合券の残り枚数・回復までの目安時間。カードの外、右寄せの控えめな表示にしている。 */}
-      <div className="flex items-center justify-end gap-3 px-1 font-sans text-xs text-[var(--ink)]/70">
-        <span className="font-bold">
-          寄合券　残り {ticketCount}/{MAX_TICKETS}
-        </span>
-        {ticketCount < MAX_TICKETS && nextTicketRecoveryAt ? (
-          <span className="flex items-center gap-1">
-            <ClockGlyph />
-            次の回復まで{formatMinutesUntil(nextTicketRecoveryAt)}分
+      {/* 寄合券の残り枚数・回復までの目安時間。カードの外、右寄せの控えめな表示にしている。
+          2026-09-13（0070ゲスト参加レビュー対応）：ゲスト・未ログイン・profile取得中は
+          「寄合券 残り0/5」「1時間で1枚回復」等を一切表示しない（確定会員にのみ表示）。 */}
+      {isMember && (
+        <div className="flex items-center justify-end gap-3 px-1 font-sans text-xs text-[var(--ink)]/70">
+          <span className="font-bold">
+            寄合券　残り {ticketCount}/{MAX_TICKETS}
           </span>
-        ) : (
-          <span className="flex items-center gap-1">
-            <ClockGlyph />
-            1時間で1枚回復
-          </span>
-        )}
-      </div>
+          {ticketCount < MAX_TICKETS && nextTicketRecoveryAt ? (
+            <span className="flex items-center gap-1">
+              <ClockGlyph />
+              次の回復まで{formatMinutesUntil(nextTicketRecoveryAt)}分
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <ClockGlyph />
+              1時間で1枚回復
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

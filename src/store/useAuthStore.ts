@@ -43,7 +43,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   // ログイン等）ではsignOut()を呼ばない。
   signInWithX: async (options) => {
     if (get().xSigningIn) return { ok: false, reason: "処理中です" };
-    const isGuestSwitch = options?.isGuestSwitch ?? false;
+    // 2026-09-13（再レビュー対応）：呼び出し元が渡すisGuestSwitchだけを信用しない。
+    // ストア自身が持つ現在のセッション（get().user?.is_anonymous）が実際に匿名なら、
+    // 呼び出し元がisGuestSwitchを渡し忘れていても（例：ゲスト対応を意識していない
+    // 素の「Xでログイン」ボタンから呼ばれた場合）確認ダイアログ→signOutを行う。
+    // 通常のXログイン利用者・未ログイン利用者（is_anonymousがfalse/undefined）では
+    // 従来どおり不要なsignOutを行わない。
+    const isGuestSwitch = get().user?.is_anonymous === true || (options?.isGuestSwitch ?? false);
 
     if (isGuestSwitch) {
       const confirmed = window.confirm(

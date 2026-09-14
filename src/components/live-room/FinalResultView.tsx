@@ -11,6 +11,7 @@ import XShareButton from "@/components/app/XShareButton";
 import MasteryGauge from "@/components/live-demo/MasteryGauge";
 import { MASTERY_GAIN } from "@/data/collectionData";
 import { APP_NAME } from "@/lib/appInfo";
+import { isGuestUser } from "@/lib/guestStatus";
 import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -94,7 +95,12 @@ export default function FinalResultView({
   }, [data.ranking]);
   const totalSteps = podiumTiers.length;
   const profile = useProfileStore((s) => s.profile);
+  const authUser = useAuthStore((s) => s.user);
   const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-13（0070ゲスト参加レビュー対応）：profile?.isGuestだけでなく
+  // authUser.is_anonymousも併せて判定する共通関数（src/lib/guestStatus.ts）を使う
+  // （profile取得前・取得失敗でも匿名ユーザーを通常会員として扱わないため）。
+  const isGuest = isGuestUser(authUser, profile);
 
   useEffect(() => {
     if (step > totalSteps) return;
@@ -272,7 +278,7 @@ export default function FinalResultView({
           ライブ終了後にXログインへの案内を出す。匿名セッションとの意図しない
           アップグレードを避けるため、isGuestSwitch:trueを渡す（useAuthStore.signInWithX
           が確認ダイアログを挟んだ上で必要な場合だけsignOut()してからOAuthを開始する）。 */}
-      {step > totalSteps && profile?.isGuest && (
+      {step > totalSteps && isGuest && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -280,7 +286,7 @@ export default function FinalResultView({
           className="mt-4 flex w-full flex-col items-center rounded-2xl bg-[#12101a] px-4 py-6 text-center"
         >
           <p className="font-sans text-xs text-white/80">
-            Xでログインすると、次回からポイント・称号・参加履歴を残せます。
+            Xでログインすると、次回からポイント・称号・アカウントの参加履歴を残せます。
           </p>
           <button
             type="button"

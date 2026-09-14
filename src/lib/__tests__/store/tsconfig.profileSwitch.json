@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "../../../..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../../../..",
+    "types": ["node"]
+  },
+  "include": [
+    "../../../data/collectionData.ts",
+    "../../../lib/basePath.ts",
+    "../../../lib/guestStatus.ts",
+    "../../../lib/supabase.ts",
+    "../../../store/useAuthStore.ts",
+    "../../../store/useProfileStore.ts",
+    "../../../store/useUserStore.ts",
+    "../../../types/economy.ts",
+    "useProfileStoreSwitch.check.ts"
+  ]
+}

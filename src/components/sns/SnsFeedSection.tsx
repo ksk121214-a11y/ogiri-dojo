@@ -9,7 +9,10 @@ import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsLiveResultsFeedList from "@/components/sns/SnsLiveResultsFeedList";
+import { isGuestUser } from "@/lib/guestStatus";
 import { isLocallyCreated } from "@/lib/staticContent";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore, type SnsAudienceKind, type SnsFeedKind, type SnsSortKind } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
 
@@ -35,6 +38,9 @@ const SORT_TABS: { key: SnsSortKind; label: string }[] = [
 // 統一したことで旧デザイン（variant="dojo"）を使う画面が無くなったため、分岐ごと削除し
 // 常にこのトンマナ（ホームのチケット意匠＝.grainPaper等）で表示する。
 export default function SnsFeedSection() {
+  const authUser = useAuthStore((s) => s.user);
+  const profile = useProfileStore((s) => s.profile);
+  const isGuest = isGuestUser(authUser, profile);
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
@@ -102,15 +108,23 @@ export default function SnsFeedSection() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex justify-center">
-        <Link
-          href="/sns/new"
-          className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} ${stadiumStyles.tornBanner} flex w-full items-center justify-center gap-2.5 px-6 py-5 font-sans text-xl font-black text-[var(--paper)] transition hover:opacity-95`}
-        >
-          <span aria-hidden>✎</span>
-          お題を投稿する
-        </Link>
-      </div>
+      {isGuest ? (
+        // 2026-09-13（再々レビュー対応）：ゲストは投稿できない仕様のため、押せるのに
+        // 拒否される投稿導線自体を見せず、案内文に差し替える（閲覧は引き続き許可）。
+        <p className="text-center font-sans text-xs text-[var(--ink)]/70">
+          ゲスト参加中です。Xでログインすると投稿やリアクションができます。
+        </p>
+      ) : (
+        <div className="flex justify-center">
+          <Link
+            href="/sns/new"
+            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} ${stadiumStyles.tornBanner} flex w-full items-center justify-center gap-2.5 px-6 py-5 font-sans text-xl font-black text-[var(--paper)] transition hover:opacity-95`}
+          >
+            <span aria-hidden>✎</span>
+            お題を投稿する
+          </Link>
+        </div>
+      )}
 
       <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 p-3 text-[var(--ink)] sm:p-4`}>
         {/* 3タブを均等幅にし、ラベルの文字数差（「ライブ結果」が長い等）に関わらず

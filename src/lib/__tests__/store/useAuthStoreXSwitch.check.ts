@@ -147,6 +147,26 @@ async function main() {
   nextOauthError = null;
   console.log("PASS: signInWithOAuth失敗時は生のエラーを含まない日本語の一般文言を返す");
 
+  // ---- テスト7（再レビュー対応）：ストアに匿名ユーザー（user.is_anonymous=true）が
+  //      入っている状態で、isGuestSwitchを渡さずにsignInWithX()を呼んでも、
+  //      呼び出し元のオプションだけを信用せず、確認ダイアログ→signOutを行う。 ----
+  signOutCallCount = 0;
+  oauthCallCount = 0;
+  confirmCallCount = 0;
+  confirmResult = true;
+  useAuthStore.setState({
+    user: { id: "guest-uid", is_anonymous: true } as unknown as ReturnType<typeof useAuthStore.getState>["user"],
+  });
+  const r7 = await useAuthStore.getState().signInWithX();
+  assert.deepEqual(r7, { ok: true });
+  assert.equal(confirmCallCount, 1, "user.is_anonymous=true時にisGuestSwitch未指定でも確認ダイアログを出していない");
+  assert.equal(signOutCallCount, 1, "user.is_anonymous=true時にisGuestSwitch未指定でもsignOut()を呼んでいない");
+  assert.equal(oauthCallCount, 1, "user.is_anonymous=true時にsignInWithOAuthを呼んでいない");
+  useAuthStore.setState({ user: null });
+  console.log(
+    "PASS: ストアのuser.is_anonymous=trueなら、isGuestSwitch未指定でも確認ダイアログ→signOutを行う（呼び出し元の指定だけを信用しない）",
+  );
+
   console.log("ALL USE_AUTH_STORE_X_SWITCH CHECKS PASSED");
 }
 

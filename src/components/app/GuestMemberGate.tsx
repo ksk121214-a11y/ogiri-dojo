@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
+import { isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -20,10 +21,11 @@ export default function GuestMemberGate({
   message?: string;
 }) {
   const profile = useProfileStore((s) => s.profile);
+  const authUser = useAuthStore((s) => s.user);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
 
-  if (!profile?.isGuest) return <>{children}</>;
+  if (!isGuestUser(authUser, profile)) return <>{children}</>;
 
   return (
     <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-3 p-8 text-center text-[var(--ink)]`}>

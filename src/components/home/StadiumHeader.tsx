@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import NotificationBell from "@/components/app/NotificationBell";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -25,6 +26,7 @@ function nameSizeClass(name: string): string {
 // 既存の認証（useAuthStore）はUIを変えずログイン/ログアウトの小さなリンクとして残す。
 export default function StadiumHeader() {
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
   const signInWithX = useAuthStore((s) => s.signInWithX);
@@ -32,9 +34,17 @@ export default function StadiumHeader() {
   const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-01: 未ログイン時にローカルのダミー名（useUserStore）が実データであるかの
   // ように表示されていた問題を修正。ログインしている場合のみ名前を出す。
-  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストは「ゲスト参加中」固定表示にし、
-  // 実データの表示名（プロフィール未設定なら「…」）は通常会員にのみ出す。
-  const displayName = authUser ? (profile?.isGuest ? "ゲスト参加中" : (profile?.displayName ?? "…")) : null;
+  // 2026-09-13（0070ゲスト参加レビュー対応）：ゲスト判定はauthUser.is_anonymousも
+  // 併せて見る共通関数（src/lib/guestStatus.ts）を使う。ゲストは「ゲスト参加中」
+  // 固定表示にし、実データの表示名（プロフィール未設定なら「…」）は確定会員
+  // （isConfirmedMember、authUserとprofileのidが一致している場合のみ）だけに出す。
+  // 2026-09-13（再レビュー対応）：profile単体（isGuestUser内のprofile.isGuest）を
+  // そのまま表示に使わず、isConfirmedMemberでauthUser.idとprofile.idの一致まで
+  // 確認する——ログイン切り替え直後、profileがまだ前の利用者のものである間に
+  // その名前を出してしまわないようにするため。
+  const guest = isGuestUser(authUser, profile);
+  const member = isConfirmedMember({ authUser, profile, profileLoading });
+  const displayName = !authUser ? null : guest ? "ゲスト参加中" : member ? (profile?.displayName ?? "…") : "…";
 
   return (
     <header className={`${styles.grainDark} border-b border-[var(--paper)]/70`}>
@@ -67,7 +77,7 @@ export default function StadiumHeader() {
             */}
             {!authLoading &&
               (authUser ? (
-                profile?.isGuest ? (
+                guest ? (
                   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストの「ログアウト」は
                   // 単に匿名セッションを終了するだけで意味が薄いため、代わりにXログインへの
                   // 切り替え導線を出す（useAuthStore.signInWithXが確認ダイアログを挟む）。

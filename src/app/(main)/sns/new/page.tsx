@@ -6,6 +6,7 @@ import { useState } from "react";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsBackButton from "@/components/sns/SnsBackButton";
+import { isGuestUser } from "@/lib/guestStatus";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -25,6 +26,7 @@ export default function SnsNewTopicPage() {
   const router = useRouter();
   const addTopic = useSnsStore((s) => s.addTopic);
   const profile = useProfileStore((s) => s.profile);
+  const authUser = useAuthStore((s) => s.user);
   const signInWithX = useAuthStore((s) => s.signInWithX);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,7 +62,7 @@ export default function SnsNewTopicPage() {
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストはsubmit_sns_topic（DB）が
   // GUEST_NOT_ALLOWEDで拒否するため、フォームを見せずに案内へ差し替える
   // （「寄合券が0枚のため投稿できません」という誤解を招く表示を避ける）。
-  if (profile?.isGuest) {
+  if (isGuestUser(authUser, profile)) {
     return (
       <StadiumPageShell contentTheme="kraft">
         <SnsBackButton

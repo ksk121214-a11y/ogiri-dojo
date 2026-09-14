@@ -6,10 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import CurtainOverlay from "@/components/live-demo/CurtainOverlay";
 import ScreenShell from "@/components/live-demo/ScreenShell";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
+import { isGuestUser } from "@/lib/guestStatus";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useProfileStore } from "@/store/useProfileStore";
 
 const ROLE_LABEL: Record<ParticipantRole, string> = {
   player: "プレイヤー希望",
@@ -26,6 +29,13 @@ export default function OpeningView() {
   const participantNames = useLiveFollowerStore((s) => s.participantNames);
   const followerError = useLiveFollowerStore((s) => s.error);
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
+  const authUser = useAuthStore((s) => s.user);
+  const profile = useProfileStore((s) => s.profile);
+  // 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストは観客(audience)としてのみ
+  // 参加でき、プレイヤー希望を選ぶ・プレイヤーへ役割変更する・組に所属することは
+  // 一切できない（DB側はjoin_live/_guard_participants_guest_audience_onlyが
+  // 最終防御）。UI側もプレイヤー関連のボタン・案内文をゲストには表示しない。
+  const isGuest = isGuestUser(authUser, profile);
   const [joining, setJoining] = useState(false);
   // 2026-09-01: 集客施策の効果測定のため、参加登録時に「どこで知ったか」を
   // 任意で選んでもらう（未選択のままでも参加はできる、選択必須にはしない）。
@@ -58,10 +68,14 @@ export default function OpeningView() {
   // 案内するのは誤りだった（以前はここが不正確だった）。プレイヤー→観客の
   // 変更は仕様上想定されていないため、こちらの警告はそのまま残す。
   const handleJoin = async (role: ParticipantRole) => {
+    // 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤーへ変更できない
+    // ため、「あとからプレイヤーへ変更できます」という文言はゲストには出さない。
     const confirmed = window.confirm(
       role === "player"
         ? "プレイヤーとして参加しますか？あとから観客に変更することはできません。"
-        : "観客として参加しますか？（人数に空きがあれば、あとからプレイヤーへ変更できます）",
+        : isGuest
+          ? "観客として参加しますか？"
+          : "観客として参加しますか？（人数に空きがあれば、あとからプレイヤーへ変更できます）",
     );
     if (!confirmed) return;
     if (role === "player") playSfx("joinAsPlayer");
@@ -107,15 +121,20 @@ export default function OpeningView() {
             </select>
           </label>
           <div className="flex flex-wrap justify-center gap-3">
-            <button
-              type="button"
-              disabled={joining || isPlayerFull}
-              onClick={() => handleJoin("player")}
-              title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
-              className="rounded-full bg-[#ff3b5b] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {joining ? "参加処理中…" : isPlayerFull ? "満員です" : "プレイヤーとして参加する"}
-            </button>
+            {/* 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤー希望を
+                選べないため、このボタン自体を表示しない（DB側join_liveも
+                GUEST_AUDIENCE_ONLYで拒否する多層防御）。 */}
+            {!isGuest && (
+              <button
+                type="button"
+                disabled={joining || isPlayerFull}
+                onClick={() => handleJoin("player")}
+                title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
+                className="rounded-full bg-[#ff3b5b] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {joining ? "参加処理中…" : isPlayerFull ? "満員です" : "プレイヤーとして参加する"}
+              </button>
+            )}
             <button
               type="button"
               disabled={joining}
@@ -125,36 +144,44 @@ export default function OpeningView() {
               {joining ? "参加処理中…" : "観客として参加する"}
             </button>
           </div>
-          {isPlayerFull && (
+          {!isGuest && isPlayerFull && (
             <p className="font-sans text-xs text-[#ffcf4a]">
               参加人数が上限に達しました。観客として参加できます。
             </p>
           )}
           {/* 2026-09-01: 「観客は採点できない」ことが画面上どこにも説明されておらず、
               観客が採点UIの不在に戸惑う可能性があったため、選択の時点で一言添える
-              （QA部指摘）。 */}
+              （QA部指摘）。ゲストにはプレイヤーの選択肢自体が無いため、観客の
+              説明だけに絞る。 */}
           <p className="mt-1 max-w-xs text-center font-sans text-[11px] text-white/50">
-            プレイヤー：舞台に立って回答し、自分の組の出番以外は採点も担当します。
-            観客：採点はできませんが、人数制限なくいつでも観戦できます。
+            {isGuest
+              ? "観客：採点はできませんが、爆笑・ツッコミ・拍手でいつでも盛り上げられます。"
+              : "プレイヤー：舞台に立って回答し、自分の組の出番以外は採点も担当します。観客：採点はできませんが、人数制限なくいつでも観戦できます。"}
           </p>
         </div>
       ) : myParticipant.preferred_role === "audience" ? (
         // 2026-09-03: 仕様書_v2.md §2.1「一度見学希望で登録した人が後から
         // プレイヤー希望に変更することも、上限内であれば可能」に対応。
         // 以前はここが確認済みの静的な表示だけで、変更する手段が無かった。
+        // 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤーへの
+        // 変更もできないため、この変更ボタン自体を表示しない。
         <div className="mt-6 flex flex-col items-center gap-2">
           <p className="font-sans text-sm text-[#ffcf4a]">観客希望で参加登録済みです</p>
-          <button
-            type="button"
-            disabled={joining || isPlayerFull}
-            onClick={() => handleJoin("player")}
-            title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
-            className="rounded-full bg-[#ff3b5b] px-6 py-2.5 font-sans text-xs font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {joining ? "変更処理中…" : isPlayerFull ? "満員です" : "プレイヤーに変更する"}
-          </button>
-          {isPlayerFull && (
-            <p className="font-sans text-xs text-[#ffcf4a]">参加人数が上限に達しています。</p>
+          {!isGuest && (
+            <>
+              <button
+                type="button"
+                disabled={joining || isPlayerFull}
+                onClick={() => handleJoin("player")}
+                title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
+                className="rounded-full bg-[#ff3b5b] px-6 py-2.5 font-sans text-xs font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {joining ? "変更処理中…" : isPlayerFull ? "満員です" : "プレイヤーに変更する"}
+              </button>
+              {isPlayerFull && (
+                <p className="font-sans text-xs text-[#ffcf4a]">参加人数が上限に達しています。</p>
+              )}
+            </>
           )}
         </div>
       ) : (

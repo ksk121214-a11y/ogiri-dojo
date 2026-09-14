@@ -17,7 +17,9 @@ import {
   sortParticipantsBySeat,
   type RoomRankingEntry,
 } from "@/lib/liveRoomSelectors";
+import { isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { supabase } from "@/lib/supabase";
 import type {
   AnswerRow,
@@ -792,16 +794,18 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       let { participantNames, participantAvatars, groups } = get();
       if (live) {
         // 2026-09-06:「回答すると回答者と回答席の位置が入れ替わる」不具合対応。
-        // ORDER BYが無いとSupabase/PostgreSQLが返す行順は問い合わせのたびに
-        // 変わりうる。joined_at昇順・同時刻はid昇順で全端末が同じ順序を得られる
-        // ようにし、さらにsortParticipantsBySeatでクライアント側でも同じ規則で
-        // 正規化する（DB側のソートだけに依存しない二重の保険）。
-        const { data: participantsData, error: participantsError } = await supabase
-          .from("participants")
-          .select("*")
-          .eq("live_id", live.id)
-          .order("joined_at", { ascending: true })
-          .order("id", { ascending: true });
+        // 取得後にsortParticipantsBySeatで必ずjoined_at昇順・同時刻はid昇順へ
+        // クライアント側で正規化するため、取得順そのものはここでは問わない。
+        // 2026-09-13（3回目レビュー対応・participants読み取り範囲の厳格化）：
+        // participantsテーブル自体は本人の行・司会/運営の行しか直接SELECTできなく
+        // なった（host_message等の非公開列を他人から隠すため、supabase/migrations/
+        // 0072参照）。一般参加者・観客・ゲストが必要とする「他参加者の表示用情報」
+        // （host_message等の非公開列は本人以外nullでマスク済み）は、安全な
+        // SECURITY DEFINER RPC経由で取得する。
+        const { data: participantsData, error: participantsError } = await supabase.rpc(
+          "participants_for_live",
+          { p_live_id: live.id },
+        );
         if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
         if (participantsError) {
           failStage("参加者情報の取得に失敗しました");
@@ -875,9 +879,26 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         .channel(swapArgs.topicFor("lives"))
         .on("postgres_changes", { event: "*", schema: "public", table: "lives" }, guardedRefetchAll)
         .subscribe(onSubscribeStatus);
+      // 2026-09-13（3回目レビュー対応）：participantsテーブル自体は本人の行・
+      // 司会/運営の行しか直接SELECTできなくなったため（0072）、Supabase Realtimeの
+      // Postgres Changesは購読者のRLS権限に基づいて配信可否を判定する都合上、
+      // 一般参加者は「自分以外の参加者」の入退場・組移動イベントをこのテーブルへの
+      // 直接購読では受け取れなくなった。参加者の実データを一切含まない専用の
+      // 合図テーブル(participants_change_pings、0072、全員に公開)を代わりに購読し、
+      // 受信のたびに同じrefetchAll()（「何か変わったので全部取り直す」）を呼ぶ。
+      // 2026-09-14（再レビュー対応）：pingsテーブルは「ライブ1件につき1行」を
+      // upsertする設計に変更した（無制限に増え続けないようにするため）ので、
+      // 2件目以降の変更はINSERTではなくUPDATEとして届く。INSERT/UPDATEの
+      // どちらも拾うようevent: "*"にする（DELETEはlive削除時のみで、この場合は
+      // どのみちlives側の変更で別途refetchAllが走るため実害はないが、"*"に
+      // 統一しておく）。
       const participantsCh = supabase
         .channel(swapArgs.topicFor("participants"))
-        .on("postgres_changes", { event: "*", schema: "public", table: "participants" }, guardedRefetchAll)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "participants_change_pings" },
+          guardedRefetchAll,
+        )
         .subscribe(onSubscribeStatus);
       const answersCh = supabase
         .channel(swapArgs.topicFor("answers"))
@@ -1025,17 +1046,24 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       p_referral_source: referralSource ?? null,
     });
     if (error) {
-      const reason = error.message.includes("PLAYER_LIMIT_REACHED")
-        ? "参加人数が上限に達しました"
-        : error.message.includes("PLAYER_JOIN_CLOSED")
-          ? "ゲームが始まったため、プレイヤーとしての参加登録はできません。観客として参加してください。"
-          : error.message.includes("PARTICIPANT_KICKED")
-            ? "このライブへの参加はできません。"
-            : error.message.includes("ACCOUNT_SUSPENDED")
-              ? "現在アカウントが利用停止中のため、ライブに参加できません。"
-              : error.message.includes("GUEST_OFFICIAL_NOT_ALLOWED")
-                ? "ゲストは本番ライブへ参加できません。Xでログインしてください。"
-                : error.message;
+      // 2026-09-13（再々レビュー2回目対応）：想定していないエラーコードを生のまま
+      // 画面へ返さない（Postgres/Supabaseの内部的な文言が利用者に見えてしまうのを
+      // 防ぐ）。詳細はconsole.warnで開発者向けに残す。
+      let reason: string;
+      if (error.message.includes("PLAYER_LIMIT_REACHED")) {
+        reason = "参加人数が上限に達しました";
+      } else if (error.message.includes("PLAYER_JOIN_CLOSED")) {
+        reason = "ゲームが始まったため、プレイヤーとしての参加登録はできません。観客として参加してください。";
+      } else if (error.message.includes("PARTICIPANT_KICKED")) {
+        reason = "このライブへの参加はできません。";
+      } else if (error.message.includes("ACCOUNT_SUSPENDED")) {
+        reason = "現在アカウントが利用停止中のため、ライブに参加できません。";
+      } else if (error.message.includes("GUEST_AUDIENCE_ONLY")) {
+        reason = "ゲストは観客として参加できます。プレイヤーで参加するにはXでログインしてください。";
+      } else {
+        console.warn("[live] join_liveが想定外のエラーで失敗", error);
+        reason = "参加できませんでした。時間をおいて再度お試しください。";
+      }
       set({ error: reason });
       return;
     }
@@ -1045,6 +1073,13 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   submitMyAnswer: async (body: string) => {
     const { currentTurn, myParticipant, myAnswerCount } = get();
     if (!currentTurn || !myParticipant) return { ok: false, reason: "参加登録がまだです" };
+    // 2026-09-13（ゲスト観客対応）：ゲストは回答できない仕様のため、UIの
+    // 非表示（回答入力欄自体を出さない）に加えて明示的にも止める
+    // （answers_insert_own_as_playerがrole='player'必須＋is_guest_user()で
+    // DB側も最終的に拒否するが、押せるのに拒否される体験を避ける）。
+    if (isGuestUser(useAuthStore.getState().user, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストは回答できません。Xでログインしてください。" };
+    }
     const trimmed = body.trim();
     if (!trimmed) return { ok: false, reason: "回答を入力してください" };
     if (trimmed.length > MAX_ANSWER_BODY_LENGTH) {
@@ -1065,7 +1100,10 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       if (error.code === "23505") {
         return { ok: false, reason: "ちょうど他の人の回答と重なりました。少し待ってからもう一度送信してください" };
       }
-      return { ok: false, reason: error.message };
+      // 2026-09-13（再々レビュー2回目対応）：生のSupabase/PostgreSQLエラーを
+      // 画面へ返さない（想定外のRLS拒否等も含め、詳細はconsole.warnに残す）。
+      console.warn("[live] 回答の送信に失敗", error);
+      return { ok: false, reason: "回答を送信できませんでした" };
     }
     await refreshTurnDerived();
     return { ok: true };
@@ -1077,6 +1115,13 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // activeAnswerが既に無い（確定直後・次の回答に切り替わった直後）は、押した本人が
     // 何か間違えたわけではない想定内の状態なので、何も表示させない(silent:true)。
     if (!activeAnswer || !myParticipant) return { ok: false, silent: true };
+    // 2026-09-13（ゲスト観客対応）：ゲストは採点できない仕様のため、明示的にも
+    // 止める（scores_insert_own_as_playerがrole='player'必須＋is_guest_user()で
+    // DB側も最終的に拒否するが、UIの非表示だけに頼らない多層防御。
+    // AudienceAnsweringView.handleScoreのcanJudgeガードとあわせた二重防御）。
+    if (isGuestUser(useAuthStore.getState().user, useProfileStore.getState().profile)) {
+      return { ok: false, silent: true };
+    }
     // 採点は一発勝負：一度投票したら本人でも変更できない（玉が落ちてくる演出と対応）。
     // DB側もscores_update_own_as_playerを廃止し、primary key(answer_id, judge_participant_id)で
     // 二重投票そのものを弾くようにしてある。ここではUIを素早く止めるためのガード。

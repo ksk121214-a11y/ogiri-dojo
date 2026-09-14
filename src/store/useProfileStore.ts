@@ -2,6 +2,7 @@
 // useAuthStore(ログイン状態)の変化を購読し、ログイン中ユーザーのプロフィールを取得・更新する。
 import { create } from "zustand";
 
+import { isGuestUser } from "@/lib/guestStatus";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useUserStore } from "@/store/useUserStore";
@@ -108,6 +109,42 @@ function toDojoProfile(row: {
   };
 }
 
+const PROFILE_UPDATE_GENERIC_ERROR = "更新に失敗しました。時間をおいて再度お試しください";
+// 2026-09-13（再々レビュー対応）：Supabase待機中にA→Bへ切り替わっていた場合、
+// Aの更新結果を現在のB（あるいはゲスト）のローカルstateへ反映しない。DB自体には
+// 既にAの行として正しく保存されている（guard.userIdはawait開始時点で固定した
+// 本人のidのため、書き込み先自体は誤らない）ため、これは「表示のすり替わり」を
+// 防ぐためだけの追加ガードであり、生のDBエラーではない専用の文言にする。
+const PROFILE_UPDATE_STALE_ACCOUNT_ERROR = "アカウントが切り替わったため、この操作は反映されませんでした";
+
+// updateDisplayName/updateAvatar/updateBio共通の事前チェック。
+// 2026-09-13（再レビュー対応）：
+// - ゲスト判定はauthUser.is_anonymousも併せて見る共通関数（src/lib/guestStatus.ts）を使う
+//   （profile.isGuestだけでは、ここに来る前にprofileが古い利用者のまま一瞬残っていた
+//   場合に判定を誤りうるため）。
+// - authUser.idとprofile.idが一致することも必須にする。ログイン切り替え直後、
+//   useProfileStoreのprofileがまだ前の利用者のものである間にこれらのアクションが
+//   呼ばれても、他人のprofiles行を書き換えてしまわないようにする最後の砦。
+function guardOwnProfileUpdate(): { ok: true; userId: string } | { ok: false; reason: string } {
+  const authUser = useAuthStore.getState().user;
+  const profile = useProfileStore.getState().profile;
+  if (!authUser || !profile) return { ok: false, reason: "ログインしていません" };
+  if (isGuestUser(authUser, profile)) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
+  if (authUser.id !== profile.id) return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+  return { ok: true, userId: profile.id };
+}
+
+// 2026-09-13（再々レビュー対応）：updateDisplayName/updateAvatar/updateBioが
+// Supabase待機中（await中）にA→Bへ切り替わっていないかを、await後にも確認する
+// ためのヘルパー。guardOwnProfileUpdateは開始時点の確認のみのため、これと
+// 組み合わせて使う（開始時・完了時の両方で本人確認する多層防御）。
+function isStillSameOwner(startedForUserId: string): boolean {
+  return (
+    useAuthStore.getState().user?.id === startedForUserId &&
+    useProfileStore.getState().profile?.id === startedForUserId
+  );
+}
+
 async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
@@ -125,59 +162,74 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
   loading: true,
 
   updateDisplayName: async (name) => {
-    const userId = get().profile?.id;
-    if (!userId) return { ok: false, reason: "ログインしていません" };
-    // 2026-09-12（ゲスト参加）：ゲストはprofiles_update_own（RLS）がUPDATE自体を
-    // 丸ごと拒否するため、ここで先に弾かないと「0件更新（エラー無し）」を
-    // 成功したかのように見せてしまう（DBには反映されず画面表示だけ変わる）。
-    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
+    const guard = guardOwnProfileUpdate();
+    if (!guard.ok) return guard;
     const trimmed = name.trim();
     if (!trimmed) return { ok: false, reason: "名前を入力してください" };
     if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
       return { ok: false, reason: `名前は${DISPLAY_NAME_MAX_LENGTH}文字以内にしてください` };
     }
 
-    const { error } = await supabase
+    // 2026-09-13（再レビュー対応）：RLS（profiles_update_own）が対象行を1件も
+    // 更新しなかった場合（本人以外の行を指してしまった・その間にゲスト化された等）、
+    // 従来はerrorがnullのまま「0件更新」を成功扱いにしてしまっていた。
+    // .select().single()で実際に更新された行を取得できた場合にのみ成功とし、
+    // 生のDB/Supabaseエラーはローカル状態にもUIにも一切出さない。
+    const { data, error } = await supabase
       .from("profiles")
       .update({ display_name: trimmed, display_name_set: true })
-      .eq("id", userId);
-    if (error) return { ok: false, reason: error.message };
+      .eq("id", guard.userId)
+      .select("display_name, display_name_set")
+      .single();
+    if (error || !data) return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+    // 2026-09-13（再々レビュー対応）：await中にA→Bへ切り替わっていたら、Aの
+    // 更新結果を現在のB（あるいはゲスト）のprofile/useUserStoreへ反映しない。
+    if (!isStillSameOwner(guard.userId)) return { ok: false, reason: PROFILE_UPDATE_STALE_ACCOUNT_ERROR };
 
     set((s) =>
       s.profile
-        ? { profile: { ...s.profile, displayName: trimmed, displayNameSet: true } }
+        ? { profile: { ...s.profile, displayName: data.display_name, displayNameSet: data.display_name_set } }
         : s,
     );
     // ranking/寄合帳など、まだuseProfileStoreを直接見ていない箇所とも名前がズレないよう、
     // ダミーのuseUserStore側にも同じ名前を反映しておく。
-    useUserStore.setState((s) => ({ user: { ...s.user, displayName: trimmed } }));
+    useUserStore.setState((s) => ({ user: { ...s.user, displayName: data.display_name } }));
     return { ok: true };
   },
 
   updateAvatar: async (icon, color) => {
-    const userId = get().profile?.id;
-    if (!userId) return { ok: false, reason: "ログインしていません" };
-    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
+    const guard = guardOwnProfileUpdate();
+    if (!guard.ok) return guard;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .update({ avatar_icon: icon, avatar_color: color })
-      .eq("id", userId);
-    if (error) return { ok: false, reason: error.message };
+      .eq("id", guard.userId)
+      .select("avatar_icon, avatar_color")
+      .single();
+    if (error || !data) return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+    if (!isStillSameOwner(guard.userId)) return { ok: false, reason: PROFILE_UPDATE_STALE_ACCOUNT_ERROR };
 
-    set((s) => (s.profile ? { profile: { ...s.profile, avatarIcon: icon, avatarColor: color } } : s));
+    set((s) =>
+      s.profile ? { profile: { ...s.profile, avatarIcon: data.avatar_icon, avatarColor: data.avatar_color } } : s,
+    );
     return { ok: true };
   },
 
   updateBio: async (bio) => {
-    const userId = get().profile?.id;
-    if (!userId) return { ok: false, reason: "ログインしていません" };
-    if (get().profile?.isGuest) return { ok: false, reason: "ゲストはプロフィールを変更できません" };
+    const guard = guardOwnProfileUpdate();
+    if (!guard.ok) return guard;
 
-    const { error } = await supabase.from("profiles").update({ bio }).eq("id", userId);
-    if (error) return { ok: false, reason: error.message };
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ bio })
+      .eq("id", guard.userId)
+      .select("bio")
+      .single();
+    if (error || !data) return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+    if (!isStillSameOwner(guard.userId)) return { ok: false, reason: PROFILE_UPDATE_STALE_ACCOUNT_ERROR };
 
-    set((s) => (s.profile ? { profile: { ...s.profile, bio } } : s));
+    set((s) => (s.profile ? { profile: { ...s.profile, bio: data.bio } } : s));
     return { ok: true };
   },
 
@@ -185,18 +237,30 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     const userId = get().profile?.id;
     if (!userId) return;
     const profile = await fetchProfile(userId);
-    if (profile) set({ profile });
+    if (!profile) return;
+    // 2026-09-13（再々レビュー対応）：取得中に別ユーザーへ切り替わっていたら、
+    // 遅れて届いたこの結果（古い利用者のprofile）を反映しない
+    // （loadForUserの世代ガードと同じ考え方）。
+    if (!isStillSameOwner(userId)) return;
+    set({ profile });
   },
 }));
 
 if (typeof window !== "undefined") {
   const loadForUser = (userId: string | null) => {
-    if (!userId) {
-      useProfileStore.setState({ profile: null, loading: false });
-      return;
-    }
-    useProfileStore.setState({ loading: true });
+    // 2026-09-13（再レビュー対応）：別のuserId（ログイン切り替え・ゲストへの
+    // 切り替え・ログアウト）を読み込み始める時点で、古いprofileを即座にnullへ
+    // 戻す。fetchProfile()の完了を待つ間、前の利用者のprofile（名前・ポイント・
+    // 段位・寄合券等）がそのまま残り続け、別アカウントやゲストへ切り替えた
+    // 直後に一瞬（取得が遅ければもっと長く）他人の情報が見えてしまっていた問題
+    // への対応。isConfirmedMember側のid一致チェックと合わせた多層防御。
+    useProfileStore.setState({ profile: null, loading: !!userId });
+    if (!userId) return;
     fetchProfile(userId).then((profile) => {
+      // 2026-09-13（再レビュー対応）：fetchProfile実行中にさらに別のuserIdへ
+      // 切り替わっていた場合（連続切り替え・素早い連打）、遅れて届いたこの結果を
+      // 反映しない（新しい方の切り替えを、古い方の取得結果で上書きしない）。
+      if (useAuthStore.getState().user?.id !== userId) return;
       useProfileStore.setState({ profile, loading: false });
       if (!profile) return;
       useUserStore.setState((s) => ({ user: { ...s.user, displayName: profile.displayName } }));

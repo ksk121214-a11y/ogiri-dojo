@@ -9,7 +9,10 @@ import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import { APP_NAME } from "@/lib/appInfo";
+import { isGuestUser } from "@/lib/guestStatus";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
 import type { SnsLiveResultAnswerCard, SnsLiveResultDetail, SnsLiveResultLabel } from "@/types/snsLiveResults";
 
@@ -118,6 +121,12 @@ function LiveResultCard({
   // このカードのresultAnswerIdに紐づくコメントを、いま開いている詳細キャッシュ全体
   // （複数のライブ結果を見た場合はその全部）から拾う。
   const allDetails = useSnsLiveResultsStore((s) => s.details);
+  const authUser = useAuthStore((s) => s.user);
+  const profile = useProfileStore((s) => s.profile);
+  // 2026-09-13（再々レビュー対応）：ゲストはライブ結果へのいいね・コメントが
+  // できない仕様のため、操作UI自体を表示しない（閲覧・コメント一覧の表示は
+  // 引き続き許可する）。
+  const isGuest = isGuestUser(authUser, profile);
   const [likePending, setLikePending] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
@@ -184,19 +193,28 @@ function LiveResultCard({
       ) : (
         <>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={likePending}
-              onClick={handleToggleLike}
-              className={`flex items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
-                card.liked
-                  ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
-                  : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
-              }`}
-            >
-              <HeartGlyph filled={card.liked} />
-              <span className="tabular-nums">{card.likes.toLocaleString()}</span>
-            </button>
+            {isGuest ? (
+              // 2026-09-13（再々レビュー対応）：ゲストはいいねできない仕様のため、
+              // 操作可能な見た目のボタンではなく件数だけの静的表示にする。
+              <span className="flex items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/50">
+                <HeartGlyph filled={card.liked} />
+                <span className="tabular-nums">{card.likes.toLocaleString()}</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={likePending}
+                onClick={handleToggleLike}
+                className={`flex items-center gap-1 rounded-full border px-3 py-1.5 font-sans text-xs font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  card.liked
+                    ? "border-dojo-cheer-pink bg-dojo-cheer-pink/20 text-dojo-cheer-pink"
+                    : "border-[var(--ink)]/25 text-[var(--ink)]/70 hover:border-dojo-cheer-pink hover:text-dojo-cheer-pink"
+                }`}
+              >
+                <HeartGlyph filled={card.liked} />
+                <span className="tabular-nums">{card.likes.toLocaleString()}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setCommentsOpen((v) => !v)}
@@ -233,27 +251,35 @@ function LiveResultCard({
                   />
                 </div>
               ))}
-              <form onSubmit={handleSubmitComment} className="flex flex-col gap-1.5">
-                <textarea
-                  value={commentBody}
-                  onChange={(e) => setCommentBody(e.target.value)}
-                  placeholder="コメントを入力..."
-                  rows={2}
-                  className="w-full rounded-lg border border-[var(--ink)]/20 bg-[var(--paper-muted)] p-2.5 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--accent)]"
-                />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-sans text-[11px] text-[var(--ink)]/60">
-                    {commentBody.length} / {MAX_COMMENT_LENGTH}
-                  </span>
-                  <button
-                    type="submit"
-                    disabled={!commentBody.trim() || commentBody.length > MAX_COMMENT_LENGTH}
-                    className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
-                  >
-                    コメントする
-                  </button>
-                </div>
-              </form>
+              {isGuest ? (
+                // 2026-09-13（再々レビュー対応）：ゲストはコメントできない仕様のため、
+                // 入力欄・送信ボタン自体を表示しない（コメント一覧の閲覧は許可のまま）。
+                <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+                  ゲストはコメントできません。Xでログインしてください。
+                </p>
+              ) : (
+                <form onSubmit={handleSubmitComment} className="flex flex-col gap-1.5">
+                  <textarea
+                    value={commentBody}
+                    onChange={(e) => setCommentBody(e.target.value)}
+                    placeholder="コメントを入力..."
+                    rows={2}
+                    className="w-full rounded-lg border border-[var(--ink)]/20 bg-[var(--paper-muted)] p-2.5 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-sans text-[11px] text-[var(--ink)]/60">
+                      {commentBody.length} / {MAX_COMMENT_LENGTH}
+                    </span>
+                    <button
+                      type="submit"
+                      disabled={!commentBody.trim() || commentBody.length > MAX_COMMENT_LENGTH}
+                      className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+                    >
+                      コメントする
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
         </>

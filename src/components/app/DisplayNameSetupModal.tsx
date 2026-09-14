@@ -3,20 +3,26 @@
 import { useState } from "react";
 
 import { APP_NAME } from "@/lib/appInfo";
+import { isConfirmedMember } from "@/lib/guestStatus";
+import { useAuthStore } from "@/store/useAuthStore";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 
 // ログイン後、display_name_set=falseの間だけ表示する高座名(演者名)の初回設定モーダル。
 // 後から自由に変更できる想定のため、閉じるボタンは置かず「決めるまで進めない」形にしている。
 export default function DisplayNameSetupModal() {
   const profile = useProfileStore((s) => s.profile);
+  const profileLoading = useProfileStore((s) => s.loading);
+  const authUser = useAuthStore((s) => s.user);
   const updateDisplayName = useProfileStore((s) => s.updateDisplayName);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // ゲストは名前を自己編集できない（DB側もprofiles_update_ownがRLSで拒否する）ため、
-  // このモーダルは一切出さない。
-  if (!profile || profile.displayNameSet || profile.isGuest) return null;
+  // このモーダルは一切出さない。2026-09-13（再レビュー対応）：isConfirmedMember
+  // （authUserとprofileのidが一致していることも含む）を使うことで、ログイン切り替え
+  // 直後にprofileがまだ前の利用者のものである間もこのモーダルを出さないようにする。
+  if (!isConfirmedMember({ authUser, profile, profileLoading }) || profile?.displayNameSet) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

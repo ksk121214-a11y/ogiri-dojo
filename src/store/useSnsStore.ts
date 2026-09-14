@@ -36,12 +36,27 @@ import {
   INITIAL_SNS_COMMENTS,
   INITIAL_SNS_TOPICS,
 } from "@/data/snsData";
+import { isGuestUser } from "@/lib/guestStatus";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import type { SnsAnswer, SnsComment, SnsTopic } from "@/types/sns";
 
 const PAGE_SIZE = 30;
+
+// 2026-09-13（再々レビュー2回目対応）：addTopic/addAnswer/addComment/deleteTopic/
+// deleteAnswer/deleteCommentがSupabase待機中（await中）にA→Bへ切り替わった場合の
+// 専用文言。DB側の書き込み自体は開始時点の本人（A）のものとして正しく行われて
+// いるが、その結果を現在の（切り替わった後の）利用者のローカルstateへ反映したり、
+// 呼び出し元（画面）へ成功として返して画面遷移させたりしない。
+const SNS_STALE_ACCOUNT_ERROR = "アカウントが切り替わったため、この操作は反映されませんでした";
+
+// addTopic等の開始時点で捕まえた世代・userIdが、await後も現在の状態と一致するかを
+// 確認するヘルパー。一致しなければ「所有権を失った」とみなし、呼び出し元は
+// state更新・pending解除・成功結果の返却のいずれも行わない。
+function ownsSnsMutation(myGeneration: number, myUserId: string, get: () => SnsState): boolean {
+  return get().generation === myGeneration && useAuthStore.getState().user?.id === myUserId;
+}
 
 // 本番環境ではダミー投稿者・ダミー投稿を一切表示しない。開発環境（next dev、プレビュー等）
 // でのみ動作確認用に残す。NODE_ENV==="production"はVercelの本番ビルドで自動的に
@@ -61,7 +76,10 @@ function mapSnsSubmitError(message: string | undefined): string {
   if (message.includes("ACCOUNT_SUSPENDED")) return "現在アカウントが利用停止中のため投稿できません";
   if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
   if (message.includes("ANSWER_NOT_FOUND")) return "回答が見つかりませんでした";
-  return message;
+  // 2026-09-13（再レビュー対応）：想定していないエラーコードを生のまま画面へ
+  // 返さない（Postgres/Supabaseの内部的な文言が利用者に見えてしまうのを防ぐ）。
+  // 詳細は呼び出し元でconsole.warn等の開発者向けログにのみ残す。
+  return "投稿に失敗しました。時間をおいて再度お試しください";
 }
 
 // delete_own_sns_topic/delete_own_sns_answer/delete_own_sns_comment（0067）が
@@ -130,6 +148,13 @@ interface SnsState {
   topics: SnsTopic[];
   answers: SnsAnswer[];
   comments: SnsComment[];
+  // 2026-09-13（再々レビュー対応）：認証userIdが変わるたび（ゲスト→Xログイン、
+  // 会員A→会員B、ログアウトを含む）に+1する世代カウンター。topics/answers/
+  // commentsのauthorId="me"変換・likedAnswerIds/followingAuthorIds/
+  // myFollowerCountはどれも「誰が見ているか」に依存する値のため、取得中に
+  // 別の利用者へ切り替わっていたら、遅れて届いた結果を反映しない（古い利用者の
+  // 情報が新しい利用者の画面に漏れるのを防ぐ）ためのガードに使う。
+  generation: number;
   likedAnswerIds: string[];
   followingAuthorIds: string[];
   // 自分がフォローされている数（sns_followsの実カウント）。ログイン中のみinit()時に
@@ -282,6 +307,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   topics: SHOW_DUMMY_DATA ? INITIAL_SNS_TOPICS : [],
   answers: SHOW_DUMMY_DATA ? INITIAL_SNS_ANSWERS : [],
   comments: SHOW_DUMMY_DATA ? INITIAL_SNS_COMMENTS : [],
+  generation: 0,
   likedAnswerIds: [],
   followingAuthorIds: INITIAL_FOLLOWING_AUTHOR_IDS,
   myFollowerCount: null,
@@ -310,6 +336,10 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   init: async () => {
     if (get().loaded) return;
     set({ loaded: true }); // 二重初期化防止（await前にフラグを立てる）
+    // 2026-09-13（再々レビュー対応）：この呼び出し開始時点の世代を記録し、
+    // 取得完了時に世代が変わっていたら（＝取得中に別ユーザーへ切り替わった）
+    // 結果を反映しない。
+    const myGeneration = get().generation;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const toAuthorId = toAuthorIdWith(myUserId);
 
@@ -346,6 +376,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const lastTopicRow = (topicsData ?? [])[((topicsData ?? []).length || 1) - 1] as DbTopicRow | undefined;
     const lastAnswerRow = (answersData ?? [])[((answersData ?? []).length || 1) - 1] as DbAnswerRow | undefined;
 
+    if (get().generation !== myGeneration) return;
     set((s) => ({
       // topics/answersはどちらも「先頭が最新」の並びに統一している。ダミーデータは
       // 開発環境でのみ、DB実データより後ろ（末尾寄り）に残す。
@@ -372,6 +403,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
         supabase.from("sns_follows").select("following_id").eq("follower_id", myUserId),
         supabase.from("sns_follows").select("id", { count: "exact", head: true }).eq("following_id", myUserId),
       ]);
+      if (get().generation !== myGeneration) return;
       set({
         likedAnswerIds: (likesData ?? []).map((r) => (r as { answer_id: string }).answer_id),
         followingAuthorIds: (followsData ?? []).map((r) => (r as { following_id: string }).following_id),
@@ -379,6 +411,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       });
     } else {
       // 未ログイン時は「…」のまま残らないよう0で確定させる。
+      if (get().generation !== myGeneration) return;
       set({ myFollowerCount: 0 });
     }
   },
@@ -389,6 +422,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const { topicsCursor, topicsHasMore, loadingMoreTopics } = get();
     if (!topicsHasMore || loadingMoreTopics || !topicsCursor) return;
     set({ loadingMoreTopics: true });
+    const myGeneration = get().generation;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const toAuthorId = toAuthorIdWith(myUserId);
 
@@ -402,9 +436,13 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
 
     if (error || !data) {
       console.warn("[sns] お題の追加取得に失敗", error);
-      set({ loadingMoreTopics: false });
+      if (get().generation === myGeneration) set({ loadingMoreTopics: false });
       return;
     }
+    // 2026-09-13（再々レビュー対応）：取得中に別ユーザーへ切り替わっていたら、
+    // 新しいTopicのauthorId="me"変換が古い利用者基準のままのため反映しない
+    // （resetSnsStoreForUserSwitchが既にloadingMoreTopics等をリセット済み）。
+    if (get().generation !== myGeneration) return;
 
     const rows = data as DbTopicRow[];
     const newTopics = rows.map((t) => mapTopicRow(t, toAuthorId));
@@ -427,6 +465,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const { answersCursor, answersHasMore, loadingMoreAnswers } = get();
     if (!answersHasMore || loadingMoreAnswers || !answersCursor) return;
     set({ loadingMoreAnswers: true });
+    const myGeneration = get().generation;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const toAuthorId = toAuthorIdWith(myUserId);
 
@@ -440,9 +479,11 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
 
     if (error || !data) {
       console.warn("[sns] 回答の追加取得に失敗", error);
-      set({ loadingMoreAnswers: false });
+      if (get().generation === myGeneration) set({ loadingMoreAnswers: false });
       return;
     }
+    // 2026-09-13（再々レビュー対応）：取得中に別ユーザーへ切り替わっていたら反映しない。
+    if (get().generation !== myGeneration) return;
 
     const rows = data as DbAnswerRow[];
     const newAnswers = rows.map((a) => mapAnswerRow(a, toAuthorId));
@@ -459,6 +500,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       newComments = ((commentsData ?? []) as DbCommentRow[]).map((c) => mapCommentRow(c, toAuthorId));
     }
 
+    if (get().generation !== myGeneration) return;
     set((s) => ({
       answers: [...s.answers, ...newAnswers],
       comments: [...s.comments, ...newComments],
@@ -479,7 +521,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
         .eq("user_id", myUserId)
         .in("answer_id", newAnswerIds);
       const newLikedIds = (likesData ?? []).map((r) => (r as { answer_id: string }).answer_id);
-      if (newLikedIds.length > 0) {
+      if (newLikedIds.length > 0 && get().generation === myGeneration) {
         set((s) => ({ likedAnswerIds: [...new Set([...s.likedAnswerIds, ...newLikedIds])] }));
       }
     }
@@ -490,6 +532,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   fetchTopicById: async (topicId) => {
     const existing = get().topics.find((t) => t.id === topicId);
     if (existing) return existing;
+    const myGeneration = get().generation;
     const { data, error } = await supabase
       .from("sns_topics")
       .select("*")
@@ -499,6 +542,11 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     if (error || !data) return null;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const topic = mapTopicRow(data as DbTopicRow, toAuthorIdWith(myUserId));
+    // 2026-09-13（再々レビュー対応）：取得中に別ユーザーへ切り替わっていたら、
+    // このauthorId="me"変換は古い利用者基準のため反映しない（切り替え時に
+    // resetSnsStoreForUserSwitchがtopics自体を作り直すため、二重に古い行が
+    // 混ざるのを防ぐ）。
+    if (get().generation !== myGeneration) return topic;
     set((s) => (s.topics.some((t) => t.id === topic.id) ? s : { topics: [...s.topics, topic] }));
     if (topic.authorId !== "me") await resolveRealAuthorNames([topic.authorId]);
     return topic;
@@ -507,6 +555,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   fetchAnswerById: async (answerId) => {
     const existing = get().answers.find((a) => a.id === answerId);
     if (existing) return existing;
+    const myGeneration = get().generation;
     const { data, error } = await supabase
       .from("sns_answers")
       .select("*")
@@ -525,6 +574,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       .eq("answer_id", answerId);
     const answerComments = ((commentsData ?? []) as DbCommentRow[]).map((c) => mapCommentRow(c, toAuthorId));
 
+    if (get().generation !== myGeneration) return answer;
     set((s) => ({
       answers: s.answers.some((a) => a.id === answer.id) ? s.answers : [...s.answers, answer],
       comments: [...s.comments.filter((c) => c.answerId !== answerId), ...answerComments],
@@ -544,7 +594,9 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
           .eq("user_id", myUserId2)
           .eq("answer_id", answerId)
           .maybeSingle();
-        if (likeRow) set((s) => ({ likedAnswerIds: [...s.likedAnswerIds, answerId] }));
+        if (likeRow && get().generation === myGeneration) {
+          set((s) => ({ likedAnswerIds: [...s.likedAnswerIds, answerId] }));
+        }
       }
     }
 
@@ -558,6 +610,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
 
   fetchAuthorPosts: async (authorId) => {
     if (authorId === "me") return; // 自分の投稿は投稿した瞬間にstateへ入っているため不要。
+    const myGeneration = get().generation;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const toAuthorId = toAuthorIdWith(myUserId);
     const [{ data: topicsData }, { data: answersData }] = await Promise.all([
@@ -574,6 +627,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
         .eq("is_hidden", false)
         .order("created_at", { ascending: false }),
     ]);
+    if (get().generation !== myGeneration) return;
     const newTopics = ((topicsData ?? []) as DbTopicRow[]).map((t) => mapTopicRow(t, toAuthorId));
     const newAnswers = ((answersData ?? []) as DbAnswerRow[]).map((a) => mapAnswerRow(a, toAuthorId));
     set((s) => ({
@@ -588,12 +642,30 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // RPCが投げるエラーメッセージ（PostgreSQLのRAISE EXCEPTIONの文言がそのまま
   // error.messageに載る）を日本語に変換する。想定外のエラーはそのまま表示する。
   addTopic: async (body) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "投稿にはログインが必要です" };
+    // 2026-09-13（再レビュー対応）：submit_sns_topic（DB）のGUEST_NOT_ALLOWED
+    // エラーに頼らず、フロント側でも共通のゲスト判定で先に弾き、DBへリクエスト
+    // しない（既存のNO_TICKETS等の案内と同じ「押せるのに拒否される」体験を避ける
+    // 方針を、お題投稿にも揃える）。
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストはお題を投稿できません。Xでログインしてください。" };
+    }
+    // 2026-09-13（再々レビュー2回目対応）：await中にA→Bへ切り替わっていないかを
+    // あとで確認するため、開始時点の世代とauth userIdを保持する。
+    const myGeneration = get().generation;
 
     const { data, error } = await supabase.rpc("submit_sns_topic", { p_body: body });
     if (error || !data) {
+      if (error) console.warn("[sns] お題の投稿に失敗", error);
       return { ok: false, reason: mapSnsSubmitError(error?.message) };
+    }
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      // 所有権を失っていたら、新しい利用者のtopicsへ他人（元のA自身だが今は
+      // 別の利用者に切り替わっている）の投稿を"me"として混ぜず、成功結果も
+      // 返さない（DB自体にはA本人の投稿として正しく保存済み）。
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
     }
     const topic: SnsTopic = { id: data.id, body: data.body, authorId: "me", createdAtLabel: "たった今" };
     set((s) => ({ topics: [topic, ...s.topics] }));
@@ -603,15 +675,24 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   },
 
   addAnswer: async (topicId, body) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "投稿にはログインが必要です" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストは回答できません。Xでログインしてください。" };
+    }
+    const myGeneration = get().generation;
 
     const { data, error } = await supabase.rpc("submit_sns_answer", {
       p_topic_id: topicId,
       p_body: body,
     });
     if (error || !data) {
+      if (error) console.warn("[sns] 回答の投稿に失敗", error);
       return { ok: false, reason: mapSnsSubmitError(error?.message) };
+    }
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
     }
     const answer: SnsAnswer = {
       id: data.id,
@@ -627,8 +708,13 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   },
 
   addComment: async (answerId, body) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "コメントにはログインが必要です" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストはツッコめません。Xでログインしてください。" };
+    }
+    const myGeneration = get().generation;
 
     // 2026-09-06: ツッコミ（コメント）もお題・回答と同じく寄合券を1枚消費する仕様に変更。
     // submit_sns_comment（0058）が券消費と投稿保存を同一トランザクションで行う。
@@ -637,7 +723,11 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       p_body: body,
     });
     if (error || !data) {
+      if (error) console.warn("[sns] ツッコミの投稿に失敗", error);
       return { ok: false, reason: mapSnsSubmitError(error?.message) };
+    }
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
     }
     const comment: SnsComment = {
       id: data.id,
@@ -655,16 +745,22 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // 状態・件数が残るようにする。likes列自体はDBトリガーで自動更新されるため、
   // ここではUIの即時反映用に楽観的更新するのみで、直接updateはしない。
   toggleLike: async (answerId) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) {
       return { ok: false, message: "いいねするにはログインが必要です。" };
     }
     // 2026-09-13（0070ゲスト参加レビュー対応）：sns_answer_likes_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
-    if (useProfileStore.getState().profile?.isGuest) {
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
       return { ok: false, message: "ゲストはいいねできません。Xでログインしてください。" };
     }
     if (get().likePending[answerId]) return { ok: false };
+    // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
+    // 遅れて届いたこの結果（pending解除・失敗時ロールバック）を新しい利用者の
+    // likedAnswerIds/answersへ反映しない（前の利用者のいいね状態が残る・
+    // 別ユーザーの表示に紛れ込むのを防ぐ）。
+    const myGeneration = get().generation;
 
     const alreadyLiked = get().likedAnswerIds.includes(answerId);
     set((s) => ({
@@ -680,6 +776,8 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const { error } = alreadyLiked
       ? await supabase.from("sns_answer_likes").delete().eq("answer_id", answerId).eq("user_id", userId)
       : await supabase.from("sns_answer_likes").insert({ answer_id: answerId, user_id: userId });
+
+    if (get().generation !== myGeneration) return { ok: false };
 
     set((s) => {
       const rest = { ...s.likePending };
@@ -708,16 +806,20 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // フォロー/フォロー解除。Supabase（sns_follows）へ実際に保存する。
   toggleFollow: async (authorId) => {
     if (authorId === "me") return { ok: false };
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) {
       return { ok: false, message: "フォローするにはログインが必要です。" };
     }
     // 2026-09-13（0070ゲスト参加レビュー対応）：sns_follows_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
-    if (useProfileStore.getState().profile?.isGuest) {
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
       return { ok: false, message: "ゲストはフォローできません。Xでログインしてください。" };
     }
     if (get().followPending[authorId]) return { ok: false };
+    // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
+    // 遅れて届いたこの結果を新しい利用者のfollowingAuthorIdsへ反映しない。
+    const myGeneration = get().generation;
 
     const alreadyFollowing = get().followingAuthorIds.includes(authorId);
     set((s) => ({
@@ -730,6 +832,8 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const { error } = alreadyFollowing
       ? await supabase.from("sns_follows").delete().eq("follower_id", userId).eq("following_id", authorId)
       : await supabase.from("sns_follows").insert({ follower_id: userId, following_id: authorId });
+
+    if (get().generation !== myGeneration) return { ok: false };
 
     set((s) => {
       const rest = { ...s.followPending };
@@ -758,12 +862,24 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // その回答・その回答へのツッコミをまとめて除去し、削除された回答ぶんの
   // likedAnswerIdsも一緒に取り除く（もう存在しない回答へのいいね状態を残さない）。
   deleteTopic: async (topicId) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+    }
     if (get().deletePending[topicId]) return { ok: false, reason: "削除に失敗しました" };
+    const myGeneration = get().generation;
     set((s) => ({ deletePending: { ...s.deletePending, [topicId]: true } }));
 
     const { error } = await supabase.rpc("delete_own_sns_topic", { p_topic_id: topicId });
+
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      // 2026-09-13（再々レビュー2回目対応）：所有権を失っていたら、新しい
+      // 利用者のdeletePending・一覧のどちらにも触れない（DB側の削除自体は
+      // 開始時点の本人のものとして正しく行われている）。
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
+    }
 
     set((s) => {
       const rest = { ...s.deletePending };
@@ -771,6 +887,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       return { deletePending: rest };
     });
     if (error) {
+      console.warn("[sns] お題の削除に失敗", error);
       return { ok: false, reason: mapSnsDeleteError(error.message) };
     }
 
@@ -792,12 +909,21 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // ツッコミの非表示化をアトミックに行う。成功時はローカルstateからも回答・
   // そのツッコミ・likedAnswerIdsの該当分を除去する。
   deleteAnswer: async (answerId) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+    }
     if (get().deletePending[answerId]) return { ok: false, reason: "削除に失敗しました" };
+    const myGeneration = get().generation;
     set((s) => ({ deletePending: { ...s.deletePending, [answerId]: true } }));
 
     const { error } = await supabase.rpc("delete_own_sns_answer", { p_answer_id: answerId });
+
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
+    }
 
     set((s) => {
       const rest = { ...s.deletePending };
@@ -805,6 +931,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       return { deletePending: rest };
     });
     if (error) {
+      console.warn("[sns] 回答の削除に失敗", error);
       return { ok: false, reason: mapSnsDeleteError(error.message) };
     }
 
@@ -819,12 +946,21 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   // 自分のツッコミを削除する。delete_own_sns_comment（0067）は対象の
   // コメント自身だけを非表示にし、他の投稿には一切影響しない。
   deleteComment: async (commentId) => {
-    const userId = useAuthStore.getState().user?.id;
+    const authUser = useAuthStore.getState().user;
+    const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
+    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
+      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+    }
     if (get().deletePending[commentId]) return { ok: false, reason: "削除に失敗しました" };
+    const myGeneration = get().generation;
     set((s) => ({ deletePending: { ...s.deletePending, [commentId]: true } }));
 
     const { error } = await supabase.rpc("delete_own_sns_comment", { p_comment_id: commentId });
+
+    if (!ownsSnsMutation(myGeneration, userId, get)) {
+      return { ok: false, reason: SNS_STALE_ACCOUNT_ERROR };
+    }
 
     set((s) => {
       const rest = { ...s.deletePending };
@@ -832,6 +968,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
       return { deletePending: rest };
     });
     if (error) {
+      console.warn("[sns] ツッコミの削除に失敗", error);
       return { ok: false, reason: mapSnsDeleteError(error.message) };
     }
 
@@ -846,16 +983,70 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
 // myFollowerCountをDBから取得できないレースコンディションがあった（リロードのたびに
 // フォロー中・フォロワー数が0に見えたり、フォローボタンの状態が戻ったりする不具合の原因）。
 // useAuthStoreのセッション確定（loading:falseになった時点）を待ってからinit()を呼ぶ。
+//
+// 2026-09-13（再々レビュー対応）：以前はこの初回ロードだけを行い、その後は
+// loaded:trueのまま二度とinit()し直さなかったため、ゲスト→Xログイン、会員A→
+// 会員Bへ切り替えても、authorId="me"変換・いいね済み状態・フォロー状態・
+// フォロワー数が「前の利用者向けに取得したまま」残り続けていた（別アカウントの
+// 投稿に自分の削除ボタンが出る等の原因）。resetSnsStoreForUserSwitchで
+// 認証userIdが変わるたびに世代(generation)を進めてこれらの状態を作り直し、
+// 改めてinit()する。topics/answers/commentsの「me」変換は取得時に一方向にしか
+// 変換できず後から作り直せないため、配列自体を空に戻してDBから読み直す方針にする
+// （realAuthorNames＝他ユーザーの表示名キャッシュは「誰が見ているか」に依存しない
+// 共有データのため、切り替えても消さずそのまま使い回す）。
+function resetSnsStoreForUserSwitch() {
+  useSnsStore.setState((s) => ({
+    generation: s.generation + 1,
+    topics: SHOW_DUMMY_DATA ? INITIAL_SNS_TOPICS : [],
+    answers: SHOW_DUMMY_DATA ? INITIAL_SNS_ANSWERS : [],
+    comments: SHOW_DUMMY_DATA ? INITIAL_SNS_COMMENTS : [],
+    likedAnswerIds: [],
+    followingAuthorIds: INITIAL_FOLLOWING_AUTHOR_IDS,
+    myFollowerCount: null,
+    loaded: false,
+    topicsCursor: null,
+    topicsHasMore: true,
+    loadingMoreTopics: false,
+    answersCursor: null,
+    answersHasMore: true,
+    loadingMoreAnswers: false,
+    likePending: {},
+    followPending: {},
+    deletePending: {},
+  }));
+  useSnsStore.getState().init();
+}
+
 if (typeof window !== "undefined") {
+  // undefined＝まだ一度もセッションが確定していない（起動直後）ことを表す。
+  // 初回のセッション確定はresetではなく素直な初回ロードとして扱い、以降は
+  // userIdが実際に変わった時だけresetSnsStoreForUserSwitchを呼ぶ。
+  let lastSeenUserId: string | null | undefined;
+  const handleAuthSettled = (userId: string | null) => {
+    if (lastSeenUserId === undefined) {
+      lastSeenUserId = userId;
+      useSnsStore.getState().init();
+      return;
+    }
+    if (userId === lastSeenUserId) return;
+    lastSeenUserId = userId;
+    resetSnsStoreForUserSwitch();
+  };
+
   const authState = useAuthStore.getState();
   if (!authState.loading) {
-    useSnsStore.getState().init();
+    handleAuthSettled(authState.user?.id ?? null);
   } else {
-    const unsubscribe = useAuthStore.subscribe((state) => {
+    const unsubscribeInitial = useAuthStore.subscribe((state) => {
       if (!state.loading) {
-        unsubscribe();
-        useSnsStore.getState().init();
+        unsubscribeInitial();
+        handleAuthSettled(state.user?.id ?? null);
       }
     });
   }
+
+  useAuthStore.subscribe((state) => {
+    if (state.loading) return; // セッション確定前の中間状態は無視する。
+    handleAuthSettled(state.user?.id ?? null);
+  });
 }

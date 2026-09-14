@@ -1,12 +1,23 @@
--- 「Xログインせずに、テストライブだけゲスト（匿名）として参加できるようにする」対応。
+-- 「Xログインせずに、本番・テストどちらのライブも観客として視聴できるように
+-- する」対応。
 --
--- 背景：動作確認・体験会等でXアカウントを持たない人にもテストライブ
--- （lives.live_mode='test'、0068）へその場で参加してもらいたい。Supabase Authの
--- 匿名サインイン（signInAnonymously、auth.users.is_anonymous=trueの行が作られる）を
--- 使う。本番ライブ（live_mode='official'）には一切参加させない。ポイント・実績・
+-- 【最終仕様（2026-09-13、ゲスト観客対応で確定）】
+-- ゲストは本番ライブ・テストライブの両方を観客(audience)として視聴できる
+-- （お題・回答・採点演出・組結果・最終結果の閲覧、爆笑・ツッコミ・拍手の利用、
+-- Xログインへの切替）。ただしプレイヤーにも審査員にもなれない（プレイヤー希望を
+-- 選べない・プレイヤーへ役割変更できない・組に所属しない・回答を送信しない・
+-- 採点しない）。ポイント・段位・順位報酬・運営ベスト報酬・ライブ参加履歴・
+-- ポイント履歴・通知・SNS投稿（お題/回答/ツッコミ/いいね/フォロー/通報/削除）・
+-- プロフィール/名前/アイコンの編集・寄合券は、引き続き一切持たない/行えない。
+-- participants行はライブ中の観客識別・リアクション・退場処理のための運用データ
+-- として作成されるが、会員の参加実績や公開結果（apply_live_rank_rewards等）には
+-- 一切含めない。Supabase Authの匿名サインイン（signInAnonymously、
+-- auth.users.is_anonymous=trueの行が作られる）を使う。ポイント・実績・
 -- point_history・SNS投稿・プロフィール自己編集等、ゲストに一切触らせてはいけない
 -- 経路は、0059/0060/0068の「RLS・列GRANT・SECURITY DEFINER RPCの多層防御」という
--- 既存の設計方針をそのまま踏襲してガードする。
+-- 既存の設計方針をそのまま踏襲してガードする（旧仕様であった「ゲストは本番ライブに
+-- 一切参加できない」制限は撤廃した。0071でofficialライブへのゲスト参加を一律拒否
+-- していた不変条件トリガーも、この最終仕様に合わせて作り直している）。
 --
 -- 【ゲストのDB側識別（二重照合）】
 -- public.is_guest_user()を新設する（is_host()と対になる設計）。
@@ -130,13 +141,22 @@ create unique index participants_guest_number_key
 -- 要さず最初から直接UPDATEできない（join_live経由でのみ書き込まれる）。
 
 -- ============================================================
--- 5) join_live：テストライブ限定のゲスト参加拒否・ゲスト番号の採番を追加する。
+-- 5) join_live：ゲストは本番・テストどちらのライブへも観客(audience)として
+--    参加できるようにし、ゲスト番号の採番を追加する。
 -- ============================================================
+-- 【最終仕様（2026-09-13、ゲスト観客対応）】ゲストは本番・テストの両方の
+-- ライブを観客として視聴できる。ただしプレイヤー・審査員には一切なれない
+-- （プレイヤー希望を選べない、組に所属しない、回答・採点をしない）。
+-- ポイント・段位・順位報酬・運営ベスト報酬・参加履歴・通知・SNS投稿・
+-- プロフィール編集は引き続き一切できない（他のセクション・0071参照）。
+--
 -- 現行本体は0053（333〜403行目）。既存の処理順序・ロック・全チェック（役割検証・
 -- 利用停止確認・退場済み確認・役割ダウングレード禁止・player参加はinterlude/opening
 -- のみ・定員確認・on conflict時の扱い）はそのまま維持し、以下だけを追加する：
---   (a) lives行をFOR UPDATEで取得する同じSELECTでlive_modeも取得し、ゲストが
---       official（本番）ライブへ参加しようとしたら'GUEST_OFFICIAL_NOT_ALLOWED'。
+--   (a) ゲストがp_preferred_role='player'を指定したら'GUEST_AUDIENCE_ONLY'で拒否する
+--       （live_modeを問わない。旧仕様のGUEST_OFFICIAL_NOT_ALLOWEDは廃止し、
+--       officialライブへのゲスト参加自体は許可する。live_mode自体はもう
+--       この判定に使わないため、lives行のSELECT列からも外した）。
 --   (b) ゲストの場合だけ、guest_numberを「同じライブの既存ゲストの最大値+1」で
 --       採番し、is_guest/guest_numberをinsertする（on conflict do update句には
 --       含めない＝再joinや役割変更で値が変わらないようにする）。
@@ -149,7 +169,6 @@ declare
   v_max int;
   v_count int;
   v_phase text;
-  v_live_mode text;
   v_kicked timestamptz;
   v_suspended boolean;
   v_existing_role text;
@@ -168,16 +187,17 @@ begin
     raise exception 'ACCOUNT_SUSPENDED';
   end if;
 
-  select max_players, current_phase, live_mode into v_max, v_phase, v_live_mode
+  select max_players, current_phase into v_max, v_phase
     from public.lives where id = p_live_id for update;
   if not found then
     raise exception 'LIVE_NOT_FOUND';
   end if;
 
-  -- 0070追加：ゲスト（匿名）は本番ライブへ一切参加できない（テストライブのみ）。
+  -- 0070追加（ゲスト観客対応で仕様変更）：ゲスト（匿名）は本番・テストどちらの
+  -- ライブへも観客(audience)として参加できる。プレイヤー希望は選べない。
   v_is_guest := is_guest_user();
-  if v_is_guest and v_live_mode = 'official' then
-    raise exception 'GUEST_OFFICIAL_NOT_ALLOWED';
+  if v_is_guest and p_preferred_role <> 'audience' then
+    raise exception 'GUEST_AUDIENCE_ONLY';
   end if;
 
   select kicked_at into v_kicked

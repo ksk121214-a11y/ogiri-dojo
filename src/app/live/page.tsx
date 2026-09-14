@@ -151,18 +151,17 @@ export default function LivePage() {
         ? Math.max(0, Math.ceil((new Date(live.phase_deadline).getTime() - now) / 1000))
         : null;
 
-  // 2026-09-13（0070ゲスト参加レビュー対応）：authLoading/未ログイン/profile取得中/
-  // ライブ取得中/認証済みゲストが本番ライブを開いた場合、のどれに該当するかを
-  // 純粋関数（テスト済み、src/lib/liveGuestAccess.ts）にまとめて判定する。
-  // profileLoading中に一瞬でも通常の参加画面（isGuest判定前）を出さないための
-  // ガードを、既存のauthLoading/liveLoadingと同じ扱いで追加している。
+  // 2026-09-13（0070ゲスト参加レビュー対応、再々レビュー2回目で本番ライブ限定の
+  // ブロック分岐は廃止）：authLoading/未ログイン/profile取得中/ライブ取得中の
+  // どれに該当するかを
+  // 純粋関数（テスト済み、src/lib/liveGuestAccess.ts）にまとめて判定する。ゲストは
+  // 本番・テストどちらのライブも観客として視聴できる最終仕様になったため、
+  // 「認証済みゲストが本番ライブを開いた場合だけ特別扱いする」分岐は無くなった。
   const screenGate = resolveLiveScreenGate({
     authLoading,
     isAuthenticated: !!authUser,
     profileLoading,
     liveLoading,
-    liveMode: live?.live_mode ?? null,
-    isGuest: !!profile?.isGuest,
   });
 
   if (screenGate === "auth-loading" || screenGate === "profile-loading") {
@@ -170,15 +169,15 @@ export default function LivePage() {
   }
 
   if (screenGate === "not-authenticated") {
-    // 2026-09-12（ゲスト参加）：テストライブ(live_mode==='test')のみ、Xアカウントを
-    // 持たない人もその場でゲスト（匿名）参加できるボタンを併せて表示する。
-    // 本番ライブ(live_mode==='official')・liveがまだ取得できていない場合は、
-    // 従来どおりXログインの案内だけを表示する（DB側のjoin_live/GUEST_OFFICIAL_NOT_ALLOWED
-    // と矛盾しないよう、そもそも公式ライブではゲストボタン自体を出さない）。
-    const isTestLive = live?.live_mode === "test";
+    // 2026-09-13（ゲスト観客対応の最終仕様確定）：本番・テストのどちらのライブでも、
+    // Xログインせず観客として視聴できるボタンを併せて表示する（以前はテストライブ
+    // 限定だった）。内部的にはsignInAsGuest()がSupabaseの匿名認証
+    // （signInAnonymously）を行うだけで、参加登録自体はこのページの他の画面
+    // （観客として参加する等のボタン）からjoin_live(..., 'audience', ...)を
+    // 呼ぶ既存の経路にそのまま合流する（ゲストはaudience以外を選べない）。
     return (
       <CenterMessage>
-        <p className="mb-4">参加するにはXログインが必要です。</p>
+        <p className="mb-4">プレイヤーとして参加するにはXログインが必要です。</p>
         <button
           type="button"
           onClick={async () => {
@@ -191,29 +190,24 @@ export default function LivePage() {
           Xでログイン
         </button>
         {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
-        {isTestLive && (
-          <>
-            <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
-              ログインせずゲストとして参加できます。
-              <br />
-              ゲストは名前・アイコンの変更ができず、ポイントや参加履歴は残りません。
-            </p>
-            <button
-              type="button"
-              disabled={guestSigningIn}
-              onClick={async () => {
-                setGuestSignInError(null);
-                const result = await signInAsGuest();
-                if (!result.ok) setGuestSignInError(result.reason);
-              }}
-              className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown disabled:opacity-50"
-            >
-              {guestSigningIn ? "参加準備中…" : "ゲストとして参加"}
-            </button>
-            {guestSignInError && (
-              <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{guestSignInError}</p>
-            )}
-          </>
+        <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
+          ゲストは観客としてライブを視聴できます。回答・採点・ポイント記録はできません。
+          爆笑・ツッコミ・拍手は利用できます。
+        </p>
+        <button
+          type="button"
+          disabled={guestSigningIn}
+          onClick={async () => {
+            setGuestSignInError(null);
+            const result = await signInAsGuest();
+            if (!result.ok) setGuestSignInError(result.reason);
+          }}
+          className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown disabled:opacity-50"
+        >
+          {guestSigningIn ? "準備中…" : "ログインせず観客として見る"}
+        </button>
+        {guestSignInError && (
+          <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{guestSignInError}</p>
         )}
       </CenterMessage>
     );
@@ -244,41 +238,6 @@ export default function LivePage() {
             </button>
           </>
         )}
-      </CenterMessage>
-    );
-  }
-
-  // 2026-09-13（0070ゲスト参加レビュー対応）：認証済みゲスト（profile.isGuest）が
-  // 本番ライブ(live_mode==='official')を開いた場合、参加ボタン・役割変更・回答・
-  // 採点画面へは一切進ませず、Xログインの案内だけを表示する。DB側（join_live/
-  // GUEST_OFFICIAL_NOT_ALLOWED）と矛盾しない、フロント側の対応する案内。
-  if (screenGate === "official-guest-blocked") {
-    return (
-      <CenterMessage>
-        <p className="mb-2 font-sans text-base font-bold text-dojo-ink">
-          本番ライブへの参加にはXログインが必要です
-        </p>
-        <p className="mb-4 font-sans text-xs text-dojo-dark-brown/70">
-          ゲスト参加はテストライブのみご利用いただけます。
-        </p>
-        <button
-          type="button"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX({ isGuestSwitch: true });
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
-          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
-        >
-          Xでログイン
-        </button>
-        {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
-        <Link
-          href="/"
-          className="mt-4 block font-sans text-xs text-dojo-dark-brown/70 underline"
-        >
-          ホームに戻る
-        </Link>
       </CenterMessage>
     );
   }
