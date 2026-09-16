@@ -19,6 +19,11 @@ function nameSizeClass(name: string): string {
   return "text-sm";
 }
 
+// 2026-09-16: ポイントを消費する機能（ガチャ等）がまだ無いため、累計ポイントの下に
+// 小さく出ている「ポイント残高」表示だけを一旦隠す。取得・計算処理（pointsBalance
+// 自体）はそのまま残し、消費機能を実装するタイミングでtrueに戻せばよい。
+const SHOW_POINTS_BALANCE = false;
+
 // 生成り色の横長カード：アイコン＋ログイン状態／名前／段位＋ポイント残高。
 // アイコンは大喜利ライブと同じ線画（MyIconAvatar、マイページで変更した色がそのまま反映される）。
 // 2026-08-28: 「上のポイントは消して、こちらのポイント残高を押すと履歴が出るように」の
@@ -165,7 +170,9 @@ export default function AccountSummary() {
           {totalPoints.toLocaleString()}
           <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/60">pt</span>
         </p>
-        <p className="text-[10px] text-[var(--ink)]/50">残高 {pointsBalance.toLocaleString()}pt</p>
+        {SHOW_POINTS_BALANCE && (
+          <p className="text-[10px] text-[var(--ink)]/50">残高 {pointsBalance.toLocaleString()}pt</p>
+        )}
       </button>
 
       {historyOpen && <PointHistoryModal variant="stadium" onClose={() => setHistoryOpen(false)} />}
