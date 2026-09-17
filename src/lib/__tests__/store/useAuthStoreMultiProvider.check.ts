@@ -130,7 +130,7 @@ async function main() {
 
   // ---- テスト5: unlinkProviderは識別情報が1つしかない場合、unlinkIdentityを呼ばずに拒否する。 ----
   unlinkIdentityCalls = [];
-  useAuthStore.setState({ identities: [makeIdentity("id-x", "x")] });
+  useAuthStore.setState({ identities: [makeIdentity("id-x", "x")], identitiesStatus: "loaded" });
   const only = makeIdentity("id-x", "x");
   const r5 = await useAuthStore.getState().unlinkProvider(only);
   assert.equal(r5.ok, false, "最後の1つなのにunlinkProviderが成功扱いになっている");
@@ -145,7 +145,11 @@ async function main() {
   const idX = makeIdentity("id-x", "x");
   const idGoogle = makeIdentity("id-google", "google");
   nextIdentities = [idX];
-  useAuthStore.setState({ identities: [idX, idGoogle], user: { id: "user-1" } as unknown as ReturnType<typeof useAuthStore.getState>["user"] });
+  useAuthStore.setState({
+    identities: [idX, idGoogle],
+    identitiesStatus: "loaded",
+    user: { id: "user-1" } as unknown as ReturnType<typeof useAuthStore.getState>["user"],
+  });
   const r6 = await useAuthStore.getState().unlinkProvider(idGoogle);
   assert.deepEqual(r6, { ok: true });
   assert.equal(unlinkIdentityCalls.length, 1);

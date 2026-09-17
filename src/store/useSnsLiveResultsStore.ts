@@ -516,7 +516,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する
     // （useSnsStore.tsのtoggleLike/toggleFollowと同じ方針）。
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, message: "ゲストはいいねできません。Xでログインしてください。" };
+      return { ok: false, message: "ゲストはいいねできません。ログインしてください。" };
     }
     if (get().likePending[resultAnswerId]) return { ok: false };
     // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
@@ -594,7 +594,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     const userId = authUser?.id;
     if (!userId) return { ok: false, message: "コメントするにはログインが必要です。" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, message: "ゲストはコメントできません。Xでログインしてください。" };
+      return { ok: false, message: "ゲストはコメントできません。ログインしてください。" };
     }
     if (get().commentPending[resultAnswerId]) return { ok: false };
     // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、

@@ -2,10 +2,27 @@
 
 import { useState } from "react";
 
+import AuthProviderIcon from "@/components/app/AuthProviderIcon";
 import type { AuthProviderId } from "@/lib/authProviders";
-import { AUTH_PROVIDER_LABELS, listEnabledAuthProviders } from "@/lib/authProviders";
+import { listEnabledAuthProviders } from "@/lib/authProviders";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLoginModalStore } from "@/store/useLoginModalStore";
+
+// 2026-09-17（複数プロバイダー対応レビュー修正・項目7）：X/Google/Appleを
+// すべて同じ赤色の独自ボタンにしない。Googleは白背景+グレー枠+公式4色ロゴ、
+// Appleは黒背景+白文字+白リンゴロゴという、各社のサインインボタンの
+// ブランドガイドラインに沿った配色にする（Xは既存の意匠を維持）。
+const PROVIDER_BUTTON_CLASS: Record<AuthProviderId, string> = {
+  x: "bg-dojo-curtain-red text-dojo-washi-white hover:opacity-90",
+  google: "border border-[#747775] bg-white text-[#1f1f1f] hover:bg-[#f7f8f8]",
+  apple: "bg-black text-white hover:opacity-90",
+};
+
+const PROVIDER_BUTTON_LABEL: Record<AuthProviderId, string> = {
+  x: "Xでログイン",
+  google: "Googleでログイン",
+  apple: "Appleでログイン",
+};
 
 // 2026-09-16（複数プロバイダー対応）：これまで各画面が個別に持っていた
 // 「Xでログイン」ボタン＋ローカルのエラー表示を、この1つの共通モーダルに
@@ -90,11 +107,10 @@ export default function LoginMethodModal() {
               type="button"
               disabled={busy}
               onClick={() => handleSelect(provider)}
-              className="rounded-xl bg-dojo-curtain-red px-4 py-3 font-sans text-sm font-bold text-dojo-washi-white transition hover:opacity-90 disabled:opacity-50"
+              className={`flex items-center justify-center gap-2.5 rounded-full px-4 py-3 font-sans text-sm font-bold transition disabled:opacity-50 ${PROVIDER_BUTTON_CLASS[provider]}`}
             >
-              {signingInProvider === provider
-                ? "処理中…"
-                : `${AUTH_PROVIDER_LABELS[provider]}でログイン`}
+              <AuthProviderIcon provider={provider} className="h-5 w-5 shrink-0" />
+              {signingInProvider === provider ? "処理中…" : PROVIDER_BUTTON_LABEL[provider]}
             </button>
           ))}
         </div>

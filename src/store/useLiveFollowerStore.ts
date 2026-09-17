@@ -1059,7 +1059,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       } else if (error.message.includes("ACCOUNT_SUSPENDED")) {
         reason = "現在アカウントが利用停止中のため、ライブに参加できません。";
       } else if (error.message.includes("GUEST_AUDIENCE_ONLY")) {
-        reason = "ゲストは観客として参加できます。プレイヤーで参加するにはXでログインしてください。";
+        reason = "ゲストは観客として参加できます。プレイヤーで参加するにはログインしてください。";
       } else {
         console.warn("[live] join_liveが想定外のエラーで失敗", error);
         reason = "参加できませんでした。時間をおいて再度お試しください。";
@@ -1078,7 +1078,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // （answers_insert_own_as_playerがrole='player'必須＋is_guest_user()で
     // DB側も最終的に拒否するが、押せるのに拒否される体験を避ける）。
     if (isGuestUser(useAuthStore.getState().user, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストは回答できません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストは回答できません。ログインしてください。" };
     }
     const trimmed = body.trim();
     if (!trimmed) return { ok: false, reason: "回答を入力してください" };

@@ -69,7 +69,7 @@ function mapSnsSubmitError(message: string | undefined): string {
   if (message.includes("NOT_LOGGED_IN")) return "投稿にはログインが必要です";
   // 0070（ゲスト参加）：submit_sns_topic/submit_sns_answer/submit_sns_commentが
   // ゲスト（匿名）からの呼び出しを拒否した場合のエラーコード。
-  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。Xでログインしてください。";
+  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。ログインしてください。";
   if (message.includes("NO_TICKETS")) return "寄合券が足りません。回復を待ってから投稿してください。";
   if (message.includes("EMPTY_BODY")) return "本文を入力してください";
   if (message.includes("BODY_TOO_LONG")) return "文字数が上限を超えています";
@@ -90,7 +90,7 @@ function mapSnsDeleteError(message: string | undefined): string {
   if (message.includes("NOT_LOGGED_IN")) return "削除にはログインが必要です";
   // 0070（ゲスト参加）：delete_own_sns_answer/comment/topicがゲスト（匿名）からの
   // 呼び出しを拒否した場合のエラーコード。
-  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。Xでログインしてください。";
+  if (message.includes("GUEST_NOT_ALLOWED")) return "ゲストはこの操作を行えません。ログインしてください。";
   if (message.includes("NOT_OWNER")) return "自分の投稿だけ削除できます";
   if (message.includes("TOPIC_NOT_FOUND")) return "お題が見つかりませんでした";
   if (message.includes("ANSWER_NOT_FOUND")) return "回答が見つかりませんでした";
@@ -650,7 +650,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     // しない（既存のNO_TICKETS等の案内と同じ「押せるのに拒否される」体験を避ける
     // 方針を、お題投稿にも揃える）。
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストはお題を投稿できません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストはお題を投稿できません。ログインしてください。" };
     }
     // 2026-09-13（再々レビュー2回目対応）：await中にA→Bへ切り替わっていないかを
     // あとで確認するため、開始時点の世代とauth userIdを保持する。
@@ -679,7 +679,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "投稿にはログインが必要です" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストは回答できません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストは回答できません。ログインしてください。" };
     }
     const myGeneration = get().generation;
 
@@ -712,7 +712,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "コメントにはログインが必要です" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストはツッコめません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストはツッコめません。ログインしてください。" };
     }
     const myGeneration = get().generation;
 
@@ -753,7 +753,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     // 2026-09-13（0070ゲスト参加レビュー対応）：sns_answer_likes_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, message: "ゲストはいいねできません。Xでログインしてください。" };
+      return { ok: false, message: "ゲストはいいねできません。ログインしてください。" };
     }
     if (get().likePending[answerId]) return { ok: false };
     // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
@@ -814,7 +814,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     // 2026-09-13（0070ゲスト参加レビュー対応）：sns_follows_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いてDB往復せず即座に案内する。
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, message: "ゲストはフォローできません。Xでログインしてください。" };
+      return { ok: false, message: "ゲストはフォローできません。ログインしてください。" };
     }
     if (get().followPending[authorId]) return { ok: false };
     // 2026-09-13（再々レビュー対応）：await中に別ユーザーへ切り替わっていたら、
@@ -866,7 +866,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストはこの操作を行えません。ログインしてください。" };
     }
     if (get().deletePending[topicId]) return { ok: false, reason: "削除に失敗しました" };
     const myGeneration = get().generation;
@@ -913,7 +913,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストはこの操作を行えません。ログインしてください。" };
     }
     if (get().deletePending[answerId]) return { ok: false, reason: "削除に失敗しました" };
     const myGeneration = get().generation;
@@ -950,7 +950,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
     const userId = authUser?.id;
     if (!userId) return { ok: false, reason: "削除にはログインが必要です" };
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      return { ok: false, reason: "ゲストはこの操作を行えません。Xでログインしてください。" };
+      return { ok: false, reason: "ゲストはこの操作を行えません。ログインしてください。" };
     }
     if (get().deletePending[commentId]) return { ok: false, reason: "削除に失敗しました" };
     const myGeneration = get().generation;

@@ -20,6 +20,17 @@ import { supabase } from "@/lib/supabase";
 // 失敗時（重複連携=identity_already_exists等）はSupabase側がこのURLへ
 // error/error_codeを付けて返す。生のエラーは画面に出さず、mapAuthErrorToMessageで
 // 必ず日本語の案内文へ変換する。
+//
+// 2026-09-17（複数プロバイダー対応レビュー修正・項目5）：連携成功時の戻り先を
+// 単なる"/mypage"から"/mypage?loginMethods=1&link=success"へ変更した。
+// これはこのページの中だけで組み立てる固定のクエリであり、URLから受け取った
+// 値をそのまま遷移先に使う（＝任意のreturn URLへ飛ばす）ことはしていない。
+// マイページ側（loginMethodsReturnFlow.ts）がこのクエリを見て、ログイン方法
+// モーダルの自動オープンと成功表示を行う。連携失敗時も、この直前のsuccessと
+// 同様にmypageへ戻す（"ホームに戻る"ボタンの遷移先も含む）ことで、利用者が
+// 元々やろうとしていた操作（ログイン方法の管理）へ迷わず戻れるようにする
+// （エラー内容自体は引き続きerrorMessageとしてこの画面上に表示するのみで、
+// 生のSupabaseエラーはmapAuthErrorToMessage経由でしか渡らない）。
 function readOAuthError(): { code: string | null } | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -49,7 +60,7 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     if (errorMessage) return;
-    const destination = isLinkFlow() ? "/mypage" : "/";
+    const destination = isLinkFlow() ? "/mypage?loginMethods=1&link=success" : "/";
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session) {
@@ -81,10 +92,10 @@ export default function AuthCallbackPage() {
           <p className="font-sans text-sm text-dojo-ink">ログインに失敗しました：{errorMessage}</p>
           <button
             type="button"
-            onClick={() => router.replace("/")}
+            onClick={() => router.replace(isLinkFlow() ? "/mypage" : "/")}
             className="rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-sm font-bold text-dojo-washi-white"
           >
-            ホームに戻る
+            {isLinkFlow() ? "マイページに戻る" : "ホームに戻る"}
           </button>
         </>
       ) : (

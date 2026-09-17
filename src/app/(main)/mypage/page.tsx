@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import LoginMethodsManageModal from "@/components/app/LoginMethodsManageModal";
 import MyProfileEditModal from "@/components/app/MyProfileEditModal";
@@ -8,6 +8,7 @@ import MyStatsModal from "@/components/app/MyStatsModal";
 import MyProfileTicket from "@/components/home/MyProfileTicket";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
 import SnsFeedSection from "@/components/sns/SnsFeedSection";
+import { parseLoginMethodsReturnParams } from "@/lib/loginMethodsReturnFlow";
 
 // マイページ：自分の演者情報（アイコン・名前・一言コメント）と、
 // 寄合帳（SNS）のフィードを1ページに統合したもの。
@@ -23,6 +24,28 @@ export default function MyPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [loginMethodsOpen, setLoginMethodsOpen] = useState(false);
+  const [loginMethodsSuccessMessage, setLoginMethodsSuccessMessage] = useState<string | null>(null);
+
+  // 2026-09-17（複数プロバイダー対応レビュー修正・項目5）：Apple/Googleの
+  // 追加連携（linkIdentity）が完了すると、auth/callbackから
+  // "/mypage?loginMethods=1&link=success" へ戻ってくる。この画面で
+  // ログイン方法モーダルを自動的に開き、identity一覧を再取得させ、成功表示を
+  // 出す。判定はloginMethodsReturnFlow.ts（純粋関数）に切り出し、URL中の値を
+  // 遷移先として使う処理は一切していない（開く/開かないの真偽値だけを見る）。
+  // 表示後はhistory.replaceStateでクエリだけを消し、リロード時の再表示・
+  // 戻る操作での再表示を防ぐ。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const { shouldOpen, showLinkSuccess } = parseLoginMethodsReturnParams(window.location.search);
+    if (!shouldOpen) return;
+    // マウント時に1度だけURL（外部から渡された任意の遷移先ではなく、このアプリ自身が
+    // auth/callbackから付けた固定クエリ）を見て開くかどうかを決めるだけの、
+    // 外部システム（URL）からの初期値読み込みのため、setStateを直接呼んでよい。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoginMethodsOpen(true);
+    if (showLinkSuccess) setLoginMethodsSuccessMessage("ログイン方法を連携しました");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
 
   return (
     <StadiumPageShell contentTheme="kraft">
@@ -52,7 +75,15 @@ export default function MyPage() {
       */}
       <MyStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
       {editOpen && <MyProfileEditModal onClose={() => setEditOpen(false)} />}
-      {loginMethodsOpen && <LoginMethodsManageModal onClose={() => setLoginMethodsOpen(false)} />}
+      {loginMethodsOpen && (
+        <LoginMethodsManageModal
+          onClose={() => {
+            setLoginMethodsOpen(false);
+            setLoginMethodsSuccessMessage(null);
+          }}
+          initialSuccessMessage={loginMethodsSuccessMessage}
+        />
+      )}
     </StadiumPageShell>
   );
 }

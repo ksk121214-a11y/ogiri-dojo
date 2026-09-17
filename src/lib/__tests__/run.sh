@@ -45,6 +45,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../guestStatus.ts"
   "$SCRIPT_DIR/../authErrorMessages.ts"
   "$SCRIPT_DIR/../authProviders.ts"
+  "$SCRIPT_DIR/../loginMethodsReturnFlow.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -367,5 +368,31 @@ else
   FAILED=1
 fi
 rm -rf "$AUTH_MULTI_PROVIDER_DIR"
+
+# src/lib/__tests__/store/useAuthStoreIdentityRaceLock.check.ts も同じ理由で専用
+# tsconfig経由にする。2026-09-17（複数プロバイダー対応レビュー修正）：
+# refreshIdentitiesの取得競合対策（古い/別ユーザーの遅延結果が混ざらない・
+# サインアウト後に復元されない・古いリクエストのfinallyがloadingを誤って
+# falseに戻さない）、取得失敗時にidentitiesStatusが"error"になり未連携と
+# 区別できること、link/unlinkの共通ロック（同時実行防止・連打で1回だけ）、
+# unlinkProviderのfail-closed（未取得中・最新一覧に無い・最後の1件）を検証する。
+AUTH_IDENTITY_RACE_LOCK_DIR="$(mktemp -d)"
+AUTH_IDENTITY_RACE_LOCK_TSCONFIG="$SCRIPT_DIR/store/tsconfig.authIdentityRaceLock.json"
+AUTH_IDENTITY_RACE_LOCK_ENTRY="$AUTH_IDENTITY_RACE_LOCK_DIR/src/lib/__tests__/store/useAuthStoreIdentityRaceLock.check.js"
+
+echo "--- useAuthStoreIdentityRaceLock.check.ts ---"
+if npx tsc -p "$AUTH_IDENTITY_RACE_LOCK_TSCONFIG" --outDir "$AUTH_IDENTITY_RACE_LOCK_DIR" && [ -f "$AUTH_IDENTITY_RACE_LOCK_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUTH_IDENTITY_RACE_LOCK_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUTH_IDENTITY_RACE_LOCK_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useAuthStoreIdentityRaceLock.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUTH_IDENTITY_RACE_LOCK_DIR"
 
 exit $FAILED
