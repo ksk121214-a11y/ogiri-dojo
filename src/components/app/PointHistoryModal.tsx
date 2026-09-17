@@ -100,7 +100,7 @@ export default function PointHistoryModal({
   // 残高0円・履歴無しを実データのように見せず、専用の案内に差し替える。
   const listBody = isGuest ? (
     <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
-      ゲスト参加中です。Xでログインするとポイントが記録されます。
+      ゲスト参加中です。ログインするとポイントが記録されます。
     </p>
   ) : !authUser ? (
     <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">

@@ -222,7 +222,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         <p
           className={`${stadiumStyles.grainPaper} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
         >
-          ゲストはツッコめません。Xでログインしてください。
+          ゲストはツッコめません。ログインしてください。
         </p>
       ) : (
         <form

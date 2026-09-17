@@ -10,6 +10,7 @@ import { isGuestUser } from "@/lib/guestStatus";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -27,11 +28,10 @@ export default function SnsNewTopicPage() {
   const addTopic = useSnsStore((s) => s.addTopic);
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   const displayedTickets = profile
     ? computeDisplayedTickets(profile.ticketsCount, profile.ticketsNextRecoveryAt)
@@ -71,20 +71,15 @@ export default function SnsNewTopicPage() {
         />
         <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-3 p-6 text-center`}>
           <p className="font-sans text-sm text-[var(--ink)]/80">
-            ゲスト参加中です。Xでログインするとお題を投稿できます。
+            ゲスト参加中です。ログインするとお題を投稿できます。
           </p>
           <button
             type="button"
-            onClick={async () => {
-              setXLoginError(null);
-              const result = await signInWithX({ isGuestSwitch: true });
-              if (!result.ok && result.reason) setXLoginError(result.reason);
-            }}
+            onClick={() => openLoginModal({ isGuestSwitch: true })}
             className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
           >
-            Xでログイン
+            ログイン
           </button>
-          {xLoginError && <p className="font-sans text-xs text-[var(--accent)]">{xLoginError}</p>}
         </div>
       </StadiumPageShell>
     );

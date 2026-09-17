@@ -187,7 +187,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         <p
           className={`${stadiumStyles.grainPaper} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
         >
-          ゲストは回答できません。Xでログインしてください。
+          ゲストは回答できません。ログインしてください。
         </p>
       ) : (
         <form

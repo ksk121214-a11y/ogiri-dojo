@@ -13,6 +13,7 @@ import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
@@ -59,7 +60,7 @@ type Notify = (type: "success" | "error", message: string) => void;
 export default function LiveHostPage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const profile = useProfileStore((s) => s.profile);
 
   const live = useLiveHostStore((s) => s.live);
@@ -84,7 +85,6 @@ export default function LiveHostPage() {
   const [closing, setClosing] = useState(false);
   const [beginningGame, setBeginningGame] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
   // 2026-08-31:「素材準備中の表示はプレイヤー画面ではなく司会コンソールに出す」要望で、
   // お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込みをここで行う
@@ -112,18 +112,10 @@ export default function LiveHostPage() {
   if (!authUser) {
     return (
       <CenterMessage>
-        <p className="mb-4">司会コンソールを開くにはXログインが必要です。</p>
-        <AdminButton
-          variant="primary"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX();
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
-        >
-          Xでログイン
+        <p className="mb-4">司会コンソールを開くにはログインが必要です。</p>
+        <AdminButton variant="primary" onClick={() => openLoginModal()}>
+          ログイン
         </AdminButton>
-        {xLoginError && <p className="mt-3 text-xs text-red-600">{xLoginError}</p>}
       </CenterMessage>
     );
   }

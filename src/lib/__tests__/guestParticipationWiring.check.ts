@@ -60,11 +60,17 @@ const snsLiveResultsStore = readFileSync(
     /ゲストは観客としてライブを視聴できます。回答・採点・ポイント記録はできません。/.test(block),
     "/live に指定のゲスト案内文言が見当たらない",
   );
-  // Xログインボタン・ゲスト観客ボタンのどちらも、live_modeによる条件分岐の外
+  // ログインボタン・ゲスト観客ボタンのどちらも、live_modeによる条件分岐の外
   // （常に表示）にあることを確認する。
-  const xLoginIdx = block.indexOf("Xでログイン");
+  // 2026-09-16（複数プロバイダー対応）：ログインボタンの文言は「Xでログイン」から
+  // 「ログイン」（押すとX/Google/Appleを選べるLoginMethodModalを開く）に変わった。
+  const loginButtonMatch = /openLoginModal\(\)[\s\S]{0,200}?>\s*ログイン\s*<\/button>/.exec(block);
   const guestButtonIdx = block.indexOf("ログインせず観客として見る");
-  assert.ok(xLoginIdx >= 0 && xLoginIdx < guestButtonIdx, "Xでログインボタンがゲスト観客ボタンより後にある");
+  assert.ok(loginButtonMatch, "openLoginModal()を呼ぶ「ログイン」ボタンが見つからない");
+  assert.ok(
+    (loginButtonMatch?.index ?? -1) < guestButtonIdx,
+    "ログインボタンがゲスト観客ボタンより後にある",
+  );
 
   console.log("PASS: /live は本番・テストどちらのライブでも「ログインせず観客として見る」ボタンを出す");
 }
@@ -93,42 +99,51 @@ const snsLiveResultsStore = readFileSync(
   console.log("PASS: useAuthStore.signInAsGuestはguestSigningInによるsingle-flightガードを持つ");
 }
 
-// 4: useAuthStore.signInWithXは、isGuestSwitch:trueの場合だけ（＝ゲストからの
-//    切り替えだと呼び出し元が分かっている場合だけ）確認ダイアログを挟んだ上で
-//    signOut()してからsignInWithOAuthを呼ぶ。通常のXログイン利用者・未ログインからの
-//    呼び出しには無意味なsignOut()を走らせない（2026-09-13レビュー対応で変更）。
-//    実際の呼び出し回数・xSigningInの状態遷移はuseAuthStoreXSwitch.check.ts側で検証する。
+// 4: useAuthStore.signInWithProvider（2026-09-16複数プロバイダー対応で、旧
+//    signInWithXのロジックをプロバイダー引数化して移設したもの）は、
+//    isGuestSwitch:trueの場合だけ（＝ゲストからの切り替えだと呼び出し元が
+//    分かっている場合だけ）確認ダイアログを挟んだ上でsignOut()してから
+//    signInWithOAuthを呼ぶ。通常ログイン利用者・未ログインからの呼び出しには
+//    無意味なsignOut()を走らせない（2026-09-13レビュー対応で変更、2026-09-16で
+//    プロバイダー非依存化）。signInWithXは後方互換のため
+//    signInWithProvider("x", options)へ委譲するだけの薄いラッパーになっている。
+//    実際の呼び出し回数・signingInProviderの状態遷移はuseAuthStoreXSwitch.check.ts・
+//    useAuthStoreMultiProvider.check.ts側で検証する。
 {
   const storeBodyIdx = authStore.indexOf("export const useAuthStore = create");
   assert.ok(storeBodyIdx >= 0, "useAuthStoreの実装本体が見つからない");
-  const fnIdx = authStore.indexOf("signInWithX: async", storeBodyIdx);
-  assert.ok(fnIdx >= 0, "useAuthStoreの実装本体にsignInWithXが定義されていない");
+  assert.ok(
+    /signInWithX: \(options\) => get\(\)\.signInWithProvider\("x", options\),/.test(authStore),
+    "signInWithXがsignInWithProvider(\"x\", options)への委譲になっていない",
+  );
+  const fnIdx = authStore.indexOf("signInWithProvider: async", storeBodyIdx);
+  assert.ok(fnIdx >= 0, "useAuthStoreの実装本体にsignInWithProviderが定義されていない");
   const fnBlock = authStore.slice(fnIdx, fnIdx + 1600);
   const isGuestSwitchIfIdx = fnBlock.indexOf("if (isGuestSwitch) {");
   const confirmIdx = fnBlock.indexOf("window.confirm(");
   const signOutIdx = fnBlock.indexOf("supabase.auth.signOut()");
   const oauthIdx = fnBlock.indexOf("supabase.auth.signInWithOAuth(");
-  assert.ok(isGuestSwitchIfIdx >= 0, "signInWithXにisGuestSwitchによる分岐が無い");
+  assert.ok(isGuestSwitchIfIdx >= 0, "signInWithProviderにisGuestSwitchによる分岐が無い");
   assert.ok(
     confirmIdx >= 0 && confirmIdx < signOutIdx,
-    "signInWithXがisGuestSwitch時にsignOutより前で確認ダイアログ(window.confirm)を出していない",
+    "signInWithProviderがisGuestSwitch時にsignOutより前で確認ダイアログ(window.confirm)を出していない",
   );
   assert.ok(
     signOutIdx >= 0 && signOutIdx < oauthIdx,
-    "signInWithXがsignInWithOAuthより前にsignOut()を呼んでいない",
+    "signInWithProviderがsignInWithOAuthより前にsignOut()を呼んでいない",
   );
-  // signOut()の呼び出しがisGuestSwitchのifブロック内（xSigningInガードの中）に
+  // signOut()の呼び出しがisGuestSwitchのifブロック内（signingInProviderガードの中）に
   // あることを確認する（=常には呼ばれない）。
   assert.ok(
     isGuestSwitchIfIdx < signOutIdx,
     "signOut()がisGuestSwitch分岐の外で呼ばれている（常にsignOutしてしまう可能性）",
   );
   assert.ok(
-    /xSigningIn: false,/.test(authStore) && /if \(get\(\)\.xSigningIn\) return/.test(fnBlock),
-    "signInWithXの先頭にxSigningInによる連打防止ガードが無い",
+    /signingInProvider: null,/.test(authStore) && /if \(get\(\)\.signingInProvider\) return/.test(fnBlock),
+    "signInWithProviderの先頭にsigningInProviderによる連打防止ガードが無い",
   );
   console.log(
-    "PASS: useAuthStore.signInWithXはisGuestSwitch:trueの場合だけ確認ダイアログ+signOutを挟んでからOAuthを開始する",
+    "PASS: useAuthStore.signInWithProviderはisGuestSwitch:trueの場合だけ確認ダイアログ+signOutを挟んでからOAuthを開始する",
   );
 }
 
@@ -324,7 +339,7 @@ const snsLiveResultsStore = readFileSync(
   assert.ok(guestIdx >= 0, "SnsFeedSectionに{isGuest ? (…分岐が見つからない");
   const block = snsFeedSection.slice(guestIdx, guestIdx + 400);
   assert.ok(
-    /ゲスト参加中です。Xでログインすると投稿やリアクションができます/.test(block),
+    /ゲスト参加中です。ログインすると投稿やリアクションができます/.test(block),
     "SnsFeedSectionがゲストに対して投稿導線の代わりの案内文を出していない",
   );
   console.log("PASS: SnsFeedSectionはゲストに「お題を投稿する」導線を表示しない");
@@ -345,7 +360,7 @@ const snsLiveResultsStore = readFileSync(
     "SnsLiveResultBodyのいいねボタンがゲストに対して静的表示へ差し替わっていない",
   );
   assert.ok(
-    /ゲストはコメントできません。Xでログインしてください。/.test(snsLiveResultBody),
+    /ゲストはコメントできません。ログインしてください。/.test(snsLiveResultBody),
     "SnsLiveResultBodyがゲストに対してコメント入力欄の代わりの案内文を出していない",
   );
   console.log("PASS: SnsLiveResultBodyはゲストにいいねボタン・コメント入力欄を表示しない（閲覧・コメント一覧は許可）");
@@ -463,11 +478,13 @@ const snsLiveResultsStore = readFileSync(
 }
 
 // 20（3回目レビュー対応）：未ログイン画面の文言が「プレイヤーとして参加するには
-//    Xログインが必要です」に変わり、ゲストが観客専用であることが一読でわかる
+//    ログインが必要です」に変わり、ゲストが観客専用であることが一読でわかる
 //    構成になっている。
+// 2026-09-16（複数プロバイダー対応）：X固定文言から、プロバイダーを問わない
+// 「ログインが必要です」へ一般化した。
 {
   assert.ok(
-    /プレイヤーとして参加するにはXログインが必要です/.test(livePage),
+    /プレイヤーとして参加するにはログインが必要です/.test(livePage),
     "/liveの未ログイン画面の文言が「プレイヤーとして参加するには」に変わっていない",
   );
   console.log("PASS: /liveの未ログイン画面は、プレイヤー参加とゲスト観客の違いが一読でわかる文言になっている");

@@ -27,6 +27,7 @@ import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 const PHASE_LABEL: Record<string, string> = {
@@ -46,13 +47,12 @@ const PHASE_LABEL: Record<string, string> = {
 export default function LivePage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const signInAsGuest = useAuthStore((s) => s.signInAsGuest);
   const guestSigningIn = useAuthStore((s) => s.guestSigningIn);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
   const [guestSignInError, setGuestSignInError] = useState<string | null>(null);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -177,19 +177,14 @@ export default function LivePage() {
     // 呼ぶ既存の経路にそのまま合流する（ゲストはaudience以外を選べない）。
     return (
       <CenterMessage>
-        <p className="mb-4">プレイヤーとして参加するにはXログインが必要です。</p>
+        <p className="mb-4">プレイヤーとして参加するにはログインが必要です。</p>
         <button
           type="button"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX();
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
+          onClick={() => openLoginModal()}
           className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
         >
-          Xでログイン
+          ログイン
         </button>
-        {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
         <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
           ゲストは観客としてライブを視聴できます。回答・採点・ポイント記録はできません。
           爆笑・ツッコミ・拍手は利用できます。

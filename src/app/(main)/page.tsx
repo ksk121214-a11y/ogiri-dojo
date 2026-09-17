@@ -61,9 +61,12 @@ export default function Home() {
 
       <AccountSummary />
 
-      {/* 2026-09-06:「X連携は本人確認にのみ使う」旨の補足文言。未ログイン時（authLoadingが
+      {/* 2026-09-06:「ログインは本人確認にのみ使う」旨の補足文言。未ログイン時（authLoadingが
           終わっていて、かつ未ログインと確定した場合）だけ、名前カードのすぐ下に控えめに表示する。
-          ログイン中はAccountSummary側で名前・段位が出るため、この案内自体が不要になる。 */}
+          ログイン中はAccountSummary側で名前・段位が出るため、この案内自体が不要になる。
+          2026-09-16（複数プロバイダー対応）：X固有の文言（「Xへの投稿・DM」等）は
+          Google/Appleでは意味が異なる／保証できないため、どのプロバイダーでも
+          共通して成り立つ最小限の表現に一般化した。 */}
       {/* 2026-09-07（不具合修正）：ホーム画面本体の背景はStadiumAppShellのdark面
           （contentThemeを渡していないためデフォルトのdark）で、--inkはgrainPaper等
           「明るいカード内」専用の濃色トークン（#171513）のため、ページ地の上に直接
@@ -72,9 +75,9 @@ export default function Home() {
           （明るい背景色向けのトーンダウン済みの色）を使う。 */}
       {!authLoading && !authUser && (
         <p className="text-center font-sans text-[11px] leading-relaxed text-[var(--muted-on-dark)]">
-          X連携はログイン確認にのみ使用します。
+          ログインは本人確認にのみ使用します。
           <br />
-          Xへの投稿・DM、タイムラインの取得・保存は行いません。
+          SNSへの投稿・メッセージの送信、投稿内容の取得は行いません。
         </p>
       )}
     </StadiumAppShell>

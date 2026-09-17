@@ -7,6 +7,7 @@ import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 import styles from "./StadiumHome.module.css";
@@ -35,11 +36,10 @@ const SHOW_POINTS_BALANCE = false;
 export default function AccountSummary() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   // 2026-09-03: 「名前とポイントが見れるところを丸角ではなく四角にして、左上に
   // リング通しのような丸い穴を（背景が透けて見える形で）付ける」要望対応。
@@ -72,18 +72,11 @@ export default function AccountSummary() {
         </p>
         <button
           type="button"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX();
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
+          onClick={() => openLoginModal()}
           className={`${styles.pressable} ${styles.grainAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
         >
-          Xでログイン
+          ログイン
         </button>
-        {xLoginError && (
-          <p className="absolute -bottom-5 left-7 font-sans text-[10px] text-red-600">{xLoginError}</p>
-        )}
       </section>
     );
   }
@@ -97,22 +90,15 @@ export default function AccountSummary() {
       <section className={`${styles.grainPaper} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
         <p className="text-sm font-bold text-[var(--ink)]/70">
-          ゲスト参加中です。Xでログインすると段位・ポイントが記録されます
+          ゲスト参加中です。ログインすると段位・ポイントが記録されます
         </p>
         <button
           type="button"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX({ isGuestSwitch: true });
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
+          onClick={() => openLoginModal({ isGuestSwitch: true })}
           className={`${styles.pressable} ${styles.grainAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
         >
-          Xでログイン
+          ログイン
         </button>
-        {xLoginError && (
-          <p className="absolute -bottom-5 left-7 font-sans text-[10px] text-red-600">{xLoginError}</p>
-        )}
       </section>
     );
   }

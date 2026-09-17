@@ -62,7 +62,7 @@ export default function ReportButton({
     // 2026-09-13（0070ゲスト参加レビュー対応）：reports_insert_own（RLS）が
     // ゲストのINSERTを拒否するため、事前に弾いて「押せるのに拒否される」体験を避ける。
     if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      window.alert("ゲストは通報できません。Xでログインしてください。");
+      window.alert("ゲストは通報できません。ログインしてください。");
       return;
     }
 

@@ -43,6 +43,8 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../snsLiveResultPreview.ts"
   "$SCRIPT_DIR/../liveGuestAccess.ts"
   "$SCRIPT_DIR/../guestStatus.ts"
+  "$SCRIPT_DIR/../authErrorMessages.ts"
+  "$SCRIPT_DIR/../authProviders.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -341,5 +343,29 @@ else
   FAILED=1
 fi
 rm -rf "$SNS_MUTATION_RACE_DIR"
+
+# src/lib/__tests__/store/useAuthStoreMultiProvider.check.ts も同じ理由で専用tsconfig
+# 経由にする。2026-09-16（複数プロバイダー対応）：signInWithProviderが指定した
+# プロバイダーをそのままsignInWithOAuthへ渡すこと、linkProvider/unlinkProviderが
+# 未ログイン・識別情報1つのみ等のガードを正しく効かせること、失敗時に生の
+# エラーを含まない日本語文言を返すことを検証する。
+AUTH_MULTI_PROVIDER_DIR="$(mktemp -d)"
+AUTH_MULTI_PROVIDER_TSCONFIG="$SCRIPT_DIR/store/tsconfig.authMultiProvider.json"
+AUTH_MULTI_PROVIDER_ENTRY="$AUTH_MULTI_PROVIDER_DIR/src/lib/__tests__/store/useAuthStoreMultiProvider.check.js"
+
+echo "--- useAuthStoreMultiProvider.check.ts ---"
+if npx tsc -p "$AUTH_MULTI_PROVIDER_TSCONFIG" --outDir "$AUTH_MULTI_PROVIDER_DIR" && [ -f "$AUTH_MULTI_PROVIDER_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUTH_MULTI_PROVIDER_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUTH_MULTI_PROVIDER_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useAuthStoreMultiProvider.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUTH_MULTI_PROVIDER_DIR"
 
 exit $FAILED

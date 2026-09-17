@@ -10,6 +10,7 @@ import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { MAX_TICKETS, computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -36,15 +37,16 @@ function nameSizeClass(name: string): string {
 export default function MyProfileTicket({
   onOpenStats,
   onOpenEdit,
+  onOpenLoginMethods,
 }: {
   onOpenStats: () => void;
   onOpenEdit: () => void;
+  onOpenLoginMethods: () => void;
 }) {
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-01: 未ログイン時にローカルのダミー値（useUserStore、名前「あなた」・
   // 段位「前座」・固定bio等）が実データであるかのように表示されていた問題を修正。
   // ログインしている場合のみ実データ（profiles）を出す。
@@ -151,7 +153,7 @@ export default function MyProfileTicket({
               </div>
             ) : isGuest ? (
               <p className="text-center font-sans text-xs text-[var(--ink)]/70">
-                ゲスト参加中です。Xでログインするとご利用いただけます。
+                ゲスト参加中です。ログインするとご利用いただけます。
               </p>
             ) : isLoadingMember ? (
               <div className="h-5 w-full animate-pulse rounded bg-[var(--ink)]/10" aria-hidden />
@@ -160,42 +162,44 @@ export default function MyProfileTicket({
             {/* 「段位・実績を見る」が参考画像では1行に収まっているのに対し、text-smだと
                 この列幅では折り返ってしまっていたため、text-xs・px-2に詰めてnowrapにしている。 */}
             {isMember ? (
-              <div className="flex gap-1.5">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={onOpenStats}
+                    className={`${styles.pressable} flex-1 whitespace-nowrap rounded-xl bg-[var(--ink)] px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                  >
+                    段位・実績を見る
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenEdit}
+                    className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-40`}
+                  >
+                    <EditGlyph />
+                    編集する
+                  </button>
+                </div>
+                {/* 2026-09-16（複数プロバイダー対応）：X/Google/Appleの連携状況を確認・
+                    追加連携・解除できる画面への入口。段位・実績や編集と同じ並びに置く。 */}
                 <button
                   type="button"
-                  onClick={onOpenStats}
-                  className={`${styles.pressable} flex-1 whitespace-nowrap rounded-xl bg-[var(--ink)] px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                  onClick={onOpenLoginMethods}
+                  className={`${styles.pressable} w-full whitespace-nowrap rounded-xl border border-[var(--ink)]/40 px-2 py-2 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5`}
                 >
-                  段位・実績を見る
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenEdit}
-                  className={`${styles.pressable} flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-[var(--ink)]/70 px-2 py-2.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:bg-[var(--ink)]/5 disabled:cursor-not-allowed disabled:opacity-40`}
-                >
-                  <EditGlyph />
-                  編集する
+                  ログイン方法
                 </button>
               </div>
             ) : isLoadingMember ? (
               <div className="h-[42px] w-full animate-pulse rounded-xl bg-[var(--ink)]/10" aria-hidden />
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setXLoginError(null);
-                    const result = await signInWithX({ isGuestSwitch: isGuest });
-                    if (!result.ok && result.reason) setXLoginError(result.reason);
-                  }}
-                  className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
-                >
-                  Xでログイン
-                </button>
-                {xLoginError && (
-                  <p className="text-center font-sans text-[10px] text-[var(--accent)]">{xLoginError}</p>
-                )}
-              </>
+              <button
+                type="button"
+                onClick={() => openLoginModal({ isGuestSwitch: isGuest })}
+                className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+              >
+                ログイン
+              </button>
             )}
           </div>
         </div>

@@ -16,7 +16,9 @@
   "include": [
     "../../../lib/basePath.ts",
     "../../../lib/supabase.ts",
-    "../../../store/useAuthStore.ts",
+    "../../../lib/authErrorMessages.ts",
+      "../../../lib/authProviders.ts",
+      "../../../store/useAuthStore.ts",
     "useAuthStoreGuest.check.ts"
   ]
 }

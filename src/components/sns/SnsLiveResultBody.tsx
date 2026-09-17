@@ -255,7 +255,7 @@ function LiveResultCard({
                 // 2026-09-13（再々レビュー対応）：ゲストはコメントできない仕様のため、
                 // 入力欄・送信ボタン自体を表示しない（コメント一覧の閲覧は許可のまま）。
                 <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
-                  ゲストはコメントできません。Xでログインしてください。
+                  ゲストはコメントできません。ログインしてください。
                 </p>
               ) : (
                 <form onSubmit={handleSubmitComment} className="flex flex-col gap-1.5">

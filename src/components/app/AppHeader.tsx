@@ -8,6 +8,7 @@ import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 const NAV_LINKS = [
@@ -38,9 +39,8 @@ export default function AppHeader() {
   const rank = getRankByMeter(member ? (profile?.masteryMeter ?? 0) : 0);
   const displayName = member ? (profile?.displayName ?? "…") : null;
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const signOut = useAuthStore((s) => s.signOut);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
   const xScreenName =
     (authUser?.user_metadata?.user_name as string | undefined) ??
     (authUser?.user_metadata?.full_name as string | undefined);
@@ -84,14 +84,10 @@ export default function AppHeader() {
                 guest ? (
                   <button
                     type="button"
-                    onClick={async () => {
-                      setXLoginError(null);
-                      const result = await signInWithX({ isGuestSwitch: true });
-                      if (!result.ok && result.reason) setXLoginError(result.reason);
-                    }}
+                    onClick={() => openLoginModal({ isGuestSwitch: true })}
                     className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
                   >
-                    Xでログイン
+                    ログイン
                   </button>
                 ) : (
                   <button
@@ -106,21 +102,14 @@ export default function AppHeader() {
               ) : (
                 <button
                   type="button"
-                  onClick={async () => {
-                    setXLoginError(null);
-                    const result = await signInWithX();
-                    if (!result.ok && result.reason) setXLoginError(result.reason);
-                  }}
+                  onClick={() => openLoginModal()}
                   className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
                 >
-                  Xでログイン
+                  ログイン
                 </button>
               ))}
           </div>
         </div>
-        {xLoginError && (
-          <p className="font-sans text-[10px] text-dojo-deep-crimson">{xLoginError}</p>
-        )}
         {/*
           スマホ幅では8項目が折り返して崩れないよう、折り返し（flex-wrap）ではなく
           横スクロール（overflow-x-auto + whitespace-nowrap）に統一する（第5ラウンドフィードバック）。

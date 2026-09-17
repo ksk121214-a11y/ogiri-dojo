@@ -22,7 +22,9 @@
     "../../../lib/liveRoomSelectors.ts",
     "../../../lib/liveRoomTypes.ts",
     "../../../lib/supabase.ts",
-    "../../../store/useAuthStore.ts",
+    "../../../lib/authErrorMessages.ts",
+      "../../../lib/authProviders.ts",
+      "../../../store/useAuthStore.ts",
     "../../../store/useLiveFollowerStore.ts",
     "useLiveFollowerStoreReactionQueue.check.ts"
   ]

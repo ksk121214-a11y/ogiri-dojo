@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
-
 import AdminButton from "@/components/admin/AdminButton";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 // 運営者専用管理画面(/admin配下)の共通ガード。role==='admin'（DojoProfile.isHost）
@@ -14,10 +13,9 @@ import { useProfileStore } from "@/store/useProfileStore";
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   if (authLoading || profileLoading) {
     return <CenterMessage>読み込み中…</CenterMessage>;
@@ -26,19 +24,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   if (!authUser) {
     return (
       <CenterMessage>
-        <p className="mb-4">管理画面を開くにはXログインが必要です。</p>
-        <AdminButton
-          variant="primary"
-          onClick={async () => {
-            setXLoginError(null);
-            const result = await signInWithX();
-            if (!result.ok && result.reason) setXLoginError(result.reason);
-          }}
-          className="px-5 py-2.5 text-sm"
-        >
-          Xでログイン
+        <p className="mb-4">管理画面を開くにはログインが必要です。</p>
+        <AdminButton variant="primary" onClick={() => openLoginModal()} className="px-5 py-2.5 text-sm">
+          ログイン
         </AdminButton>
-        {xLoginError && <p className="mt-3 text-xs text-red-600">{xLoginError}</p>}
       </CenterMessage>
     );
   }

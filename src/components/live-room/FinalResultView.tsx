@@ -16,6 +16,7 @@ import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSe
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
@@ -74,7 +75,6 @@ export default function FinalResultView({
 }) {
   // ベストアンサーの発表ステップを廃止したため、1位分（従来のstep1〜3）から始める。
   const [step, setStep] = useState(1);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-03:「上位3順位に同点で4人以上いる場合、一部が表彰演出から漏れる」
   // 不具合の修正。以前はdata.ranking.slice(0,3)で配列の先頭3件（＝配列の"位置"）を
   // 固定で3人ぶんだけ発表していたため、例えば1位が2人同点だと3人目（実際には
@@ -96,7 +96,7 @@ export default function FinalResultView({
   const totalSteps = podiumTiers.length;
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   // 2026-09-13（0070ゲスト参加レビュー対応）：profile?.isGuestだけでなく
   // authUser.is_anonymousも併せて判定する共通関数（src/lib/guestStatus.ts）を使う
   // （profile取得前・取得失敗でも匿名ユーザーを通常会員として扱わないため）。
@@ -275,9 +275,10 @@ export default function FinalResultView({
 
       {/* 2026-09-12（ゲスト参加）：ゲストのままだと今回の参加は一切記録に残らない
           （0068/0070の多層防御によりポイント・実績・履歴には反映されない）ため、
-          ライブ終了後にXログインへの案内を出す。匿名セッションとの意図しない
-          アップグレードを避けるため、isGuestSwitch:trueを渡す（useAuthStore.signInWithX
-          が確認ダイアログを挟んだ上で必要な場合だけsignOut()してからOAuthを開始する）。 */}
+          ライブ終了後にログインへの案内を出す。匿名セッションとの意図しない
+          アップグレードを避けるため、isGuestSwitch:trueを渡す
+          （useAuthStore.signInWithProviderが確認ダイアログを挟んだ上で必要な場合だけ
+          signOut()してからOAuthを開始する）。 */}
       {step > totalSteps && isGuest && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -286,20 +287,15 @@ export default function FinalResultView({
           className="mt-4 flex w-full flex-col items-center rounded-2xl bg-[#12101a] px-4 py-6 text-center"
         >
           <p className="font-sans text-xs text-white/80">
-            Xでログインすると、次回からポイント・称号・アカウントの参加履歴を残せます。
+            ログインすると、次回からポイント・称号・アカウントの参加履歴を残せます。
           </p>
           <button
             type="button"
-            onClick={async () => {
-              setXLoginError(null);
-              const result = await signInWithX({ isGuestSwitch: true });
-              if (!result.ok && result.reason) setXLoginError(result.reason);
-            }}
+            onClick={() => openLoginModal({ isGuestSwitch: true })}
             className="mt-3 rounded-full bg-white px-5 py-2.5 font-sans text-sm font-bold text-[#12101a] transition hover:opacity-90"
           >
-            Xでログイン
+            ログイン
           </button>
-          {xLoginError && <p className="mt-2 font-sans text-xs text-[#ff8f8f]">{xLoginError}</p>}
         </motion.div>
       )}
 

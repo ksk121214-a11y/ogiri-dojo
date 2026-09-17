@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import LoginMethodsManageModal from "@/components/app/LoginMethodsManageModal";
 import MyProfileEditModal from "@/components/app/MyProfileEditModal";
 import MyStatsModal from "@/components/app/MyStatsModal";
 import MyProfileTicket from "@/components/home/MyProfileTicket";
@@ -21,6 +22,7 @@ import SnsFeedSection from "@/components/sns/SnsFeedSection";
 export default function SnsPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [loginMethodsOpen, setLoginMethodsOpen] = useState(false);
 
   return (
     <StadiumPageShell contentTheme="kraft">
@@ -34,12 +36,17 @@ export default function SnsPage() {
         </p>
       </div>
 
-      <MyProfileTicket onOpenStats={() => setStatsOpen(true)} onOpenEdit={() => setEditOpen(true)} />
+      <MyProfileTicket
+        onOpenStats={() => setStatsOpen(true)}
+        onOpenEdit={() => setEditOpen(true)}
+        onOpenLoginMethods={() => setLoginMethodsOpen(true)}
+      />
 
       <SnsFeedSection />
 
       <MyStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
       {editOpen && <MyProfileEditModal onClose={() => setEditOpen(false)} />}
+      {loginMethodsOpen && <LoginMethodsManageModal onClose={() => setLoginMethodsOpen(false)} />}
     </StadiumPageShell>
   );
 }

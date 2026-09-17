@@ -7,7 +7,7 @@
 //   - isGuestSwitch:trueかつ確認されたら、signOut→signInWithOAuthの順で呼ぶ。
 //   - isGuestSwitch省略（通常のXログイン・未ログインからの呼び出し）では
 //     signOutを一切呼ばず、signInWithOAuthだけを呼ぶ。
-//   - xSigningInによるsingle-flightガード（連打防止）。
+//   - signingInProviderによるsingle-flightガード（連打防止）。
 //   - signOut/signInWithOAuthの失敗時は生のエラーを含まない日本語の一般文言を返す。
 import assert from "node:assert/strict";
 
@@ -99,12 +99,12 @@ async function main() {
   confirmResult = true;
 
   // ---- テスト4: 連打（並行呼び出し）してもsignInWithOAuthは1回しか呼ばれない
-  //      （xSigningInによるsingle-flightガード）。2回目以降はok:falseで即座に弾かれる。 ----
+  //      （signingInProviderによるsingle-flightガード）。2回目以降はok:falseで即座に弾かれる。 ----
   signOutCallCount = 0;
   oauthCallCount = 0;
   deferred = makeDeferred();
   const p1 = useAuthStore.getState().signInWithX();
-  assert.equal(useAuthStore.getState().xSigningIn, true, "呼び出し中にxSigningInがtrueになっていない");
+  assert.equal(useAuthStore.getState().signingInProvider, "x", "呼び出し中にsigningInProviderが\"x\"になっていない");
   const p2 = useAuthStore.getState().signInWithX();
   const p3 = useAuthStore.getState().signInWithX();
   deferred.resolve();
@@ -113,9 +113,9 @@ async function main() {
   assert.equal(res1.ok, true, "1回目（実際に処理された呼び出し）がok:trueを返さなかった");
   assert.equal(res2.ok, false, "2回目（連打分）がok:falseを返さなかった");
   assert.equal(res3.ok, false, "3回目（連打分）がok:falseを返さなかった");
-  assert.equal(useAuthStore.getState().xSigningIn, false, "完了後もxSigningInがfalseに戻っていない");
+  assert.equal(useAuthStore.getState().signingInProvider, null, "完了後もsigningInProviderがnullに戻っていない");
   deferred = null;
-  console.log("PASS: signInWithXの連打はxSigningInによるsingle-flightガードにより1回しかOAuthを呼ばない");
+  console.log("PASS: signInWithXの連打はsigningInProviderによるsingle-flightガードにより1回しかOAuthを呼ばない");
 
   // ---- テスト5: signOut失敗時（isGuestSwitch:true）は生のエラーを含まない
   //      日本語の一般文言を返し、signInWithOAuthは呼ばれない。 ----
@@ -128,7 +128,7 @@ async function main() {
     assert.ok(r5.reason && !r5.reason.includes("PGRST301"), "signOut失敗時の理由に生のエラー文言が含まれている");
   }
   assert.equal(oauthCallCount, 0, "signOutが失敗したのにsignInWithOAuthが呼ばれてしまっている");
-  assert.equal(useAuthStore.getState().xSigningIn, false, "失敗後もxSigningInがfalseに戻っていない");
+  assert.equal(useAuthStore.getState().signingInProvider, null, "失敗後もsigningInProviderがnullに戻っていない");
   nextSignOutError = null;
   console.log("PASS: signOut失敗時は生のエラーを含まない日本語の一般文言を返し、OAuthを開始しない");
 
@@ -142,7 +142,7 @@ async function main() {
       r6.reason && !r6.reason.includes("some raw oauth error detail"),
       "signInWithOAuth失敗時の理由に生のエラー文言が含まれている",
     );
-    assert.ok(/Xログイン/.test(r6.reason ?? ""), "失敗時の理由がXログイン向けの案内になっていない");
+    assert.ok(/ログイン/.test(r6.reason ?? ""), "失敗時の理由がログイン向けの案内になっていない");
   }
   nextOauthError = null;
   console.log("PASS: signInWithOAuth失敗時は生のエラーを含まない日本語の一般文言を返す");

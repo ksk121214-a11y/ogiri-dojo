@@ -112,7 +112,7 @@ export default function SnsFeedSection() {
         // 2026-09-13（再々レビュー対応）：ゲストは投稿できない仕様のため、押せるのに
         // 拒否される投稿導線自体を見せず、案内文に差し替える（閲覧は引き続き許可）。
         <p className="text-center font-sans text-xs text-[var(--ink)]/70">
-          ゲスト参加中です。Xでログインすると投稿やリアクションができます。
+          ゲスト参加中です。ログインすると投稿やリアクションができます。
         </p>
       ) : (
         <div className="flex justify-center">

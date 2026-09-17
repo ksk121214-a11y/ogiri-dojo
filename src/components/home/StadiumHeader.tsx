@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 
 import NotificationBell from "@/components/app/NotificationBell";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useLoginModalStore } from "@/store/useLoginModalStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 import SoundSettingsToggle from "./SoundSettingsToggle";
@@ -29,9 +29,8 @@ export default function StadiumHeader() {
   const profileLoading = useProfileStore((s) => s.loading);
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
   const signOut = useAuthStore((s) => s.signOut);
-  const [xLoginError, setXLoginError] = useState<string | null>(null);
+  const openLoginModal = useLoginModalStore((s) => s.openLoginModal);
   // 2026-09-01: 未ログイン時にローカルのダミー名（useUserStore）が実データであるかの
   // ように表示されていた問題を修正。ログインしている場合のみ名前を出す。
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲスト判定はauthUser.is_anonymousも
@@ -79,18 +78,14 @@ export default function StadiumHeader() {
               (authUser ? (
                 guest ? (
                   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストの「ログアウト」は
-                  // 単に匿名セッションを終了するだけで意味が薄いため、代わりにXログインへの
-                  // 切り替え導線を出す（useAuthStore.signInWithXが確認ダイアログを挟む）。
+                  // 単に匿名セッションを終了するだけで意味が薄いため、代わりにログインへの
+                  // 切り替え導線を出す（useAuthStore.signInWithProviderが確認ダイアログを挟む）。
                   <button
                     type="button"
-                    onClick={async () => {
-                      setXLoginError(null);
-                      const result = await signInWithX({ isGuestSwitch: true });
-                      if (!result.ok && result.reason) setXLoginError(result.reason);
-                    }}
+                    onClick={() => openLoginModal({ isGuestSwitch: true })}
                     className="shrink-0 font-sans text-[10px] text-[var(--muted-on-dark)] underline decoration-[var(--border-dark)] underline-offset-2 transition hover:text-[var(--text-on-dark)] hover:decoration-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                   >
-                    Xでログイン
+                    ログイン
                   </button>
                 ) : (
                   <button
@@ -104,11 +99,7 @@ export default function StadiumHeader() {
               ) : (
                 <button
                   type="button"
-                  onClick={async () => {
-                    setXLoginError(null);
-                    const result = await signInWithX();
-                    if (!result.ok && result.reason) setXLoginError(result.reason);
-                  }}
+                  onClick={() => openLoginModal()}
                   className="shrink-0 font-sans text-[10px] text-[var(--muted-on-dark)] underline decoration-[var(--border-dark)] underline-offset-2 transition hover:text-[var(--text-on-dark)] hover:decoration-[var(--text-on-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                 >
                   ログイン
@@ -116,7 +107,6 @@ export default function StadiumHeader() {
               ))}
           </div>
         </div>
-        {xLoginError && <p className="font-sans text-[10px] text-red-400">{xLoginError}</p>}
       </div>
     </header>
   );

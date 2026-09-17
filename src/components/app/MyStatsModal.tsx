@@ -88,7 +88,7 @@ export default function MyStatsModal({
             </button>
           </div>
           <p className="font-sans text-sm text-[var(--ink)]/70">
-            ゲスト参加中です。Xでログインすると段位・実績が記録されます。
+            ゲスト参加中です。ログインすると段位・実績が記録されます。
           </p>
         </div>
       </div>

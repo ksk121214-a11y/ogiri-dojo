@@ -4,6 +4,7 @@ import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
 import AmbientBgmController from "@/components/app/AmbientBgmController";
 import AudioProvider from "@/components/app/AudioProvider";
 import HostProgressController from "@/components/app/HostProgressController";
+import LoginMethodModal from "@/components/app/LoginMethodModal";
 import StadiumSfxController from "@/components/app/StadiumSfxController";
 
 import "./globals.css";
@@ -57,6 +58,9 @@ export default function RootLayout({
           <StadiumSfxController />
           <HostProgressController />
           {children}
+          {/* 2026-09-16（複数プロバイダー対応）：ログイン方法選択モーダルはどのページ・
+              どのテーマ配下からでも同じものを開けるよう、root layoutに1つだけマウントする。 */}
+          <LoginMethodModal />
         </AudioProvider>
       </body>
     </html>
