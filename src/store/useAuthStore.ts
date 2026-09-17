@@ -5,17 +5,10 @@ import { create } from "zustand";
 
 import { mapAuthErrorToMessage } from "@/lib/authErrorMessages";
 import type { AuthProviderId } from "@/lib/authProviders";
+import { SUPABASE_PROVIDER_VALUE } from "@/lib/authProviders";
 import { BASE_PATH } from "@/lib/basePath";
+import { clearLinkAttempt, saveLinkAttempt } from "@/lib/linkAttempt";
 import { supabase } from "@/lib/supabase";
-
-// SupabaseのProvider型（"x"|"google"|"apple"|...）に対する、このアプリが
-// 実際に扱う3種類だけの対応表。AuthProviderId自体をそのままProviderへ渡せるが、
-// 将来Providerの綴りが変わってもここ1箇所の変更で追従できるよう明示しておく。
-const SUPABASE_PROVIDER: Record<AuthProviderId, "x" | "google" | "apple"> = {
-  x: "x",
-  google: "google",
-  apple: "apple",
-};
 
 type AuthActionResult = { ok: true } | { ok: false; reason?: string };
 
@@ -139,7 +132,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
       const redirectTo = `${window.location.origin}${BASE_PATH}/auth/callback/`;
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: SUPABASE_PROVIDER[provider],
+        provider: SUPABASE_PROVIDER_VALUE[provider],
         options: { redirectTo },
       });
       if (error) {
@@ -173,31 +166,70 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   // 2026-09-16（複数プロバイダー対応）：linkIdentity()もOAuthのリダイレクトを
   // 伴う（signInWithOAuthと同じPKCEフロー）ため、成功/失敗はこの呼び出し自体では
-  // 分からず、/auth/callbackへ戻ってきた時点でURL中のerror/error_codeを見て
-  // 判定する（callbackページ側の実装を参照）。ここでは「リダイレクト開始」に
+  // 分からず、/auth/callbackへ戻ってきた時点で判定する（callbackページ側の
+  // 実装・src/lib/linkFlowVerification.tsを参照）。ここでは「リダイレクト開始」に
   // 失敗した場合（未ログイン状態でlinkIdentityを呼んだ等）だけを扱う。
   // 2026-09-17（レビュー修正・項目3）：identityMutationInProgress（link/unlink共通
   // ロック）をsigningInProvider/linkingProviderと並べてここで確認する。setによる
   // ロック取得はawaitより前（同期的）に行うため、連打・同時クリックでも2回目以降は
   // 必ずこのガードで弾かれ、supabase.auth.linkIdentity()自体は1回しか呼ばれない。
+  // 2026-09-18（レビュー再修正・項目1）：ログイン済みユーザーが/auth/callback/
+  // ?flow=linkを直接開いただけで連携成功扱いになっていた不具合の修正。連携開始
+  // 時点で「誰が・どのprovider向けに・どのidentity一覧を起点に」連携しようと
+  // したかをsessionStorageへ保存し、コールバック側が実際にそのidentityが
+  // 増えたことを確認できた場合だけ成功とする（詳細はlinkAttempt.ts参照）。
+  // 追加の事前条件：(1) identities一覧を正常取得済み（identitiesStatus==="loaded"）
+  // でなければ開始しない（開始前のidentity一覧が信頼できないと事後の突き合わせが
+  // 意味を持たない）。(2) 対象providerが既に連携済みなら開始しない。
+  // (3) 保存するprovider引数はこの関数の呼び出し元が渡した値そのものであり、
+  // URL等の外部入力は一切経由しない。(4) sessionStorageへの保存に失敗した
+  // 場合はlinkIdentity()自体を呼ばない。(5) linkIdentity()の開始自体が失敗
+  // した場合は保存した一時情報を削除する。(6) 開始に成功した場合
+  // （この後OAuthのフルリダイレクトが起きる可能性がある）はfinallyで
+  // 一時情報を消さない（コールバック側が消費して削除する）。
   linkProvider: async (provider) => {
     if (get().signingInProvider || get().identityMutationInProgress) {
       return { ok: false, reason: "処理中です" };
     }
-    if (!get().user) return { ok: false, reason: "ログインしてからお試しください。" };
+    const user = get().user;
+    if (!user) return { ok: false, reason: "ログインしてからお試しください。" };
+
+    if (get().identitiesStatus !== "loaded" || !get().identities) {
+      return { ok: false, reason: "ログイン方法を取得できませんでした。時間をおいて再度お試しください。" };
+    }
+    const currentIdentities = get().identities as UserIdentity[];
+    const targetProviderValue = SUPABASE_PROVIDER_VALUE[provider];
+    if (currentIdentities.some((identity) => identity.provider === targetProviderValue)) {
+      return { ok: false, reason: "このログイン方法は既に連携済みです。" };
+    }
 
     set({ identityMutationInProgress: true, linkingProvider: provider });
+
+    const saved = saveLinkAttempt({
+      userId: user.id,
+      provider,
+      priorIdentityIds: currentIdentities.map((identity) => identity.identity_id),
+    });
+    if (!saved) {
+      set({ identityMutationInProgress: false, linkingProvider: null });
+      return { ok: false, reason: "連携を開始できませんでした。時間をおいて再度お試しください。" };
+    }
+
     try {
       const redirectTo = `${window.location.origin}${BASE_PATH}/auth/callback/?flow=link`;
       const { error } = await supabase.auth.linkIdentity({
-        provider: SUPABASE_PROVIDER[provider],
+        provider: targetProviderValue,
         options: { redirectTo },
       });
       if (error) {
+        clearLinkAttempt();
         return { ok: false, reason: mapAuthErrorToMessage(error) };
       }
+      // 成功時：この後OAuthのフルリダイレクトが発生する可能性があるため、
+      // ここでは一時情報を消さない（/auth/callbackが消費して削除する）。
       return { ok: true };
     } catch {
+      clearLinkAttempt();
       return { ok: false, reason: "連携を開始できませんでした。時間をおいて再度お試しください。" };
     } finally {
       set({ identityMutationInProgress: false, linkingProvider: null });

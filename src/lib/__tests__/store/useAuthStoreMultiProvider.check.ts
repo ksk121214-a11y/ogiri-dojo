@@ -65,9 +65,22 @@ let nextIdentities: UserIdentity[] = [];
   return { data: { identities: nextIdentities }, error: null };
 };
 
+// 2026-09-18（レビュー再修正・項目1）：linkProviderは連携開始時にsessionStorageへ
+// 一時情報を保存するようになったため、最小限のin-memory sessionStorageモックを
+// 用意する（useProfileStoreSwitch.check.tsのlocalStorageモックと同じ考え方）。
+const memorySessionStorage = new Map<string, string>();
 (global as unknown as { window: unknown }).window = {
   confirm: () => true,
   location: { origin: "http://localhost:3000" },
+  sessionStorage: {
+    getItem: (key: string) => memorySessionStorage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memorySessionStorage.set(key, value);
+    },
+    removeItem: (key: string) => {
+      memorySessionStorage.delete(key);
+    },
+  },
 };
 
 function makeIdentity(id: string, provider: string): UserIdentity {
@@ -104,9 +117,14 @@ async function main() {
   // ---- テスト3: ログイン中はlinkProviderが「?flow=link」付きredirectToでlinkIdentityを呼ぶ。 ----
   linkIdentityCalls = [];
   nextLinkIdentityError = null;
+  // user.idの変化はストア自身のsubscribe（項目1の競合対策）によりidentitiesを
+  // 即座にnull/"idle"へ戻すため、先にuserを切り替えてから、その後で
+  // identities一覧を正常取得済み（"loaded"）としてセットする（同じsetState呼び出しに
+  // まとめると、直後のsubscribeが上書きしてしまう）。
   useAuthStore.setState({
     user: { id: "user-1", is_anonymous: false } as unknown as ReturnType<typeof useAuthStore.getState>["user"],
   });
+  useAuthStore.setState({ identities: [makeIdentity("id-x", "x")], identitiesStatus: "loaded" });
   const r3 = await useAuthStore.getState().linkProvider("apple");
   assert.deepEqual(r3, { ok: true });
   assert.equal(linkIdentityCalls.length, 1);

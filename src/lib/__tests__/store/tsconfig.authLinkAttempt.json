@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "../../../..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../../../..",
+    "types": ["node"]
+  },
+  "include": [
+    "../../../lib/basePath.ts",
+    "../../../lib/supabase.ts",
+    "../../../lib/authErrorMessages.ts",
+    "../../../lib/authProviders.ts",
+    "../../../lib/linkAttempt.ts",
+    "../../../store/useAuthStore.ts",
+    "useAuthStoreLinkAttempt.check.ts"
+  ]
+}

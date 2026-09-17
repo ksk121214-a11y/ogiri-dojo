@@ -65,9 +65,21 @@ let unlinkIdentityDeferred: { promise: Promise<void>; resolve: () => void } | nu
   return { data: {}, error: null };
 };
 
+// 2026-09-18（レビュー再修正・項目1）：linkProviderは連携開始時にsessionStorageへ
+// 一時情報を保存するようになったため、最小限のin-memoryモックを用意する。
+const memorySessionStorage = new Map<string, string>();
 (global as unknown as { window: unknown }).window = {
   confirm: () => true,
   location: { origin: "http://localhost:3000" },
+  sessionStorage: {
+    getItem: (key: string) => memorySessionStorage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memorySessionStorage.set(key, value);
+    },
+    removeItem: (key: string) => {
+      memorySessionStorage.delete(key);
+    },
+  },
 };
 
 function makeDeferred() {

@@ -72,7 +72,22 @@ https://<本番ドメイン>/auth/callback/
    （テストユーザー限定のままだと、登録した数人以外はログインできません）。
 3. **APIとサービス → 認証情報 → 認証情報を作成 → OAuthクライアントID**
    - アプリケーションの種類：**ウェブアプリケーション**
-   - 承認済みのリダイレクトURI：上記1.4の `https://<プロジェクトref>.supabase.co/auth/v1/callback`
+   - **承認済みの JavaScript 生成元（Authorized JavaScript origins）**：
+     アプリの本番オリジン（例：`https://ogiri-dojo.vercel.app`、または独自ドメイン）。
+     `signInWithOAuth`/`linkIdentity`はブラウザからのリダイレクト開始のため、
+     実際にボタンを表示するオリジンをここへ登録する。
+   - **承認済みのリダイレクト URI（Authorized redirect URI）**：
+     上記1.4の `https://<プロジェクトref>.supabase.co/auth/v1/callback`
+     （アプリの本番ドメインではなく、Supabase自身のドメイン）。
+   - **Preview環境・localhostを使う場合**：Vercelのpreviewデプロイやローカル
+     開発（`http://localhost:3000`等）でもGoogleログインの実機確認をしたい
+     場合は、そのオリジンも同様に「承認済みのJavaScript生成元」へ追加できる
+     （リダイレクトURI自体はSupabase側の1つで共通のため追加不要）。
+     **ただし本番公開時には、確認や検証が終わった一時的なlocalhost・
+     使わなくなったpreview URLをこの一覧に残さないこと。** 不要になった
+     オリジンが残っていると、そのオリジンから偽装されたページが
+     OAuthフローを開始できてしまう余地が生まれるため、定期的に一覧を
+     見直して不要なエントリを削除する。
 4. 発行された **クライアントID** と **クライアントシークレット** を、
    Supabaseダッシュボードの Google Provider設定（1.1）へ入力する。
 
@@ -88,10 +103,19 @@ Sign in with Appleは、Googleより設定項目が多く、シークレット�
    - 「Identifiers → Services IDs」で新規作成。これがOAuthの`client_id`
      として使われる（App IDとは別物）。
    - Services IDの設定内で **Sign In with Apple** を有効化し、
-     「Configure」から以下を登録する。
-     - Primary App ID：手順1で用意したApp ID
-     - Domains and Subdomains：本番ドメイン（例：`ogiri-dojo.vercel.app` や独自ドメイン）
-     - Return URLs：上記1.4の `https://<プロジェクトref>.supabase.co/auth/v1/callback`
+     「Configure」から以下を登録する（Supabase公式ドキュメント
+     [Login with Apple](https://supabase.com/docs/guides/auth/social-login/auth-apple)、
+     2026-09-18確認の記載どおり）。
+     - **Domains and Subdomains：`<project-ref>.supabase.co`**
+       （**アプリの本番ドメイン（`ogiri-dojo.vercel.app`や独自ドメイン）ではない**。
+       SupabaseのWeb OAuthフローでは、Appleとのやり取り自体はSupabase側の
+       ドメインで完結するため、Apple側にはSupabaseのドメインだけを登録する）
+     - **Return URLs：`https://<project-ref>.supabase.co/auth/v1/callback`**
+       （上記1.4と同じURL。アプリの本番ドメインをここに登録する必要は無い）
+   - アプリの本番ドメイン（`https://<本番ドメイン>/auth/callback/`）は、
+     Apple側ではなく**Supabase側のRedirect URLs（上記1.5）**へ登録するもの
+     である点に注意する（AppleのDomains/Return URLsと、Supabaseの
+     Redirect URLsは、登録先も値も別物）。
 3. **Key**
    - 「Keys」で新規作成し、**Sign In with Apple** を有効化してひも付けるApp IDを選択。
    - 作成すると`.p8`の秘密鍵ファイルが**1度だけ**ダウンロードできる
@@ -151,16 +175,129 @@ Google Cloud/Apple Developer設定）と、下記5章の実機確認がすべて
    - 最後の1つのログイン方法は解除できない。
    - ゲストからGoogle/Appleへの切り替え時も、確認ダイアログ→ゲスト記録の
      引き継ぎなしが機能する。
-2. 問題が無いことを確認したら、本番のVercel環境変数でフラグをONにする。
+2. **自動リンク（6章参照）の実際の挙動を、以下の組み合わせで確認する。**
+   自動リンクが成立する条件・成立しない条件が実機でも6章の記載どおりに
+   なっているかを見るための項目であり、いずれの結果になっても
+   （成立してもしなくても）利用者にエラーや不可解な状態を見せないことを確認する。
+   - **XとGoogleで確認済みメールアドレスが同じ場合**（自動リンクが成立し、
+     同じSupabase userとして扱われることを確認する）。
+   - **メールアドレスが異なる場合**（自動リンクが起きず、Google側は
+     別アカウントとして新規作成されることを確認する）。
+   - **Xからメールアドレスが取得できない場合**（自動リンクの判定材料が
+     無いため、新規アカウントとして作成されることを確認する）。
+   - **Appleでメールアドレスを公開した場合**（Appleの実メールがX/Google側と
+     一致すれば自動リンク、一致しなければ新規アカウントになることを確認する）。
+   - **Appleでメールアドレスを非公開にした場合**（リレーアドレスが使われ、
+     通常は自動リンクが成立しないことを確認する）。
+   - **既に別アカウントへ連携済みのidentityを使った場合**（`identity_already_exists`
+     等が生のエラーではなく日本語の案内文になり、処理が安全に止まることを確認する）。
+3. 問題が無いことを確認したら、本番のVercel環境変数でフラグをONにする。
 
-## 6. 既存アカウントへの追加連携について（利用者向けの案内の要点）
+## 6. 既存アカウントへの追加連携について（訂正：2026-09-18）
 
-- **Xで作成済みのアカウントにGoogle/Appleを追加したい場合は、必ず先にその
-  Xアカウントでログインしてから、マイページの「ログイン方法」画面で連携して
-  ください。** 新規に「Googleでログイン」「Appleでログイン」をすると、
-  （そのGoogle/Appleが未連携であれば）別の新しいアカウントが作られます。
-- **メールアドレスが同じだからといって、X側のアカウントとGoogle/Apple側の
-  アカウントが自動的に統合されることはありません。** 本実装はSupabase Authの
-  Manual Identity Linking（`linkIdentity()`）を使っており、メールアドレス
-  一致による自動統合には一切依存していません。統合したい場合は、必ず上記の
-  手順（先にXへログイン→ログイン方法画面で連携）を踏む必要があります。
+**訂正のお知らせ：** 本ドキュメントの旧版には「メールアドレスが同じでも
+自動統合されない」という記載がありましたが、これはSupabase Authの公式仕様と
+逆であり誤りでした。以下の内容に訂正します。
+
+### Supabase Authには自動リンクの仕組みが実際にある
+
+Supabase Auth公式ドキュメント
+[Identity Linking](https://supabase.com/docs/guides/auth/auth-identity-linking)
+（2026-09-18確認）によれば、Supabase Authは
+**確認済み（verified）のメールアドレスが一致するOAuth識別情報を、
+同じユーザーへ自動的にリンクする**仕組みを持っている。これは複数のOAuth
+手段を使うユーザーの利便性のための挙動であり、Manual Linking
+（`linkIdentity()`）とは別の、Supabase Auth自体の既定の動作である。
+
+さらに、自動リンクが成立した際にSupabaseは**確認未了（unconfirmed）の
+他の識別情報を削除する**（アカウント乗っ取り対策）ことも公式ドキュメントに
+明記されている。
+
+### ただし、すべての組み合わせで起きるとは限らない
+
+自動リンクは「確認済みメールアドレスの一致」が条件であり、以下のような
+ケースでは一致せず、自動リンクが起きない可能性がある。
+
+- **Xからメールアドレスが提供されない**（Xはメールアドレスをスコープに
+  含めない設定・連携が一般的で、Supabaseに渡らないことがある）。
+- **XとGoogleで異なるメールアドレスを使っている。**
+- **Appleの「メールを非公開」機能により、実際のメールではなく
+  Apple生成のリレーアドレスが使われる**（これがX/Google側のメールと
+  一致することは通常無い）。
+- **provider側のメールアドレスが未確認（unverified）**の場合。
+- **そのGoogle/Appleの識別情報が、既に別のSupabase userへ連携済み**の場合
+  （この場合はSupabase側が`identity_already_exists`等で拒否し、本実装は
+  この結果を生のエラーを見せずに日本語で案内して処理を止める設計になって
+  いる。詳細はsrc/lib/authErrorMessages.ts参照）。
+
+### 利用者へ案内する安全な手順（変更なし）
+
+上記のとおり自動リンクが**起きる場合はあるが、すべての組み合わせで
+起きるとは保証できない**ため、引き続き以下の手順を確実な方法として案内する。
+
+> **既存のXアカウントを確実に引き継ぎたい場合は、先にそのXアカウントで
+> ログインし、マイページの「ログイン方法」からGoogle／Appleを連携して
+> ください。**
+
+- 新規に「Googleでログイン」「Appleでログイン」をした場合、メールアドレスの
+  一致条件を満たせば自動的に同じアカウントへ寄せられることもあるが、
+  **上記の条件を満たさなければ、意図せず別の新しいアカウントが作られる。**
+  自動リンクの成立有無に依存したアカウント引き継ぎの案内はしない。
+- **本実装（LoginMethodsManageModal・マイページの「ログイン方法」画面）は、
+  Xログイン中のセッションに対してManual Linking（`linkIdentity()`）で
+  明示的に連携する操作のみを提供する。** 既にそれぞれ別々のSupabase user
+  として作成済みになってしまった2つのアカウント（例：自動リンクの条件を
+  満たさずGoogleで新規登録してしまった後のXアカウントとGoogleアカウント）を、
+  この画面だけで後から統合することはできない。
+- **別々に作成済みの2アカウントのデータ（ポイント・投稿・フォロー・
+  ライブ履歴等）を統合したい場合は、この画面の操作だけでは完結せず、
+  管理者による別の移行手順（対象ユーザーの特定・profiles行の手動統合・
+  関連テーブルのuser_id付け替え等）が必要になる可能性がある。** 現時点で
+  この移行手順は未整備であり、今回の実装スコープにも含まれていない。
+
+## 7. ログインボタンのロゴ素材について（2026-09-18追加）
+
+`src/components/app/AuthProviderIcon.tsx`が使用しているロゴ素材の出所を記録する。
+SupabaseのOAuth開始処理（`signInWithOAuth`/`linkIdentity`）自体は変更しておらず、
+以下は見た目（ロゴ画像）だけの対応であることに注意。
+
+### Google：公式配布物を導入済み
+
+- **取得元URL：** https://developers.google.com/identity/branding-guidelines
+  に掲載されている、公式配布のZIPアーカイブ
+  `https://developers.google.com/static/identity/images/signin-assets.zip`
+- **確認日：2026-09-18**
+- **取得した具体的なファイル：**
+  `Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web.svg`
+  （ライトテーマ・正方形・テキスト無しの「G」ロゴ単体）を一切加工せず
+  `public/auth-icons/google-g-light-square.svg`としてそのまま同梱している。
+- **テキスト無し版を選んだ理由：** 公式配布物のテキスト付きボタンは
+  英語（"Sign in with Google"）が画像に焼き込まれており、アプリの日本語UI
+  （「Googleでログイン」）と両立できないため。ロゴ単体を使い、ボタンの文言は
+  Googleのガイドライン記載の配色（文字色 `#1F1F1F`、枠線 `#747775`、背景
+  `#FFFFFF`）に沿って別途HTML/CSSで組んでいる。
+- 色・形状の描き直しは行っていない（ロゴ画像自体は非改変、周囲のボタンの
+  余白・枠線・背景色だけをガイドラインの数値に合わせて実装している）。
+
+### Apple：公式素材導入待ち
+
+Appleについては、以下の理由により、出所を確認できる公式のロゴ素材を
+今回のブランチには導入していない。
+
+- Apple公式のボタン生成手段（`https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid.js`）は、
+  Apple自身の認証フロー（`AppleID.auth.signIn()`、IDトークンをSupabaseの
+  `signInWithIdToken`で検証する方式）に紐づいており、今回のSupabase OAuth
+  リダイレクト方式（`signInWithOAuth`/`linkIdentity`）とは別の実装になる。
+  「SupabaseのOAuth開始処理は変更しない」という要件と両立できないため
+  採用していない。
+- Apple Human Interface Guidelinesのロゴ配布ページはスクリプト描画のため
+  内容を確認できず、認証済みのApple Developerアカウント経由でのみ入手できる
+  ダウンロード資産にもこの環境からはアクセスできなかった。
+- そのため、`AuthProviderIcon`の`provider === "apple"`は現在ロゴを描画せず
+  `null`を返す（Appleボタンはテキストのみ）。**`NEXT_PUBLIC_ENABLE_APPLE_LOGIN`が
+  OFFの間はボタン自体が表示されないため、この状態が本番ユーザーの目に
+  触れることは無い。**
+- Apple公式のロゴ素材を正規の手段（Apple Developerアカウントでのログイン、
+  または正式に配布されるデザインリソースパッケージ）で入手できた時点で、
+  Googleと同様に取得元URL・確認日を記録した上でこのコンポーネントへ追加すること。
+  それまでは機能フラグをONにしないこと。

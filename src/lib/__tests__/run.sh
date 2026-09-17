@@ -46,6 +46,8 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../authErrorMessages.ts"
   "$SCRIPT_DIR/../authProviders.ts"
   "$SCRIPT_DIR/../loginMethodsReturnFlow.ts"
+  "$SCRIPT_DIR/../linkAttempt.ts"
+  "$SCRIPT_DIR/../linkFlowVerification.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -394,5 +396,32 @@ else
   FAILED=1
 fi
 rm -rf "$AUTH_IDENTITY_RACE_LOCK_DIR"
+
+# src/lib/__tests__/store/useAuthStoreLinkAttempt.check.ts も同じ理由で専用
+# tsconfig経由にする。2026-09-18（複数プロバイダー対応レビュー再修正・項目1）：
+# linkProviderがidentities未取得/取得失敗中・対象provider既連携済みでは
+# 開始しないこと、正常時はuserId/provider/開始前のidentity一覧を
+# sessionStorageへ保存してからlinkIdentity()を呼ぶこと、開始失敗時は一時情報を
+# 削除し、開始成功時（リダイレクトの可能性がある）は消さずに残すこと、
+# sessionStorageへの保存自体が失敗した場合はlinkIdentity()を呼ばず安全な
+# 日本語エラーを返すことを検証する。
+AUTH_LINK_ATTEMPT_DIR="$(mktemp -d)"
+AUTH_LINK_ATTEMPT_TSCONFIG="$SCRIPT_DIR/store/tsconfig.authLinkAttempt.json"
+AUTH_LINK_ATTEMPT_ENTRY="$AUTH_LINK_ATTEMPT_DIR/src/lib/__tests__/store/useAuthStoreLinkAttempt.check.js"
+
+echo "--- useAuthStoreLinkAttempt.check.ts ---"
+if npx tsc -p "$AUTH_LINK_ATTEMPT_TSCONFIG" --outDir "$AUTH_LINK_ATTEMPT_DIR" && [ -f "$AUTH_LINK_ATTEMPT_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUTH_LINK_ATTEMPT_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUTH_LINK_ATTEMPT_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useAuthStoreLinkAttempt.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUTH_LINK_ATTEMPT_DIR"
 
 exit $FAILED
