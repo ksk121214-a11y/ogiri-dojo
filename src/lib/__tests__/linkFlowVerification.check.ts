@@ -107,6 +107,82 @@ function main() {
   );
   console.log("PASS: 開始前に無かった対象providerのidentityが実際に増えている場合だけ成功する");
 
+  // ==== verifyIdentityWasAdded：複数タブ等で並行して連携が増えたケース
+  //      （2026-09-19再々レビュー修正、配列順に依存しないことの検証） ====
+
+  // 1. 開始前がXのみ、完了後がX・Google・Appleで対象はApple。
+  //    新規identityの並びがGoogle→Apple（対象が配列の後ろ）でも成功する。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "apple", priorIdentityIds: ["id-x"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-google", "google"), makeIdentity("id-apple", "apple")],
+    }),
+    { ok: true },
+  );
+  console.log("PASS: 新規identityがGoogle→Appleの並びでも、対象Appleが含まれていれば成功する");
+
+  // 2. 同じ条件で、新規identityの並びがApple→Google（対象が配列の先頭）でも成功する。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "apple", priorIdentityIds: ["id-x"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-apple", "apple"), makeIdentity("id-google", "google")],
+    }),
+    { ok: true },
+  );
+  console.log("PASS: 新規identityがApple→Googleの並びでも、対象Appleが含まれていれば成功する");
+
+  // 3. 対象がGoogleで、完了後にGoogleとAppleの両方が増えていても成功する
+  //    （並行連携そのものは咎めず、対象providerが含まれていれば成功でよい）。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "google", priorIdentityIds: ["id-x"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-google", "google"), makeIdentity("id-apple", "apple")],
+    }),
+    { ok: true },
+  );
+  console.log("PASS: 対象がGoogleで、Google・Appleの両方が新規に増えていても成功する");
+
+  // 4. 新しいidentityはAppleだけ、対象はGoogle → provider_mismatch。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "google", priorIdentityIds: ["id-x"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-apple", "apple")],
+    }),
+    { ok: false, reason: "provider_mismatch" },
+  );
+  console.log("PASS: 新規identityがAppleのみで対象がGoogleの場合はprovider_mismatchになる");
+
+  // 5. 新しいidentityが0件 → identity_not_added。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "google", priorIdentityIds: ["id-x", "id-google"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-google", "google")],
+    }),
+    { ok: false, reason: "identity_not_added" },
+  );
+  console.log("PASS: 新規identityが0件の場合はidentity_not_addedになる");
+
+  // 6. 元からGoogleが存在していて（priorIdentityIdsに含まれる）、新規追加は
+  //    Appleだけ、対象はGoogle → 元から存在したGoogleを成功判定に使わず、
+  //    provider_mismatchになる（新規に増えたものだけを対象に判定する）。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "google", priorIdentityIds: ["id-x", "id-google"] }), {
+      ok: true,
+      identities: [makeIdentity("id-x", "x"), makeIdentity("id-google", "google"), makeIdentity("id-apple", "apple")],
+    }),
+    { ok: false, reason: "provider_mismatch" },
+  );
+  console.log(
+    "PASS: 元から存在していたGoogleは成功判定に使われず、新規追加がAppleだけなら対象Googleはprovider_mismatchになる",
+  );
+
+  // 7. identity取得失敗 → identities_fetch_failed（既存の分岐が壊れていないことの再確認）。
+  assert.deepEqual(
+    verifyIdentityWasAdded(makeAttempt({ provider: "apple" }), { ok: false }),
+    { ok: false, reason: "identities_fetch_failed" },
+  );
+  console.log("PASS: identity取得失敗はidentities_fetch_failedになる（複数タブケースでも変わらない）");
+
   // 一連の状態遷移：validateLinkAttempt→verifyIdentityWasAddedの順で両方okの
   // 場合だけ「連携成功」と判断できることを、実際に両方呼んで確認する
   // （callbackページの実際の呼び出し順と同じ組み合わせ方）。

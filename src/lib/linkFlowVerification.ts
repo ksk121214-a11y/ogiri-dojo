@@ -39,23 +39,32 @@ export type IdentitiesFetchResult = { ok: true; identities: UserIdentity[] } | {
 
 // 手順6〜7相当：validateLinkAttemptがokの場合にのみ呼ぶ。実際に
 // getUserIdentities()を実行した結果と、連携開始「前」のidentity_id一覧を
-// 突き合わせ、(a) 新しいidentityが実際に増えていること、(b) その新しい
-// identityのproviderが、連携を開始したprovider（sessionStorageに保存された
-// 値、URLの値ではない）と一致することの両方を確認する。
+// 突き合わせ、(a) 新しいidentityが実際に増えていること、(b) その新しく
+// 増えたidentityの中に、連携を開始したprovider（sessionStorageに保存された
+// 値、URLの値ではない）と一致するものが存在することの両方を確認する。
+//
+// 2026-09-19（再々レビュー修正）：以前は新しいidentityのうち配列内で最初に
+// 見つかった1件だけを見ており、複数タブ等でGoogle/Appleの連携が並行して
+// 進んだ場合（開始前=X、完了後=X・Google・Apple）、対象がAppleでも配列の
+// 先頭がGoogleなら誤ってprovider_mismatchにしてしまう不具合があった。
+// 新しく増えたidentity「全員」を抽出し、その中に対象providerが1件でも
+// あれば成功とする（配列の並び順に依存しない）。元から存在していた
+// 同じproviderのidentity（priorIdentityIdsに含まれるもの）を成功判定に
+// 使わないよう、必ず「新規に増えた」もの限定で判定する。
 export function verifyIdentityWasAdded(
   attempt: LinkAttempt,
   identitiesResult: IdentitiesFetchResult,
 ): LinkVerificationCheck {
   if (!identitiesResult.ok) return { ok: false, reason: "identities_fetch_failed" };
 
-  const newIdentity = identitiesResult.identities.find(
+  const newIdentities = identitiesResult.identities.filter(
     (identity) => !attempt.priorIdentityIds.includes(identity.identity_id),
   );
-  if (!newIdentity) return { ok: false, reason: "identity_not_added" };
+  if (newIdentities.length === 0) return { ok: false, reason: "identity_not_added" };
 
-  if (newIdentity.provider !== SUPABASE_PROVIDER_VALUE[attempt.provider]) {
-    return { ok: false, reason: "provider_mismatch" };
-  }
+  const targetProviderValue = SUPABASE_PROVIDER_VALUE[attempt.provider];
+  const matchesTargetProvider = newIdentities.some((identity) => identity.provider === targetProviderValue);
+  if (!matchesTargetProvider) return { ok: false, reason: "provider_mismatch" };
 
   return { ok: true };
 }
