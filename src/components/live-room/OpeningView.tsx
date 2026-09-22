@@ -45,9 +45,13 @@ export default function OpeningView() {
   // - ゲストには表示しない。
   // - profile取得が完了する（profileLoading===false）まで表示判定しない
   //   （プロフィール取得前の一瞬だけ表示されてしまうことを防ぐ）。
-  // - 取得済みprofile.referralSourceAnsweredAtが入っていれば、以後は
-  //   二度と表示しない（localStorageではなくDBの値だけで判定する）。
-  const showReferralSurvey = !isGuest && !profileLoading && !!profile && profile.referralSourceAnsweredAt == null;
+  // - referralSource/referralSourceAnsweredAtの両方がnullの場合だけ表示する
+  //   （2026-09-22再修正・問題2：join_live成功直後はapplyReferralAnswerFromJoinで
+  //   referralSourceAnsweredAtだけを暫定値で先に埋める設計のため、片方だけを
+  //   見るとローカル反映直後に判定がずれる隙が生じうる。両方nullという厳しい方の
+  //   条件にすることで、ローカル反映直後の安全性を上げる）。
+  const showReferralSurvey =
+    !isGuest && !profileLoading && !!profile && profile.referralSource == null && profile.referralSourceAnsweredAt == null;
   // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
   // 開く演出・音・BGMを体験してもらうため、このタブでまだ見ていなければここで見せる。
   const [showCurtain] = useState(() => !hasSeenCurtain());

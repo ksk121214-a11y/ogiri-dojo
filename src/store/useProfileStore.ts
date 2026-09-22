@@ -62,6 +62,11 @@ interface ProfileState {
   // 2026-09-02: 寄合券の消費（submit_sns_topic/submit_sns_answer）等、他のRPCが
   // profilesを更新した後にクライアント側の表示を最新化するための汎用リフレッシュ。
   refreshProfile: () => Promise<void>;
+  // 2026-09-22（レビュー対応・問題2）：join_live成功時にDB側で確定した
+  // effective_referral_source（ParticipantRow.referral_source）を、DBへの
+  // 追加UPDATEなしでローカルprofileへ即座に反映する。refreshProfileの完了を
+  // 待たずに「回答済み」表示へ切り替えられるようにするための専用アクション。
+  applyReferralAnswerFromJoin: (userId: string, referralSource: string) => void;
 }
 
 function toDojoProfile(row: {
@@ -116,6 +121,13 @@ function toDojoProfile(row: {
     referralSource: row.referral_source,
     referralSourceAnsweredAt: row.referral_source_answered_at,
   };
+}
+
+// 2026-09-22追加：join_live側のCHECK制約・許可値と同じ値域
+// （supabase/migrations/0074_referral_source_survey.sql参照）。
+const VALID_REFERRAL_SOURCE_VALUES = ["x", "friend", "app", "other"] as const;
+function isValidReferralSourceValue(value: string): boolean {
+  return (VALID_REFERRAL_SOURCE_VALUES as readonly string[]).includes(value);
 }
 
 const PROFILE_UPDATE_GENERIC_ERROR = "更新に失敗しました。時間をおいて再度お試しください";
@@ -252,6 +264,37 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     // （loadForUserの世代ガードと同じ考え方）。
     if (!isStillSameOwner(userId)) return;
     set({ profile });
+  },
+
+  // 2026-09-22（レビュー対応・問題2）：join_live成功直後、DBが返した
+  // effective_referral_source（クライアント値ではなくDB側で確定した値）を
+  // 使ってローカルprofileを回答済み状態へ更新する。DBへの書き込みは行わない
+  // （join_liveが既にDBで完了済みの結果をローカルへ反映するだけ）。
+  // 呼び出し元（useLiveFollowerStore.joinLive）がアカウント切り替えの世代
+  // ガードを行っていても、ここでも独立して本人確認・ゲスト確認・値の検証を
+  // 行う（他の場所から呼ばれても安全な自己完結型のアクションにするため）。
+  applyReferralAnswerFromJoin: (userId, referralSource) => {
+    const authUser = useAuthStore.getState().user;
+    const profile = get().profile;
+    if (!authUser || authUser.id !== userId) return;
+    if (!profile || profile.id !== userId) return;
+    if (isGuestUser(authUser, profile)) return;
+    if (!isValidReferralSourceValue(referralSource)) return;
+
+    set((s) =>
+      s.profile
+        ? {
+            profile: {
+              ...s.profile,
+              referralSource,
+              // 既にDBから取得済みの正式なanswered_atがあればそれを維持し、
+              // まだ無ければ暫定的に現在時刻を入れる（後続のrefreshProfileが
+              // 完了すればDBの正式な値へ置き換わる）。
+              referralSourceAnsweredAt: s.profile.referralSourceAnsweredAt ?? new Date().toISOString(),
+            },
+          }
+        : s,
+    );
   },
 }));
 

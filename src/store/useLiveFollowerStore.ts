@@ -1032,6 +1032,13 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     const { live } = get();
     const userId = useAuthStore.getState().user?.id;
     if (!live || !userId) return;
+    // 2026-09-22（レビュー対応・問題1）：join_live RPCを待っている間に
+    // アカウント（ログアウト・ログイン切り替え）またはライブ（別ライブへの
+    // ナビゲーション）が切り替わっても、遅れて返ってきた古い結果を現在の
+    // 別アカウント・別ライブの状態へ反映しないよう、開始時点のuser/liveを
+    // 固定しておく。
+    const startedUserId = userId;
+    const startedLiveId = live.id;
     // 運営者専用管理画面の追加（第1段階）：最大参加人数(lives.max_players)を
     // Supabase側で安全に守るため、直接INSERTではなくsecurity definer RPC
     // (join_live)経由にした。RPC内でlives行をfor updateロックしてから
@@ -1041,10 +1048,25 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     // 2026-09-01: 集客施策の効果測定のため、任意で「どこで知ったか」を
     // referral_sourceとして一緒に記録できるようにした（未指定ならnull）。
     const { data, error } = await supabase.rpc("join_live", {
-      p_live_id: live.id,
+      p_live_id: startedLiveId,
       p_preferred_role: preferredRole,
       p_referral_source: referralSource ?? null,
     });
+
+    // 2026-09-22（レビュー対応・問題1）：RPC完了後、現在の状態が開始時と
+    // 一致しているかを確認する。一致しなければ、DB上の処理自体は成功して
+    // いてもローカルの別アカウント・別ライブの状態は一切変更せず、静かに
+    // 破棄する（myParticipant・errorのどちらも更新しない）。
+    const stillSameContext =
+      useAuthStore.getState().user?.id === startedUserId && get().live?.id === startedLiveId;
+    if (!stillSameContext) {
+      console.warn("[live] join_liveの結果が古いアカウント/ライブのものだったため破棄", {
+        startedUserId,
+        startedLiveId,
+      });
+      return;
+    }
+
     if (error) {
       // 2026-09-13（再々レビュー2回目対応）：想定していないエラーコードを生のまま
       // 画面へ返さない（Postgres/Supabaseの内部的な文言が利用者に見えてしまうのを
@@ -1069,17 +1091,45 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       set({ error: reason });
       return;
     }
-    set({ myParticipant: data as ParticipantRow, error: null });
 
-    // 2026-09-22（レビュー対応・項目2）：参加成功直後、useProfileStoreの
-    // profileがまだ古い状態（referral_source未回答のまま）で残っていると、
-    // 同じタブ・同じログイン状態のまま次のライブへ移った際にアンケートが
-    // もう一度表示されてしまう恐れがある。通常会員（ゲストは対象外）に限り、
-    // DBの最新状態を取り直す。refreshProfile自体が所有者確認（取得中に
-    // 別ユーザーへ切り替わっていたら反映しない）・失敗時の無害なno-opを
-    // 既に備えているため、ここでは追加のtry/catchや結果チェックを行わず、
-    // 参加処理自体の成否には一切影響させない。
-    if (!isGuestUser(useAuthStore.getState().user, useProfileStore.getState().profile)) {
+    const participant = data as ParticipantRow;
+    // 2026-09-22（レビュー対応・問題1）：RPCが返したparticipantが、開始時に
+    // 意図したuser_id/live_idと異なる（想定できない異常応答）場合は画面へ
+    // 反映しない。生の内部情報は画面へ出さず、開発者向けログにだけ残す。
+    if (participant.user_id !== startedUserId || participant.live_id !== startedLiveId) {
+      console.warn("[live] join_liveが開始時と異なるuser_id/live_idのparticipantを返した（異常応答のため破棄）", {
+        startedUserId,
+        startedLiveId,
+        participantUserId: participant.user_id,
+        participantLiveId: participant.live_id,
+      });
+      return;
+    }
+
+    set({ myParticipant: participant, error: null });
+
+    // 2026-09-22（レビュー対応・問題1）：ゲスト判定は「RPC完了後の現在の
+    // auth/profile」ではなく、DBが返したparticipant.is_guestを信頼する
+    // （アカウント切り替え中でも、この値は開始時に固定されたstartedUserId
+    // 本人について、DBが確定したis_guestなので誤らない）。
+    if (!participant.is_guest) {
+      // 2026-09-22（レビュー対応・問題2）：join_live成功時に返された
+      // referral_sourceは、DB側で確定済みの信頼できるeffective_referral_source
+      // （初回回答・改ざん無視・保存済み値の引き継ぎ、いずれの結果も含む）。
+      // 「選択しない」で参加し、DBもnullを返した場合（=未回答のまま）は
+      // 何もしない。refreshProfileの完了を待たずに、まず同期的にローカル
+      // profileへ反映することで、次のライブへ即座に移ってもアンケートが
+      // 再表示されないようにする。
+      if (participant.referral_source) {
+        useProfileStore.getState().applyReferralAnswerFromJoin(startedUserId, participant.referral_source);
+      }
+
+      // その上で、DBの正式なreferral_source_answered_at等を取り直すために
+      // refreshProfileを呼ぶ。refreshProfile自体が所有者確認（取得中に別
+      // ユーザーへ切り替わっていたら反映しない）を備えており、失敗しても
+      // 何もしない（上で同期的に反映した回答済み状態を消さない）ため、ここでは
+      // 追加のtry/catchや結果チェックを行わず、参加処理自体の成否には一切
+      // 影響させない。
       void useProfileStore.getState().refreshProfile().catch(() => {});
     }
   },
