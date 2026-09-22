@@ -1070,6 +1070,18 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       return;
     }
     set({ myParticipant: data as ParticipantRow, error: null });
+
+    // 2026-09-22（レビュー対応・項目2）：参加成功直後、useProfileStoreの
+    // profileがまだ古い状態（referral_source未回答のまま）で残っていると、
+    // 同じタブ・同じログイン状態のまま次のライブへ移った際にアンケートが
+    // もう一度表示されてしまう恐れがある。通常会員（ゲストは対象外）に限り、
+    // DBの最新状態を取り直す。refreshProfile自体が所有者確認（取得中に
+    // 別ユーザーへ切り替わっていたら反映しない）・失敗時の無害なno-opを
+    // 既に備えているため、ここでは追加のtry/catchや結果チェックを行わず、
+    // 参加処理自体の成否には一切影響させない。
+    if (!isGuestUser(useAuthStore.getState().user, useProfileStore.getState().profile)) {
+      void useProfileStore.getState().refreshProfile().catch(() => {});
+    }
   },
 
   submitMyAnswer: async (body: string) => {

@@ -2294,7 +2294,17 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       })
       .single();
     if (error) {
-      return { ok: false, reason: error.message };
+      // 2026-09-22（レビュー対応・項目4）：create_live_preparation()自体が
+      // ok:false（お題不足・重複開催番号・不正な手動番号等）を返した場合は
+      // 下のresult.reason（SQL関数側で組み立てた日本語文言）を使うので、
+      // ここに来るのは「そもそも呼び出し自体が失敗した」場合だけ
+      // （権限エラー・想定外の制約違反・不正な引数型等）。生のPostgreSQL/
+      // Supabaseエラー文言（制約名・型名等）を画面へ出さない。
+      console.warn("[live] create_live_preparationの呼び出し自体が失敗", error);
+      const reason = error.message.includes("not authorized")
+        ? "この操作を行う権限がありません"
+        : "ライブの準備に失敗しました。入力内容を確認し、時間をおいて再度お試しください。";
+      return { ok: false, reason };
     }
     const result = data as { ok: boolean; reason: string | null; live_id: string | null };
     if (!result.ok || !result.live_id) {

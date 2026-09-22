@@ -9,9 +9,10 @@
 -- localStorageに頼らずDBへ永続化するため、profilesへ新しい列を追加する。
 -- 一度保存した回答は本人でも直接書き換えられないよう、この2列への
 -- authenticatedロールへのUPDATE権限は意図的にgrantしない（0033のmastery_meter等
--- と同じ方針）。書き込みはjoin_live（SECURITY DEFINER）内の
--- 「referral_source is null」ガード付きUPDATEからのみ行い、初回の非空回答だけを
--- 保存し以後は上書きしない。
+-- と同じ方針）。書き込みはjoin_live（SECURITY DEFINER）内、profiles行をFOR UPDATEで
+-- 直列化した上での「referral_source is null」ガード付きUPDATEからのみ行い、
+-- 初回の非空回答だけを保存し以後は上書きしない（2026-09-22レビュー対応で、
+-- participants.referral_sourceも常にDB側で確定した値を使うよう修正済み）。
 begin;
 
 -- ============================================================
@@ -34,14 +35,31 @@ alter table public.profiles
   add constraint profiles_referral_source_check
   check (referral_source is null or referral_source in ('x', 'friend', 'app', 'other'));
 
+-- 2026-09-22（レビュー対応・項目3）：referral_sourceとreferral_source_answered_atは
+-- 常にセットで確定する（片方だけ値が入る状態を許さない）。「両方null（未回答）」
+-- 「両方not null（回答済み）」のどちらかしか成立しない。0074はまだ本番へ
+-- 適用していないため、新規migrationを増やさずこのファイル自体に追記する。
+alter table public.profiles
+  add constraint profiles_referral_source_answered_at_pairing_check
+  check ((referral_source is null) = (referral_source_answered_at is null));
+
 -- 意図的にgrantしない＝authenticatedロールから直接UPDATEできない
 -- （0033のmastery_meter等と同じ方針。既にprofilesはUPDATE権限を列単位で
 -- 絞ってgrantしている前提のため、明示的なrevokeは不要）。
 
 -- ============================================================
--- 3) join_live：許可値チェックの追加と、通常会員（ゲストを除く）の
---    初回の流入元回答だけをprofilesへ永続化する処理を追加する。
---    既存のロジック（0070本体）は一切変更しない。
+-- 3) join_live：許可値チェックの追加と、通常会員（ゲストを除く）の流入元を
+--    アカウント単位で正しく引き継ぐ処理を追加する。既存のロジック（0070本体）の
+--    うち、流入元に無関係な検証・組み立て（権限確認・停止確認・定員確認・
+--    ゲスト番号採番等）は一切変更しない。
+--
+-- 2026-09-22（レビュー対応・項目1）：以前はp_referral_sourceをそのまま
+-- participants.referral_sourceへ入れており、(a) 既に回答済みの通常会員が
+-- 次のライブへnullで参加すると「未回答」に見えてしまう、(b) 回答済みの値を
+-- 改ざんした値で上書きできてしまう、という2つの問題があった。
+-- 「そのユーザーについて今回のparticipants行へ実際に記録すべき値」を
+-- v_effective_referral_sourceとして一度だけ確定させ、それだけをparticipants
+-- へ書き込む（p_referral_sourceを直接insertへは使わない）。
 -- ============================================================
 create or replace function public.join_live(p_live_id uuid, p_preferred_role text, p_referral_source text default null)
 returns public.participants
@@ -58,6 +76,8 @@ declare
   v_is_guest boolean;
   v_guest_number int;
   v_row public.participants;
+  v_profile_referral_source text;
+  v_effective_referral_source text;
 begin
   if p_preferred_role not in ('player', 'audience') then
     raise exception 'INVALID_ROLE';
@@ -131,27 +151,52 @@ begin
     v_guest_number := null;
   end if;
 
+  -- 2026-09-22（レビュー対応・項目1）：v_effective_referral_sourceを確定する。
+  -- ゲストは常にnull（運営の流入元集計を汚さない・使い捨てプロフィールへは
+  -- 書き込まない）。通常会員は、
+  --   (a) 既に回答済み（profiles.referral_sourceがnot null）なら、クライアントが
+  --       今回何を送ってきたか（null・改ざんされた別の値のいずれでも）に関わらず、
+  --       保存済みの値をそのまま使う。
+  --   (b) 未回答で、今回許可された値が送られた場合だけ、この場でprofilesへ
+  --       初回保存し、その値を使う。
+  --   (c) 未回答で、今回もnull（「選択しない」）なら、未回答のままにする。
+  -- 同時に複数のライブへ参加しても初回回答が競合しないよう、profiles行を
+  -- FOR UPDATEで直列化する（lives→profilesの順で一貫してロックするため、
+  -- 他の経路との間でデッドロックは生じない）。
+  if v_is_guest then
+    v_effective_referral_source := null;
+  else
+    select referral_source into v_profile_referral_source
+      from public.profiles where id = auth.uid() for update;
+
+    if v_profile_referral_source is not null then
+      v_effective_referral_source := v_profile_referral_source;
+    elsif p_referral_source is not null then
+      -- FOR UPDATEで排他済みのため、ここでのUPDATEは必ずこの呼び出しだけが行う
+      -- （「referral_source is null」の再確認は、将来のリファクタでロックが
+      -- 外れた場合の保険として残す）。
+      update public.profiles
+        set referral_source = p_referral_source,
+            referral_source_answered_at = now()
+        where id = auth.uid()
+          and referral_source is null;
+      v_effective_referral_source := p_referral_source;
+    else
+      v_effective_referral_source := null;
+    end if;
+  end if;
+
+  -- participantsへ書き込む値は、クライアントが送ってきたp_referral_sourceでは
+  -- なく、DB側で確定したv_effective_referral_sourceにする（改ざん・古い回答の
+  -- 送信いずれでも、実際に記録される値はDBが確定したものになる）。
   insert into public.participants (live_id, user_id, preferred_role, referral_source, is_guest, guest_number)
-  values (p_live_id, auth.uid(), p_preferred_role, p_referral_source, v_is_guest, v_guest_number)
+  values (p_live_id, auth.uid(), p_preferred_role, v_effective_referral_source, v_is_guest, v_guest_number)
   on conflict (live_id, user_id) do update
     set preferred_role = excluded.preferred_role,
         -- 既に流入元が記録済みなら上書きしない（再度role変更で呼ばれた時に消さない）。
         referral_source = coalesce(public.participants.referral_source, excluded.referral_source)
         -- is_guest/guest_numberは意図的に更新しない（初回参加時の値を保持する）。
   returning * into v_row;
-
-  -- 2026-09-22追加：通常会員（ゲストを除く）が今回はじめて流入元を回答した
-  -- 場合だけ、profilesへ永続化する（アカウント単位で以後は二度と表示しない
-  -- ため）。「referral_source is null」を対象条件にしているため、既に
-  -- 回答済みの場合はこのUPDATEが0件ヒットで終わり、改ざんされた値が来ても
-  -- 上書きされない。ゲストの使い捨てプロフィールへは書き込まない。
-  if p_referral_source is not null and not v_is_guest then
-    update public.profiles
-      set referral_source = p_referral_source,
-          referral_source_answered_at = now()
-      where id = auth.uid()
-        and referral_source is null;
-  end if;
 
   return v_row;
 end;

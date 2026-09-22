@@ -106,6 +106,31 @@ else
 fi
 rm -rf "$POINT_BREAKDOWN_DIR"
 
+# src/lib/__tests__/store/useLiveHostStoreCreateLivePreparation.check.ts も同じ理由
+# （useLiveHostStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を含む）
+# で専用tsconfig経由にする。2026-09-22レビュー対応：create_live_preparation RPC
+# 呼び出し自体が失敗した場合に、生のPostgreSQL/Supabaseエラー文言を画面へ返さず
+# 安全な日本語文言へ変換することを検証する（SQL関数側が返すresult.reasonの
+# 日本語文言はこれまでどおりそのまま通ることの回帰確認も含む）。
+HOST_CREATE_LIVE_PREP_DIR="$(mktemp -d)"
+HOST_CREATE_LIVE_PREP_TSCONFIG="$SCRIPT_DIR/store/tsconfig.hostCreateLivePreparation.json"
+HOST_CREATE_LIVE_PREP_ENTRY="$HOST_CREATE_LIVE_PREP_DIR/src/lib/__tests__/store/useLiveHostStoreCreateLivePreparation.check.js"
+
+echo "--- useLiveHostStoreCreateLivePreparation.check.ts ---"
+if npx tsc -p "$HOST_CREATE_LIVE_PREP_TSCONFIG" --outDir "$HOST_CREATE_LIVE_PREP_DIR" && [ -f "$HOST_CREATE_LIVE_PREP_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$HOST_CREATE_LIVE_PREP_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$HOST_CREATE_LIVE_PREP_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveHostStoreCreateLivePreparation.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$HOST_CREATE_LIVE_PREP_DIR"
+
 # src/lib/__tests__/store/useLiveFollowerStoreRace.check.ts は、useLiveFollowerStore.ts
 # （"@/..."エイリアス・実際のSupabaseクライアント生成を含む）を本番と同じ実装のまま
 # importして検証するため、上のCHECK_FILESループ（-maxdepth 1、素のtsc起動）とは別に、
@@ -129,6 +154,30 @@ else
   FAILED=1
 fi
 rm -rf "$FOLLOWER_RACE_DIR"
+
+# src/lib/__tests__/store/useLiveFollowerStoreJoinReferral.check.ts も同じ理由
+# （useLiveFollowerStore.ts/useProfileStore.tsが"@/..."エイリアス・実際の
+# Supabaseクライアント生成を含む）で専用tsconfig経由にする。2026-09-22
+# レビュー対応：joinLive成功後にrefreshProfileを呼ぶこと（ゲストは対象外、
+# 失敗しても参加自体を失敗扱いにしない、生のDBエラーをerrorへ入れない）を検証する。
+FOLLOWER_JOIN_REFERRAL_DIR="$(mktemp -d)"
+FOLLOWER_JOIN_REFERRAL_TSCONFIG="$SCRIPT_DIR/store/tsconfig.followerJoinReferral.json"
+FOLLOWER_JOIN_REFERRAL_ENTRY="$FOLLOWER_JOIN_REFERRAL_DIR/src/lib/__tests__/store/useLiveFollowerStoreJoinReferral.check.js"
+
+echo "--- useLiveFollowerStoreJoinReferral.check.ts ---"
+if npx tsc -p "$FOLLOWER_JOIN_REFERRAL_TSCONFIG" --outDir "$FOLLOWER_JOIN_REFERRAL_DIR" && [ -f "$FOLLOWER_JOIN_REFERRAL_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$FOLLOWER_JOIN_REFERRAL_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_JOIN_REFERRAL_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreJoinReferral.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FOLLOWER_JOIN_REFERRAL_DIR"
 
 # src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.ts も同じ理由
 # （useLiveFollowerStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を
