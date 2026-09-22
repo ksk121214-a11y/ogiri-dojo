@@ -139,6 +139,7 @@ const participants: ParticipantRow[] = [
     kicked_at: null,
     is_guest: false,
     guest_number: null,
+    referral_source: null,
   },
   {
     id: PARTICIPANT_OTHER,
@@ -153,6 +154,7 @@ const participants: ParticipantRow[] = [
     kicked_at: null,
     is_guest: false,
     guest_number: null,
+    referral_source: null,
   },
 ];
 

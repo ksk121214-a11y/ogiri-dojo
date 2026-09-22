@@ -81,6 +81,9 @@ export interface LivePreparationInput {
   // 保証する）。"official"を選ぶと開催番号が付与され、終了後にポイント・実績へ
   // 反映される。
   liveMode: "test" | "official";
+  // 2026-09-22追加：本番開催番号の手動指定。nullなら従来どおり自動採番する
+  // （liveMode==="test"のときは呼び出し元が必ずnullにする）。
+  manualOfficialSequenceNumber: number | null;
 }
 
 interface LiveHostState {
@@ -134,6 +137,9 @@ interface LiveHostState {
   loadTopicBank: () => Promise<void>;
   // ライブ準備〜開始（第1段階で新設）。
   createLivePreparation: (input: LivePreparationInput) => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-22追加：司会コンソールの準備フォームで「次に自動採番される番号」を
+  // 初期値表示するための読み取り専用取得（更新は一切しない）。
+  fetchNextOfficialSequenceNumber: () => Promise<number | null>;
   openReception: () => Promise<{ ok: boolean; reason?: string }>; // 「参加受付を開始する」
   randomizeGroups: () => Promise<{ ok: boolean; reason?: string }>; // 「（もう一度）ランダムに振り分ける」
   setParticipantGroup: (participantId: string, groupId: string | null) => Promise<{ ok: boolean; reason?: string }>;
@@ -2284,6 +2290,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         p_planned_group_count: input.groupCount,
         p_topic_bank_ids: entries.slice(0, neededTopics).map((entry) => entry.id),
         p_live_mode: input.liveMode,
+        p_manual_official_sequence_number: input.manualOfficialSequenceNumber,
       })
       .single();
     if (error) {
@@ -2349,6 +2356,16 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     subscribeLiveChannels(live.id);
     runtimeReadyLiveId = null;
     return { ok: true };
+  },
+
+  // 2026-09-22追加：準備フォームの「本番開催番号」入力欄に初期値表示するための
+  // 読み取り専用取得。official_live_counterはクライアントから直接readできない
+  // ため、is_host()のみ許可するSECURITY DEFINER RPC経由で覗き見する
+  // （更新は一切しない。取得失敗時はnullを返し、呼び出し元は空欄扱いにする）。
+  fetchNextOfficialSequenceNumber: async () => {
+    const { data, error } = await supabase.rpc("get_next_official_sequence_number");
+    if (error || typeof data !== "number") return null;
+    return data;
   },
 
   // 「参加受付を開始する」：旧startLive()のinsert部分をupdateに置き換えただけで、

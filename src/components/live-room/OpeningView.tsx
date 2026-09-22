@@ -36,10 +36,18 @@ export default function OpeningView() {
   // 一切できない（DB側はjoin_live/_guard_participants_guest_audience_onlyが
   // 最終防御）。UI側もプレイヤー関連のボタン・案内文をゲストには表示しない。
   const isGuest = isGuestUser(authUser, profile);
+  const profileLoading = useProfileStore((s) => s.loading);
   const [joining, setJoining] = useState(false);
   // 2026-09-01: 集客施策の効果測定のため、参加登録時に「どこで知ったか」を
   // 任意で選んでもらう（未選択のままでも参加はできる、選択必須にはしない）。
   const [referralSource, setReferralSource] = useState("");
+  // 2026-09-22追加（流入アンケートの1アカウント1回化）：
+  // - ゲストには表示しない。
+  // - profile取得が完了する（profileLoading===false）まで表示判定しない
+  //   （プロフィール取得前の一瞬だけ表示されてしまうことを防ぐ）。
+  // - 取得済みprofile.referralSourceAnsweredAtが入っていれば、以後は
+  //   二度と表示しない（localStorageではなくDBの値だけで判定する）。
+  const showReferralSurvey = !isGuest && !profileLoading && !!profile && profile.referralSourceAnsweredAt == null;
   // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
   // 開く演出・音・BGMを体験してもらうため、このタブでまだ見ていなければここで見せる。
   const [showCurtain] = useState(() => !hasSeenCurtain());
@@ -103,23 +111,27 @@ export default function OpeningView() {
       {!myParticipant ? (
         <div className="mt-6 flex flex-col items-center gap-2">
           {/* 2026-09-01: 集客施策の効果測定のための任意アンケート。選ばなくても
-              参加はできる（グロース部指摘：Xシェアの効果検証ができない問題への対応）。 */}
-          <label className="flex flex-col items-center gap-1 text-center">
-            <span className="font-sans text-[11px] text-white/50">
-              どこでこのライブを知りましたか？（任意）
-            </span>
-            <select
-              value={referralSource}
-              onChange={(e) => setReferralSource(e.target.value)}
-              className="rounded-full border border-white/30 bg-transparent px-3 py-1.5 font-sans text-xs text-white [&>option]:bg-[#12101a]"
-            >
-              <option value="">選択しない</option>
-              <option value="x">X（旧Twitter）</option>
-              <option value="friend">友人・知人の紹介</option>
-              <option value="app">アプリ内（寄合帳・ホーム等）で知った</option>
-              <option value="other">その他</option>
-            </select>
-          </label>
+              参加はできる（グロース部指摘：Xシェアの効果検証ができない問題への対応）。
+              2026-09-22追加：通常会員が過去に一度でも回答済みなら、以後は表示しない
+              （showReferralSurveyの判定参照）。ゲストにも表示しない。 */}
+          {showReferralSurvey && (
+            <label className="flex flex-col items-center gap-1 text-center">
+              <span className="font-sans text-[11px] text-white/50">
+                どこでこのライブを知りましたか？（任意）
+              </span>
+              <select
+                value={referralSource}
+                onChange={(e) => setReferralSource(e.target.value)}
+                className="rounded-full border border-white/30 bg-transparent px-3 py-1.5 font-sans text-xs text-white [&>option]:bg-[#12101a]"
+              >
+                <option value="">選択しない</option>
+                <option value="x">X（旧Twitter）</option>
+                <option value="friend">友人・知人の紹介</option>
+                <option value="app">アプリ内（寄合帳・ホーム等）で知った</option>
+                <option value="other">その他</option>
+              </select>
+            </label>
+          )}
           <div className="flex flex-wrap justify-center gap-3">
             {/* 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤー希望を
                 選べないため、このボタン自体を表示しない（DB側join_liveも

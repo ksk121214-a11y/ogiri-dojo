@@ -80,6 +80,8 @@ function makeProfile(overrides: Partial<ReturnType<typeof useProfileStore.getSta
     bestAnswerCount: 0,
     ticketsCount: 5,
     ticketsNextRecoveryAt: null,
+    referralSource: null,
+    referralSourceAnsweredAt: null,
     ...overrides,
   };
 }

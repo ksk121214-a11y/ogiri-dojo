@@ -67,6 +67,8 @@ async function main() {
       bestAnswerCount: 0,
       ticketsCount: 0,
       ticketsNextRecoveryAt: null,
+      referralSource: null,
+      referralSourceAnsweredAt: null,
     },
     loading: false,
   });

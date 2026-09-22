@@ -188,6 +188,7 @@ function buildRoster(myGroupSize: number = PREVIEW_MEMBERS_PER_GROUP): {
       kicked_at: null,
       is_guest: false,
       guest_number: null,
+      referral_source: null,
     };
   };
 
@@ -204,6 +205,7 @@ function buildRoster(myGroupSize: number = PREVIEW_MEMBERS_PER_GROUP): {
     kicked_at: null,
     is_guest: false,
     guest_number: null,
+    referral_source: null,
   };
 
   // 自分の枠(1人)を差し引いた残り全員ぶんの名前をシャッフルして各組に配分する。

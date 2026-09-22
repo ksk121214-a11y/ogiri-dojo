@@ -1060,6 +1060,8 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         reason = "現在アカウントが利用停止中のため、ライブに参加できません。";
       } else if (error.message.includes("GUEST_AUDIENCE_ONLY")) {
         reason = "ゲストは観客として参加できます。プレイヤーで参加するにはXでログインしてください。";
+      } else if (error.message.includes("INVALID_REFERRAL_SOURCE")) {
+        reason = "参加できませんでした。時間をおいて再度お試しください。";
       } else {
         console.warn("[live] join_liveが想定外のエラーで失敗", error);
         reason = "参加できませんでした。時間をおいて再度お試しください。";

@@ -85,6 +85,27 @@ for src in "${CHECK_FILES[@]}"; do
   fi
 done
 
+# src/lib/__tests__/store/pointBreakdown.check.ts は、pointBreakdown.tsが
+# 依存するsrc/data/collectionData.ts自体が"@/types/economy"エイリアスを使っており、
+# 素のtsc起動（パスエイリアス無し）では解決できないため、専用tsconfig経由にする
+# （Supabaseクライアントは一切生成しないため、SUPABASE系の環境変数は不要）。
+POINT_BREAKDOWN_DIR="$(mktemp -d)"
+POINT_BREAKDOWN_TSCONFIG="$SCRIPT_DIR/store/tsconfig.pointBreakdown.json"
+POINT_BREAKDOWN_ENTRY="$POINT_BREAKDOWN_DIR/src/lib/__tests__/store/pointBreakdown.check.js"
+
+echo "--- pointBreakdown.check.ts ---"
+if npx tsc -p "$POINT_BREAKDOWN_TSCONFIG" --outDir "$POINT_BREAKDOWN_DIR" && [ -f "$POINT_BREAKDOWN_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$POINT_BREAKDOWN_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$POINT_BREAKDOWN_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: pointBreakdown.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$POINT_BREAKDOWN_DIR"
+
 # src/lib/__tests__/store/useLiveFollowerStoreRace.check.ts は、useLiveFollowerStore.ts
 # （"@/..."エイリアス・実際のSupabaseクライアント生成を含む）を本番と同じ実装のまま
 # importして検証するため、上のCHECK_FILESループ（-maxdepth 1、素のtsc起動）とは別に、

@@ -29,9 +29,15 @@ function ratioInRank(
 export default function MasteryGauge({
   baseline,
   gained,
+  displayGained,
 }: {
   baseline: number;
+  // ゲージ（メーター）の伸び幅。DBへ実際に加算される最終合計値を渡す
+  // （2026-09-22：この値は変更しない。分離するのは下のテキスト表示だけ）。
   gained: number;
+  // メーター下の「今回の獲得：+○」テキストにだけ使う値。省略時はgainedと同じ
+  // （呼び出し元を全て更新するまでの後方互換）。
+  displayGained?: number;
 }) {
   const controls = useAnimation();
   const startRank = getRankByMeter(baseline);
@@ -149,7 +155,7 @@ export default function MasteryGauge({
           animate={{ opacity: 1 }}
           className="font-sans text-xs text-[#ff8f4a]"
         >
-          今回の獲得：+{gained}
+          今回の獲得：+{displayGained ?? gained}
         </motion.p>
       )}
 

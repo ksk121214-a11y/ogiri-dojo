@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import BotSetupPanel from "@/components/live-demo/host/BotSetupPanel";
 import AdminButton from "@/components/admin/AdminButton";
@@ -14,7 +14,7 @@ import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
-import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
+import { formatLiveTicketLabel, formatLiveTicketNo } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 
@@ -22,6 +22,20 @@ const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
   audience: "観客",
 };
+
+// 2026-09-22追加（司会コンソールの参加者一覧に流入元を表示）：生のDB値
+// （x/friend/app/other/null）ではなく、必ず日本語ラベル経由で表示する。
+// この情報は運営者専用画面（/live/host、is_host限定）でのみ表示し、一般参加者へは公開しない。
+const REFERRAL_SOURCE_LABEL: Record<string, string> = {
+  x: "X（旧Twitter）",
+  friend: "友人・知人の紹介",
+  app: "アプリ内",
+  other: "その他",
+};
+function referralSourceLabel(value: string | null): string {
+  if (!value) return "未回答";
+  return REFERRAL_SOURCE_LABEL[value] ?? "未回答";
+}
 
 const PHASE_LABEL: Record<string, string> = {
   scheduled: "準備中（受付前）",
@@ -356,6 +370,7 @@ export default function LiveHostPage() {
 // ライブ準備画面：liveが無い（またはclosed後）の時に表示するフォーム。
 function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const createLivePreparation = useLiveHostStore((s) => s.createLivePreparation);
+  const fetchNextOfficialSequenceNumber = useLiveHostStore((s) => s.fetchNextOfficialSequenceNumber);
   const topicBank = useLiveHostStore((s) => s.topicBank);
   const [title, setTitle] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -369,14 +384,58 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // 2026-09-22追加：本番開催番号の手動指定。nextAutoNumberは表示専用の
+  // 参考値（official_live_counterを覗き見するだけの読み取り専用RPC）で、
+  // 実際に消費されるのは送信時にmanualNumberInputへ入っている値。
+  const [nextAutoNumber, setNextAutoNumber] = useState<number | null>(null);
+  const [manualNumberInput, setManualNumberInput] = useState("");
+  const [manualNumberTouched, setManualNumberTouched] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchNextOfficialSequenceNumber().then((n) => {
+      if (!cancelled) setNextAutoNumber(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchNextOfficialSequenceNumber]);
+
+  useEffect(() => {
+    // 本番ライブへ切り替えた時点で、運営者がまだ何も入力していなければ
+    // 「次に自動採番される番号」を初期値として入れておく（要望どおり）。
+    if (liveMode === "official" && !manualNumberTouched && nextAutoNumber !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setManualNumberInput(String(nextAutoNumber));
+    }
+  }, [liveMode, nextAutoNumber, manualNumberTouched]);
+
   const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
 
   const handleSubmit = async () => {
     if (submitting) return;
     setLocalError(null);
+
+    // 2026-09-22追加：手動開催番号のバリデーション（0・負数・小数・不正文字列を拒否）。
+    // テストライブでは入力欄自体を表示しないため常にnull。
+    let manualOfficialSequenceNumber: number | null = null;
+    if (liveMode === "official") {
+      const trimmed = manualNumberInput.trim();
+      if (trimmed !== "") {
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          setLocalError("本番開催番号は1以上の整数で指定してください");
+          return;
+        }
+        manualOfficialSequenceNumber = parsed;
+      }
+    }
+
     if (liveMode === "official") {
       const confirmed = window.confirm(
-        "本番ライブとして準備します。正式な開催番号が付与され、終了後にポイント・実績へ反映されます。よろしいですか？",
+        manualOfficialSequenceNumber !== null
+          ? `本番ライブとして準備します。開催番号${formatLiveTicketNo(manualOfficialSequenceNumber)}が付与され、終了後にポイント・実績へ反映されます。よろしいですか？`
+          : "本番ライブとして準備します。正式な開催番号が付与され、終了後にポイント・実績へ反映されます。よろしいですか？",
       );
       if (!confirmed) return;
     }
@@ -390,6 +449,7 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
           ? { mode: "random" }
           : { mode: "manual", topicBankIds: manualTopicIds },
       liveMode,
+      manualOfficialSequenceNumber,
     };
     setSubmitting(true);
     try {
@@ -397,8 +457,16 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
       if (!result.ok) {
         setLocalError(result.reason ?? "保存に失敗しました");
         onNotify("error", result.reason ?? "保存に失敗しました");
+        // 手動番号が「既に使用されています」等で失敗した場合、表示中の
+        // 次番号が古くなっている可能性があるため取り直す。
+        if (liveMode === "official") {
+          setManualNumberTouched(false);
+          fetchNextOfficialSequenceNumber().then(setNextAutoNumber);
+        }
       } else {
         onNotify("success", "ライブを準備しました。");
+        setManualNumberInput("");
+        setManualNumberTouched(false);
       }
     } finally {
       setSubmitting(false);
@@ -452,6 +520,36 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
               </span>
             </label>
           </div>
+
+          {/* 2026-09-22追加：本番ライブを選んだ時だけ、開催番号を手動指定できる
+              入力欄を表示する（テストライブでは表示せず、番号も消費しない）。 */}
+          {liveMode === "official" && (
+            <div className="mt-2 rounded border border-red-200 bg-red-50 p-2">
+              <p className="text-xs font-bold text-gray-700">本番開催番号</p>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={manualNumberInput}
+                onChange={(e) => {
+                  setManualNumberTouched(true);
+                  setManualNumberInput(e.target.value);
+                }}
+                placeholder="空欄で自動採番"
+                className="mt-1 w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
+              />
+              <p className="mt-1 text-gray-600">
+                {manualNumberInput.trim() !== "" && Number.isInteger(Number(manualNumberInput)) && Number(manualNumberInput) > 0
+                  ? `この番号を使用：${formatLiveTicketNo(Number(manualNumberInput))}`
+                  : nextAutoNumber !== null
+                    ? `空欄の場合、自動的に${formatLiveTicketNo(nextAutoNumber)}が付与されます`
+                    : "空欄の場合は自動採番されます"}
+              </p>
+              <p className="mt-0.5 text-gray-500">
+                作成後はこの画面から変更できません。誤って使用した番号を空けたい場合のみ変更してください。
+              </p>
+            </div>
+          )}
         </div>
 
         <LabeledInput label="タイトル">
@@ -714,6 +812,25 @@ function ParticipantsPanel({
   const nameOf = (p: ParticipantRow) =>
     hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
 
+  // 2026-09-22追加：流入元の回答別人数集計（運営者専用）。
+  const referralCounts = useMemo(() => {
+    const counts: Record<"x" | "friend" | "app" | "other" | "unanswered", number> = {
+      x: 0,
+      friend: 0,
+      app: 0,
+      other: 0,
+      unanswered: 0,
+    };
+    for (const p of participants) {
+      if (p.referral_source === "x" || p.referral_source === "friend" || p.referral_source === "app" || p.referral_source === "other") {
+        counts[p.referral_source] += 1;
+      } else {
+        counts.unanswered += 1;
+      }
+    }
+    return counts;
+  }, [participants]);
+
   // 参加者一覧が変わって選択中の相手が居なくなった場合は先頭にフォールバックする。
   const target = participants.find((p) => p.id === targetId) ?? participants[0] ?? null;
   const effectiveTargetId = target?.id ?? "";
@@ -805,6 +922,12 @@ function ParticipantsPanel({
         >
           {resyncing ? "再計算中…" : judgingBusy ? "採点中は再計算できません" : "審査人数の分母を再計算する"}
         </AdminButton>
+        {/* 2026-09-22追加：流入元（どこでこのライブを知ったか）の回答別人数集計。
+            運営者専用画面でのみ表示する。 */}
+        <p className="mt-2 text-[11px] text-gray-500">
+          流入元：X {referralCounts.x}人・紹介 {referralCounts.friend}人・アプリ内 {referralCounts.app}
+          人・その他 {referralCounts.other}人・未回答 {referralCounts.unanswered}人
+        </p>
         <ul className="mt-2 max-h-56 overflow-y-auto text-xs text-gray-700">
           {participants.map((p) => {
             const name = nameOf(p);
@@ -815,7 +938,7 @@ function ParticipantsPanel({
               : `${ROLE_LABEL[p.preferred_role] ?? p.preferred_role}希望`;
             return (
               <li key={p.id} className="border-b border-gray-100 py-1 last:border-0">
-                {name}（{statusLabel}）
+                {name}（{statusLabel}・流入元：{referralSourceLabel(p.referral_source)}）
                 {p.kicked_at && <span className="ml-1 font-bold text-red-600">退場中</span>}
               </li>
             );

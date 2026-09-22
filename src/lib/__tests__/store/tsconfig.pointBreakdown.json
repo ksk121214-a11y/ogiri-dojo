@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "../../../..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../../../..",
+    "types": ["node"]
+  },
+  "include": [
+    "../../../types/economy.ts",
+    "../../../data/collectionData.ts",
+    "../../pointBreakdown.ts",
+    "pointBreakdown.check.ts"
+  ]
+}

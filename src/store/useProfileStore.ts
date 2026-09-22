@@ -41,6 +41,11 @@ export interface DojoProfile {
   // で管理していた寄合券の残数・次回回復時刻を、サーバー側の実データに一本化した。
   ticketsCount: number;
   ticketsNextRecoveryAt: string | null;
+  // 2026-09-22追加（流入アンケートの1アカウント1回化）：nullなら未回答（今回も
+  // アンケートを表示してよい）、値が入っていれば回答済み（以後は表示しない）。
+  // 直接updateする手段は無く、join_live（SECURITY DEFINER）が最初の1回だけ書く。
+  referralSource: string | null;
+  referralSourceAnsweredAt: string | null;
 }
 
 interface ProfileState {
@@ -80,6 +85,8 @@ function toDojoProfile(row: {
   tickets_count: number;
   tickets_next_recovery_at: string | null;
   is_guest: boolean;
+  referral_source: string | null;
+  referral_source_answered_at: string | null;
 }): DojoProfile {
   return {
     id: row.id,
@@ -106,6 +113,8 @@ function toDojoProfile(row: {
     ticketsCount: row.tickets_count,
     ticketsNextRecoveryAt: row.tickets_next_recovery_at,
     isGuest: row.is_guest,
+    referralSource: row.referral_source,
+    referralSourceAnsweredAt: row.referral_source_answered_at,
   };
 }
 
@@ -149,7 +158,7 @@ async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at, is_guest",
+      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at, is_guest, referral_source, referral_source_answered_at",
     )
     .eq("id", userId)
     .single();

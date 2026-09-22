@@ -242,7 +242,10 @@ export default function FinalResultScreen() {
             熟練度メーター獲得
           </p>
           <div className="mt-4">
-            <MasteryGauge baseline={baseline} gained={masteryGain} />
+            {/* 2026-09-22：実ライブ側の表示分離（今回の獲得＝大喜利得点のみ）に
+                そろえる。獲得ポイント（pointsGain、寄合券/ガチャ用の別経済）は
+                元々masteryGainとは別物のため変更しない。 */}
+            <MasteryGauge baseline={baseline} gained={masteryGain} displayGained={myTotal} />
           </div>
           <p className="mt-4 font-sans text-xs text-white/80">
             獲得ポイント：

@@ -13,6 +13,7 @@ import { MASTERY_GAIN } from "@/data/collectionData";
 import { APP_NAME } from "@/lib/appInfo";
 import { isGuestUser } from "@/lib/guestStatus";
 import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
+import { computePointBreakdown } from "@/lib/pointBreakdown";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
@@ -121,15 +122,11 @@ export default function FinalResultView({
   // （set_sns_live_result_manager_best()、この画面の時点ではまだ運営ベストは
   // 決まっていないため、ここでは含めずに計算する）。
   const myEntry = data.ranking.find((r) => r.participantId === myParticipantId);
-  const rankBonus =
-    data.myRank === 1
-      ? MASTERY_GAIN.rankBonus.first
-      : data.myRank === 2
-        ? MASTERY_GAIN.rankBonus.second
-        : data.myRank === 3
-          ? MASTERY_GAIN.rankBonus.third
-          : 0;
-  const gain = myEntry ? MASTERY_GAIN.participation + myEntry.total + rankBonus : 0;
+  // 2026-09-22：「今回の獲得」と「獲得ポイント」が同じ数字になっていた問題の修正。
+  // 内訳（大喜利得点／参加ポイント／順位ボーナス／合計）をcomputePointBreakdownに
+  // 一本化する（式自体はapply_live_rank_rewardsと完全に同じ、変更していない）。
+  const breakdown = myEntry ? computePointBreakdown(myEntry.total, data.myRank) : null;
+  const gain = breakdown?.totalPoints ?? 0;
 
   // シェア文面：自分が1〜3位の場合だけ順位を明記する（他の参加者の順位は一切含めない。
   // 下位の順位を本人の意図に反してさらけ出さない、という既存の匿名性方針を踏まえた
@@ -303,7 +300,10 @@ export default function FinalResultView({
         </motion.div>
       )}
 
-      {step > totalSteps && myEntry && profile && liveMode === "official" && (
+      {/* 2026-09-22：ゲスト（isGuest）はapply_live_rank_rewards側で加算対象から
+          除外されるため、実際には付与されないポイント・熟練度メーターの見込み
+          表示を出さない（myEntryがランキングに含まれていても表示しない）。 */}
+      {step > totalSteps && myEntry && profile && breakdown && liveMode === "official" && !isGuest && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -314,12 +314,24 @@ export default function FinalResultView({
             熟練度メーター獲得
           </p>
           <div className="mt-3">
-            <MasteryGauge baseline={profile.masteryMeter} gained={gain} />
+            <MasteryGauge
+              baseline={profile.masteryMeter}
+              gained={breakdown.totalPoints}
+              displayGained={breakdown.ogiriPoints}
+            />
           </div>
-          <p className="mt-3 font-sans text-xs text-white/80">
-            獲得ポイント：
-            <span className="font-bold text-[#ffcf4a]">+{gain}pt</span>
-          </p>
+          <div className="mt-3 flex flex-col items-center gap-1 font-sans text-xs text-white/80">
+            <p>
+              参加ポイント：<span className="font-bold text-white">+{breakdown.participationPoints}pt</span>
+            </p>
+            <p>
+              ボーナスポイント：<span className="font-bold text-white">+{breakdown.rankBonusPoints}pt</span>
+            </p>
+            <p>
+              獲得ポイント：
+              <span className="font-bold text-[#ffcf4a]">+{breakdown.totalPoints}pt</span>
+            </p>
+          </div>
         </motion.div>
       )}
     </div>

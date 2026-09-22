@@ -105,6 +105,9 @@ export interface ParticipantRow {
   // 「ゲスト01」のような表示名に使う連番（0070、join_live内で採番）。
   is_guest: boolean;
   guest_number: number | null;
+  // 2026-09-22追加（司会コンソールの参加者一覧に流入元を表示）：0070で追加済みの
+  // 列を型に反映する。運営者(is_host)のみselectできる（0072の参加者read RLS）。
+  referral_source: string | null;
 }
 
 export type TurnStatus = "pending" | "active" | "done";
