@@ -16,26 +16,13 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { formatLiveTicketLabel, formatLiveTicketNo } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
+import { referralSourceDisplayLabel, summarizeReferralSurvey } from "@/lib/referralSurveySummary";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 
 const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
   audience: "観客",
 };
-
-// 2026-09-22追加（司会コンソールの参加者一覧に流入元を表示）：生のDB値
-// （x/friend/app/other/null）ではなく、必ず日本語ラベル経由で表示する。
-// この情報は運営者専用画面（/live/host、is_host限定）でのみ表示し、一般参加者へは公開しない。
-const REFERRAL_SOURCE_LABEL: Record<string, string> = {
-  x: "X（旧Twitter）",
-  friend: "友人・知人の紹介",
-  app: "アプリ内",
-  other: "その他",
-};
-function referralSourceLabel(value: string | null): string {
-  if (!value) return "未回答";
-  return REFERRAL_SOURCE_LABEL[value] ?? "未回答";
-}
 
 const PHASE_LABEL: Record<string, string> = {
   scheduled: "準備中（受付前）",
@@ -812,24 +799,17 @@ function ParticipantsPanel({
   const nameOf = (p: ParticipantRow) =>
     hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）";
 
-  // 2026-09-22追加：流入元の回答別人数集計（運営者専用）。
-  const referralCounts = useMemo(() => {
-    const counts: Record<"x" | "friend" | "app" | "other" | "unanswered", number> = {
-      x: 0,
-      friend: 0,
-      app: 0,
-      other: 0,
-      unanswered: 0,
-    };
-    for (const p of participants) {
-      if (p.referral_source === "x" || p.referral_source === "friend" || p.referral_source === "app" || p.referral_source === "other") {
-        counts[p.referral_source] += 1;
-      } else {
-        counts.unanswered += 1;
-      }
-    }
-    return counts;
-  }, [participants]);
+  // 2026-09-22追加・2026-09-23修正：流入元の回答別人数集計（運営者専用）。
+  // 終了ライブの結果公開欄（src/app/admin/schedule/page.tsx）と集計仕様が
+  // 食い違わないよう、独自集計を持たず共通関数summarizeReferralSurveyを使う
+  // （ゲストは内訳・未回答・対象人数のいずれからも除外する）。
+  const referralCounts = useMemo(
+    () =>
+      summarizeReferralSurvey(
+        participants.map((p) => ({ referralSource: p.referral_source, isGuest: p.is_guest })),
+      ),
+    [participants],
+  );
 
   // 参加者一覧が変わって選択中の相手が居なくなった場合は先頭にフォールバックする。
   const target = participants.find((p) => p.id === targetId) ?? participants[0] ?? null;
@@ -923,10 +903,14 @@ function ParticipantsPanel({
           {resyncing ? "再計算中…" : judgingBusy ? "採点中は再計算できません" : "審査人数の分母を再計算する"}
         </AdminButton>
         {/* 2026-09-22追加：流入元（どこでこのライブを知ったか）の回答別人数集計。
-            運営者専用画面でのみ表示する。 */}
+            運営者専用画面でのみ表示する。ゲストは対象外のため、回答済み・対象人数
+            のどちらにも含まれない（終了ライブの結果公開欄と同じ集計仕様）。 */}
         <p className="mt-2 text-[11px] text-gray-500">
           流入元：X {referralCounts.x}人・紹介 {referralCounts.friend}人・アプリ内 {referralCounts.app}
-          人・その他 {referralCounts.other}人・未回答 {referralCounts.unanswered}人
+          人・その他 {referralCounts.other}人・未回答 {referralCounts.noAnswer}人
+        </p>
+        <p className="text-[11px] text-gray-500">
+          回答済み：{referralCounts.answered}人 / 対象：{referralCounts.target}人
         </p>
         <ul className="mt-2 max-h-56 overflow-y-auto text-xs text-gray-700">
           {participants.map((p) => {
@@ -938,7 +922,7 @@ function ParticipantsPanel({
               : `${ROLE_LABEL[p.preferred_role] ?? p.preferred_role}希望`;
             return (
               <li key={p.id} className="border-b border-gray-100 py-1 last:border-0">
-                {name}（{statusLabel}・流入元：{referralSourceLabel(p.referral_source)}）
+                {name}（{statusLabel}・流入元：{referralSourceDisplayLabel(p.referral_source, p.is_guest)}）
                 {p.kicked_at && <span className="ml-1 font-bold text-red-600">退場中</span>}
               </li>
             );

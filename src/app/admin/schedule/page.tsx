@@ -23,6 +23,7 @@ import {
 } from "@/lib/liveSchedulePlan";
 import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import type { LiveRow } from "@/lib/liveRoomTypes";
+import { summarizeReferralSurvey, type ReferralSurveyCounts } from "@/lib/referralSurveySummary";
 import { supabase } from "@/lib/supabase";
 
 const START_TIME_OPTIONS = buildStartTimeOptions();
@@ -446,11 +447,32 @@ async function fetchQuickResultSummary(liveId: string): Promise<QuickResultSumma
   return { hasResult: true, podiumNames, perfectCount, managerBestSet: !!resultData.manager_best_answer_id };
 }
 
+// 流入アンケート集計は運営者専用画面だけで使う（一般ユーザー側には一切出さない）。
+// そのライブに参加した時点の participants.referral_source を集計するだけの
+// 軽いクエリ1本（is_guest/referral_sourceの2列だけをlive_id指定で取得）にとどめ、
+// N+1・全件取得は行わない。取得失敗時は0人として誤表示せず"error"を返す。
+async function fetchReferralSurveySummary(liveId: string): Promise<ReferralSurveyCounts | "error"> {
+  const { data, error } = await supabase
+    .from("participants")
+    .select("referral_source, is_guest")
+    .eq("live_id", liveId);
+  if (error || !data) return "error";
+  return summarizeReferralSurvey(
+    (data as { referral_source: string | null; is_guest: boolean }[]).map((r) => ({
+      referralSource: r.referral_source,
+      isGuest: r.is_guest,
+    })),
+  );
+}
+
 function ResultsPublishSection() {
   const [lives, setLives] = useState<LiveRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<Record<string, QuickResultSummary | "loading">>({});
+  const [referralSummaries, setReferralSummaries] = useState<Record<string, ReferralSurveyCounts | "loading" | "error">>(
+    {},
+  );
 
   useEffect(() => {
     (async () => {
@@ -464,16 +486,24 @@ function ResultsPublishSection() {
     })();
   }, []);
 
-  const handleToggleExpand = async (liveId: string) => {
+  const handleToggleExpand = (liveId: string) => {
     if (expandedId === liveId) {
       setExpandedId(null);
       return;
     }
     setExpandedId(liveId);
-    if (summaries[liveId]) return;
-    setSummaries((s) => ({ ...s, [liveId]: "loading" }));
-    const summary = await fetchQuickResultSummary(liveId);
-    setSummaries((s) => ({ ...s, [liveId]: summary }));
+    if (!summaries[liveId]) {
+      setSummaries((s) => ({ ...s, [liveId]: "loading" }));
+      fetchQuickResultSummary(liveId).then((summary) => {
+        setSummaries((s) => ({ ...s, [liveId]: summary }));
+      });
+    }
+    if (!referralSummaries[liveId]) {
+      setReferralSummaries((s) => ({ ...s, [liveId]: "loading" }));
+      fetchReferralSurveySummary(liveId).then((summary) => {
+        setReferralSummaries((s) => ({ ...s, [liveId]: summary }));
+      });
+    }
   };
 
   if (loading || lives.length === 0) return null;
@@ -530,6 +560,7 @@ function ResultsPublishSection() {
                       </p>
                     </div>
                   )}
+                  <ReferralSurveySummaryBlock summary={referralSummaries[live.id]} />
                   <div className="mt-2">
                     <Link href={`/admin/live-results/${live.id}`}>
                       <AdminButton>ライブ結果の設定・公開はこちら →</AdminButton>
@@ -542,5 +573,34 @@ function ResultsPublishSection() {
         })}
       </ul>
     </AdminCard>
+  );
+}
+
+// 流入アンケート集計の表示欄。summary.hasResult（SNS掲載結果の有無）とは無関係に、
+// そのライブに参加したparticipants.referral_sourceがあれば常に表示する
+// （運営者専用画面だけに出す。一般ユーザー側には一切公開しない）。
+function ReferralSurveySummaryBlock({ summary }: { summary: ReferralSurveyCounts | "loading" | "error" | undefined }) {
+  return (
+    <div className="mt-2 rounded border border-gray-100 bg-gray-50 p-2">
+      <p className="mb-1 font-bold text-gray-700">流入アンケート</p>
+      {summary === "loading" || !summary ? (
+        <p className="text-gray-400">読み込み中…</p>
+      ) : summary === "error" ? (
+        <p className="text-red-600">アンケート集計の取得に失敗しました</p>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
+            <p>X：{summary.x}人</p>
+            <p>友人・知人の紹介：{summary.friend}人</p>
+            <p>アプリ内：{summary.app}人</p>
+            <p>その他：{summary.other}人</p>
+            <p>未回答：{summary.noAnswer}人</p>
+          </div>
+          <p className="text-gray-500">
+            回答済み：{summary.answered}人 / 対象：{summary.target}人
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -43,6 +43,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../snsLiveResultPreview.ts"
   "$SCRIPT_DIR/../liveGuestAccess.ts"
   "$SCRIPT_DIR/../guestStatus.ts"
+  "$SCRIPT_DIR/../referralSurveySummary.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
