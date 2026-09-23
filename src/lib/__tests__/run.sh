@@ -44,6 +44,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../liveGuestAccess.ts"
   "$SCRIPT_DIR/../guestStatus.ts"
   "$SCRIPT_DIR/../referralSurveySummary.ts"
+  "$SCRIPT_DIR/../singleFlight.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。

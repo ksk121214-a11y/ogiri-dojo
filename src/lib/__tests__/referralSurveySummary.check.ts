@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   referralSourceDisplayLabel,
   summarizeReferralSurvey,
+  toOverallReferralSurveyCounts,
   type ReferralSurveyParticipantRow,
 } from "../referralSurveySummary";
 
@@ -151,5 +152,24 @@ assert.equal(referralSourceDisplayLabel("friend", false), "友人・知人の紹
 assert.equal(referralSourceDisplayLabel("app", false), "アプリ内");
 assert.equal(referralSourceDisplayLabel("other", false), "その他");
 console.log("PASS: 通常会員の回答済みは選択した流入元（x/friend/app/other）の日本語ラベルを表示する");
+
+// ---- toOverallReferralSurveyCounts（全体アンケート集計RPCの戻り値の変換） ----
+
+// 12: RPCの生の行(x_count/friend_count/app_count/other_count/answered_total)を
+//     camelCaseのOverallReferralSurveyCountsへそのまま対応付ける。
+assert.deepEqual(
+  toOverallReferralSurveyCounts({ x_count: 5, friend_count: 3, app_count: 2, other_count: 1, answered_total: 11 }),
+  { x: 5, friend: 3, app: 2, other: 1, answeredTotal: 11 },
+);
+console.log("PASS: toOverallReferralSurveyCountsはRPCの戻り値(x_count等)を正しくcamelCaseへ変換する（要求例の5/3/2/1/11を再現）");
+
+// 13: 全項目0（未回答の会員しかいない）の場合もそのまま0で変換される
+//     （呼び出し側でanswered_total===0を「アンケートの回答はまだありません」の
+//     判定に使うための前提）。
+assert.deepEqual(
+  toOverallReferralSurveyCounts({ x_count: 0, friend_count: 0, app_count: 0, other_count: 0, answered_total: 0 }),
+  { x: 0, friend: 0, app: 0, other: 0, answeredTotal: 0 },
+);
+console.log("PASS: 全項目0のRPC結果はanswered_total=0のまま変換される（「回答はまだありません」判定に使える）");
 
 console.log("ALL REFERRAL_SURVEY_SUMMARY CHECKS PASSED");

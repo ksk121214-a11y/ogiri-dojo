@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
 
@@ -23,7 +23,14 @@ import {
 } from "@/lib/liveSchedulePlan";
 import { formatLiveTicketLabel } from "@/lib/liveTicketNo";
 import type { LiveRow } from "@/lib/liveRoomTypes";
-import { summarizeReferralSurvey, type ReferralSurveyCounts } from "@/lib/referralSurveySummary";
+import {
+  summarizeReferralSurvey,
+  toOverallReferralSurveyCounts,
+  type OverallReferralSurveyCounts,
+  type OverallReferralSurveyRow,
+  type ReferralSurveyCounts,
+} from "@/lib/referralSurveySummary";
+import { runSingleFlight } from "@/lib/singleFlight";
 import { supabase } from "@/lib/supabase";
 
 const START_TIME_OPTIONS = buildStartTimeOptions();
@@ -200,6 +207,7 @@ export default function AdminSchedulePage() {
         </div>
       )}
 
+      <OverallReferralSurveySection />
       <ResultsPublishSection />
     </AdminShell>
   );
@@ -462,6 +470,102 @@ async function fetchReferralSurveySummary(liveId: string): Promise<ReferralSurve
       referralSource: r.referral_source,
       isGuest: r.is_guest,
     })),
+  );
+}
+
+// 「全体アンケート集計」（サービス全体で1アカウント1回の回答を集計する）。
+// ライブ単位の集計（fetchReferralSurveySummary、participants基準）とは目的が
+// 異なり、こちらはprofiles.referral_source（0074）をDB側で直接集計するRPC
+// public.admin_referral_survey_summary()（0075、運営者のみ実行可・SECURITY
+// DEFINER）を呼ぶだけで、フロント側では一切プロフィール行を取得・集計しない。
+// Supabaseが返す{error}オブジェクトだけでなく、通信例外等でこの関数自体が
+// 例外を投げた場合も、生のエラーを外へ漏らさず"error"として返す
+// （呼び出し側のsingle-flightロックが確実に解除されるよう、ここで例外を
+// 握りつぶす。詳細はOverallReferralSurveySectionのload参照）。
+async function fetchOverallReferralSurveySummary(): Promise<OverallReferralSurveyCounts | "error"> {
+  try {
+    const { data, error } = await supabase.rpc("admin_referral_survey_summary");
+    const row = (data as OverallReferralSurveyRow[] | null)?.[0];
+    if (error || !row) return "error";
+    return toOverallReferralSurveyCounts(row);
+  } catch {
+    return "error";
+  }
+}
+
+function OverallReferralSurveySection() {
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<OverallReferralSurveyCounts | "error" | null>(null);
+
+  // 2026-09-23修正（レビュー対応）：stateのloadingは次の再描画まで反映されない
+  // ため、それだけを連打防止のロックに使うと、同じtick内でload()が2回呼ばれた
+  // 場合に両方とも古いloading=falseを見て二重実行してしまう（React Strict Mode
+  // の開発時二重effect実行でも同様に起こり得る）。useRef<boolean>が返す
+  // { current: boolean }は、そのままsingle-flightの排他ロック
+  // （src/lib/singleFlight.ts、SingleFlightLock）として使え、同期的に
+  // 読み書きできるため二重実行を確実に防げる。loading state自体は画面表示・
+  // ボタンのdisabled制御にだけ引き続き使う。
+  const inFlightLockRef = useRef(false);
+  // アンマウント後に遅延した取得結果でstateを更新しないためのガード。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const load = () => {
+    void runSingleFlight(inFlightLockRef, async () => {
+      setLoading(true);
+      try {
+        const result = await fetchOverallReferralSurveySummary();
+        if (mountedRef.current) setSummary(result);
+      } catch {
+        // fetchOverallReferralSurveySummary自体は例外を投げない設計だが、
+        // 予期しない例外が万一発生しても生のエラーを表示せず、専用の
+        // エラーメッセージへ倒す（このtryはrunSingleFlightのfinallyで
+        // ロックが確実に解除されることの安全網でもある）。
+        if (mountedRef.current) setSummary("error");
+      } finally {
+        if (mountedRef.current) setLoading(false);
+      }
+    });
+  };
+
+  // 初回表示時の自動取得も、再読み込みボタンと同じload()（＝同じ
+  // single-flight制御）を通す。React Strict Modeの開発時にこのeffectが
+  // マウント→クリーンアップ→再マウントで2回評価されても、1回目のload()が
+  // 同期的に立てたinFlightLockRef.currentがまだtrueのままなので、2回目の
+  // load()はrunSingleFlightに素通しされずスキップされる。
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <AdminCard title="全体アンケート集計">
+      <p className="text-xs text-gray-500">1アカウントにつき1回の回答を集計しています。</p>
+      <div className="mt-2 text-sm text-gray-700">
+        {summary === null ? (
+          <p className="text-gray-400">読み込み中…</p>
+        ) : summary === "error" ? (
+          <p className="text-red-600">全体アンケート集計の取得に失敗しました</p>
+        ) : summary.answeredTotal === 0 ? (
+          <p className="text-gray-400">アンケートの回答はまだありません</p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <p>X（旧Twitter）：{summary.x}人</p>
+            <p>友人・知人の紹介：{summary.friend}人</p>
+            <p>アプリ内：{summary.app}人</p>
+            <p>その他：{summary.other}人</p>
+            <p className="mt-1 font-bold">回答済み合計：{summary.answeredTotal}人</p>
+          </div>
+        )}
+      </div>
+      <AdminButton className="mt-2" disabled={loading} onClick={load}>
+        {loading ? "読み込み中…" : "再読み込み"}
+      </AdminButton>
+    </AdminCard>
   );
 }
 
