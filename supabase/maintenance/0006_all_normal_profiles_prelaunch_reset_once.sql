@@ -58,11 +58,13 @@
 --
 -- 同時書き込み対策：トランザクション冒頭でprofiles/lives/official_live_counter/
 -- point_history/sns_topics/sns_answers/sns_comments/sns_live_result_comments/
--- sns_answer_likes/reportsをSHAREモードでロックする（読み取りは妨げず、通常の
--- INSERT/UPDATE/DELETEだけを妨げる）。lock_timeoutを短く設定し、ロックを
--- 取得できない場合は待ち続けずエラーで停止する（begin/commitの外に一切
--- 変更が漏れないため、安全にロールバックされる）。create_live_preparation()
--- 自体が使うのと同じadvisory lockも維持する。
+-- sns_answer_likes/sns_follows/reportsをSHAREモードでロックする（読み取りは
+-- 妨げず、通常のINSERT/UPDATE/DELETEだけを妨げる）。sns_followsは初期化対象
+-- ではないが、事後検証で実行前後のスナップショットを完全一致で比較するため、
+-- 実行中のフォロー・解除で比較結果が不安定にならないようロック対象に含める。
+-- lock_timeoutを短く設定し、ロックを取得できない場合は待ち続けずエラーで
+-- 停止する（begin/commitの外に一切変更が漏れないため、安全にロールバック
+-- される）。create_live_preparation()自体が使うのと同じadvisory lockも維持する。
 
 begin;
 
@@ -123,6 +125,10 @@ begin
   lock table public.sns_comments in share mode;
   lock table public.sns_live_result_comments in share mode;
   lock table public.sns_answer_likes in share mode;
+  -- sns_followsは初期化対象ではないが、実行前後で完全一致を検証するため
+  -- （手順10-d参照）、実行中のフォロー・解除で比較結果が不安定にならないよう
+  -- ロック対象に含める。
+  lock table public.sns_follows in share mode;
   lock table public.reports in share mode;
 
   -- ------------------------------------------------------------

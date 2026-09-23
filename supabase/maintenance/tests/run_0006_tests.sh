@@ -330,6 +330,69 @@ if [ -n "$DB" ]; then
 fi
 
 echo ""
+echo "--- ロック動作：別セッションがpoint_historyへの書き込みロックを保持している間は"
+echo "    0006がlock_timeoutで失敗し、一切変更されない。解放後は正常実行できる ---"
+DB=$(fresh_seeded_db)
+if [ -n "$DB" ]; then
+  BEFORE_LIVEMODE="$(scalar "$DB" "select live_mode from public.lives where live_mode='official';")"
+  BEFORE_MASTERY="$(scalar "$DB" "select mastery_meter from public.profiles where id='d0000000-0000-0000-0000-00000000000f';")"
+  BEFORE_TOPICS="$(scalar "$DB" "select count(*) from public.sns_topics;")"
+  BEFORE_COUNTER="$(scalar "$DB" "select last_value from public.official_live_counter where id=true;")"
+
+  # 別セッションでpoint_historyへROW EXCLUSIVEロックを取り、10秒間保持する
+  # （0006のlock_timeoutは5秒のため、自然解放より先に必ずタイムアウトするはず）。
+  # 実際に行を変更しない"where false"更新でも、テーブルレベルのロックは
+  # 変更対象の有無に関わらず取得される。
+  psql -d "$(db_url "$DB")" -c "begin; update public.point_history set label = label where false; select pg_sleep(10);" \
+    >/tmp/0006_lockholder_${SUFFIX}.log 2>&1 &
+  LOCK_HOLDER_PID=$!
+  sleep 1
+
+  SECONDS=0
+  LOCK_OUT="$(run_0006 "$DB" 2>&1)"
+  LOCK_RC=$?
+  LOCK_ELAPSED=$SECONDS
+
+  if [ $LOCK_RC -eq 0 ]; then
+    echo "FAIL: [ロックタイムアウト] 別セッションがロックを保持しているのに0006が成功してしまった" >&2
+    FAILED=1
+  elif ! echo "$LOCK_OUT" | grep -qi "lock timeout"; then
+    echo "FAIL: [ロックタイムアウト] lock_timeoutによる失敗ではない想定外のエラーだった" >&2
+    echo "$LOCK_OUT" | tail -10 >&2
+    FAILED=1
+  elif [ "$LOCK_ELAPSED" -ge 10 ]; then
+    echo "FAIL: [ロックタイムアウト] ロックの自然解放（10秒後）まで待ってから完了しており、lock_timeout(5秒)で先に失敗していない（経過${LOCK_ELAPSED}秒）" >&2
+    FAILED=1
+  else
+    AFTER_LIVEMODE="$(scalar "$DB" "select live_mode from public.lives where live_mode='official';")"
+    AFTER_MASTERY="$(scalar "$DB" "select mastery_meter from public.profiles where id='d0000000-0000-0000-0000-00000000000f';")"
+    AFTER_TOPICS="$(scalar "$DB" "select count(*) from public.sns_topics;")"
+    AFTER_COUNTER="$(scalar "$DB" "select last_value from public.official_live_counter where id=true;")"
+    if [ "$BEFORE_LIVEMODE" = "$AFTER_LIVEMODE" ] && [ "$BEFORE_MASTERY" = "$AFTER_MASTERY" ] && [ "$BEFORE_TOPICS" = "$AFTER_TOPICS" ] && [ "$BEFORE_COUNTER" = "$AFTER_COUNTER" ]; then
+      echo "PASS: [ロックタイムアウト] 別セッションがpoint_historyのロックを保持している間、0006は約${LOCK_ELAPSED}秒でlock_timeoutにより失敗し、一切変更しなかった"
+    else
+      echo "FAIL: [ロックタイムアウト] lock_timeoutで失敗したはずなのに一部の変更が残っている(live_mode:$BEFORE_LIVEMODE->$AFTER_LIVEMODE, mastery:$BEFORE_MASTERY->$AFTER_MASTERY, topics:$BEFORE_TOPICS->$AFTER_TOPICS, counter:$BEFORE_COUNTER->$AFTER_COUNTER)" >&2
+      FAILED=1
+    fi
+  fi
+
+  # 別セッションの保持（最大10秒）が終わるのを待ち、ロックが解放されてから
+  # 正常実行できることを確認する。
+  wait "$LOCK_HOLDER_PID" 2>/dev/null
+  rm -f "/tmp/0006_lockholder_${SUFFIX}.log"
+
+  AFTER_RELEASE_OUT="$(run_0006 "$DB" 2>&1)"
+  AFTER_RELEASE_RC=$?
+  if [ $AFTER_RELEASE_RC -eq 0 ] && echo "$AFTER_RELEASE_OUT" | grep -q "事後検証OK"; then
+    echo "PASS: [ロック解放後] ロック解放後は0006が正常に完了する"
+  else
+    echo "FAIL: [ロック解放後] ロック解放後の0006実行が成功しなかった" >&2
+    echo "$AFTER_RELEASE_OUT" | tail -10 >&2
+    FAILED=1
+  fi
+fi
+
+echo ""
 if [ "$FAILED" -eq 0 ]; then
   echo "==> 完了：0006の全ローカルテストが成功しました（本番へは一切接続していません）。"
 else
