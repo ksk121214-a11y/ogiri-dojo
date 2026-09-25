@@ -9,15 +9,18 @@ import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
 import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
-import { ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import { IS_SHORT_TEST_BUILD, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { formatLiveTicketLabel, formatLiveTicketNo } from "@/lib/liveTicketNo";
 import type { GroupRow, LiveRow, ParticipantRow, TopicRow } from "@/lib/liveRoomTypes";
 import { referralSourceDisplayLabel, summarizeReferralSurvey } from "@/lib/referralSurveySummary";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
+import { phaseRemainingSeconds } from "@/lib/liveRemaining";
+import { useServerClockState } from "@/lib/useServerNow";
 
 const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
@@ -60,7 +63,8 @@ type Notify = (type: "success" | "error", message: string) => void;
 export default function LiveHostPage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const profile = useProfileStore((s) => s.profile);
 
   const live = useLiveHostStore((s) => s.live);
@@ -79,10 +83,13 @@ export default function LiveHostPage() {
   const init = useLiveHostStore((s) => s.init);
   const refresh = useLiveHostStore((s) => s.refresh);
   const closeLive = useLiveHostStore((s) => s.closeLive);
+  const emergencyCloseLive = useLiveHostStore((s) => s.emergencyCloseLive);
   const beginGame = useLiveHostStore((s) => s.beginGame);
 
-  const [now, setNow] = useState(() => Date.now());
+  // 4回目レビュー対応：端末のDate.now()ではなく、DB時刻と同期した共通時計を使う。
+  const clock = useServerClockState(500);
   const [closing, setClosing] = useState(false);
+  const [emergencyClosing, setEmergencyClosing] = useState(false);
   const [beginningGame, setBeginningGame] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
@@ -96,17 +103,8 @@ export default function LiveHostPage() {
     if (profile?.isHost) init();
   }, [profile?.isHost, init]);
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(id);
-  }, []);
-
-  const remainingSec =
-    live?.answering_paused && live.answering_remaining_ms != null
-      ? Math.ceil(live.answering_remaining_ms / 1000)
-      : live?.phase_deadline
-        ? Math.max(0, Math.ceil((new Date(live.phase_deadline).getTime() - now) / 1000))
-        : null;
+  const remaining = live ? phaseRemainingSeconds(live, clock) : { sec: null, syncing: false };
+  const remainingSec = remaining.sec;
 
   if (authLoading) return <CenterMessage>読み込み中…</CenterMessage>;
 
@@ -172,6 +170,29 @@ export default function LiveHostPage() {
     }
   };
 
+  // 2026-09-25追加：通常終了(最終結果画面から。ポイント・段位・実績・参加回数を
+  // 付与する)とは別に、進行中に事故・不具合等でどうしても中断する必要がある
+  // 場合の緊急中止。報酬は一切付与されないため、通常終了より強い確認文言を
+  // 表示し、誤操作を防ぐ。
+  const handleEmergencyCloseLive = async () => {
+    if (emergencyClosing) return; // 連打防止
+    const confirmed = window.confirm(
+      "【緊急中止】このライブを、最終結果画面に到達していない状態で強制的に終了しますか？\n\n" +
+        "・この操作は取り消せません。\n" +
+        "・ポイント・段位・実績・参加回数はこのライブについて一切付与されません（後から付与し直すこともできません）。\n" +
+        "・通常の終了ではありません。事故・不具合等でどうしても続行できない場合のみ使用してください。",
+    );
+    if (!confirmed) return;
+    const reason = window.prompt("緊急中止の理由（任意・後から管理画面で確認できます）") ?? undefined;
+    setEmergencyClosing(true);
+    try {
+      const result = await emergencyCloseLive(reason || undefined);
+      if (!result.ok) notifyError(result.reason ?? "処理に失敗しました。もう一度お試しください");
+    } finally {
+      setEmergencyClosing(false);
+    }
+  };
+
   return (
     <AdminShell>
       <AdminHeader title="司会コンソール（ライブ準備・操作）" />
@@ -214,9 +235,9 @@ export default function LiveHostPage() {
               </p>
             )}
             {live.title && <p className="mt-0.5 text-sm text-gray-600">{live.title}</p>}
-            {remainingSec !== null && (
+            {(remainingSec !== null || remaining.syncing) && (
               <p className="mt-1 text-sm font-bold tabular-nums text-gray-700">
-                残り{remainingSec}秒
+                {remaining.syncing ? "時刻を同期中…" : `残り${remainingSec}秒`}
                 {live.answering_paused && "（審査中は一時停止）"}
               </p>
             )}
@@ -338,14 +359,35 @@ export default function LiveHostPage() {
             </AdminCard>
           )}
 
-          <AdminButton
-            variant="danger"
-            disabled={closing}
-            onClick={handleCloseLive}
-            className="self-start px-5 py-2"
-          >
-            {closing ? "終了処理中…" : "ライブを終了する"}
-          </AdminButton>
+          <div className="flex flex-col gap-2">
+            <AdminButton
+              variant="danger"
+              disabled={closing || live?.current_phase !== "final_result"}
+              onClick={handleCloseLive}
+              className="self-start px-5 py-2"
+            >
+              {closing ? "終了処理中…" : "ライブを終了する"}
+            </AdminButton>
+            {live?.current_phase !== "final_result" && (
+              <p className="text-xs text-gray-500">
+                通常の終了は最終結果画面に到達してから行えます（ポイント・段位・実績が付与されます）。
+              </p>
+            )}
+            {/* 2026-09-25（2回目レビュー対応）：最終結果画面に到達している場合は
+                通常終了だけを使う。緊急中止を誤って押すと報酬が永久に付与
+                されなくなるため、final_resultでは表示自体しない（DB側の
+                emergency_close_liveでも同じ条件を拒否する多層防御）。 */}
+            {live?.current_phase !== "final_result" && (
+              <button
+                type="button"
+                disabled={emergencyClosing}
+                onClick={handleEmergencyCloseLive}
+                className="self-start text-xs font-bold text-red-700 underline underline-offset-2 disabled:opacity-50"
+              >
+                {emergencyClosing ? "緊急中止処理中…" : "（事故・不具合時のみ）緊急中止する"}
+              </button>
+            )}
+          </div>
         </>
       )}
 
@@ -437,6 +479,11 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
           : { mode: "manual", topicBankIds: manualTopicIds },
       liveMode,
       manualOfficialSequenceNumber,
+      // 3回目レビュー対応（項目2）：本番ビルドでは常にstandard。通し稽古用ビルド
+      // (NEXT_PUBLIC_LIVE_TIMING_MODE=test)でテストライブを作る場合だけ
+      // short_testを渡す（official（本番）ライブはDB制約でもstandardに固定される
+      // ため、liveMode==="official"なら常にstandardにする）。
+      timingProfile: liveMode === "test" && IS_SHORT_TEST_BUILD ? "short_test" : "standard",
     };
     setSubmitting(true);
     try {

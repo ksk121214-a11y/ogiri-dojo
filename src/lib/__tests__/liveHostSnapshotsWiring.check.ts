@@ -137,19 +137,52 @@ const count = (needle: string) => src.split(needle).length - 1;
     assert.ok(m, `${fn} が tickGeneration/tickLiveId を受け取っていない`);
   }
   // reveal / resolve / pause / resume の各 DB 書き込み直前の多層ガード。
-  assert.ok(
-    /reveal 更新の直前でもう一度凍結を確認する[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
-    "processRevealQueue の reveal 更新直前ガードが無い",
-  );
-  assert.ok(
-    /確定 UPDATE の直前でもう一度凍結を確認する[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
-    "resolveIfDue の確定 UPDATE 直前ガードが無い",
-  );
-  assert.ok(
-    /pause UPDATE の直前[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src) &&
-      /resume UPDATE の直前[\s\S]{0,80}?progressFrozenForTick\(tickGeneration, tickLiveId, true\)/.test(src),
-    "syncAnsweringPause の pause/resume UPDATE 直前ガードが無い",
-  );
+  // 2026-09-25（司会不在時に未発表回答で停止する問題への対応）：revealの生の
+  // UPDATEがreveal_next_answer_if_due RPC呼び出しへ置き換わったため、
+  // 「RPC呼び出しより前に凍結を再確認する」ことを検証する形へ更新した。
+  {
+    const revealFn = src.match(/async function processRevealQueue\([\s\S]*?\n\}\n/);
+    assert.ok(revealFn, "processRevealQueue が見つからない");
+    const guardIdx = revealFn![0].indexOf(
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+    );
+    const rpcIdx = revealFn![0].indexOf('.rpc("reveal_next_answer_if_due"');
+    assert.ok(
+      guardIdx !== -1 && rpcIdx !== -1 && guardIdx < rpcIdx,
+      "processRevealQueue の reveal_next_answer_if_due 呼び出し直前ガードが無い",
+    );
+  }
+  // 2026-09-25（0079対応）：確定処理が生のUPDATEからresolve_answer_if_due RPC
+  // 呼び出しへ置き換わったため、「RPC呼び出しより前に凍結を再確認する」ことを
+  // 検証する形へ更新した（ガードそのものの意図は変わっていない）。
+  {
+    const resolveFn = src.match(/async function resolveIfDue\([\s\S]*?\n\}\n/);
+    assert.ok(resolveFn, "resolveIfDue が見つからない");
+    const guardIdx = resolveFn![0].indexOf(
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+    );
+    const rpcIdx = resolveFn![0].indexOf('.rpc("resolve_answer_if_due"');
+    assert.ok(
+      guardIdx !== -1 && rpcIdx !== -1 && guardIdx < rpcIdx,
+      "resolveIfDue の resolve_answer_if_due 呼び出し直前ガードが無い",
+    );
+  }
+  // 2026-09-25（0079対応）：pause/resumeの個別UPDATEが、busy判定・現在の
+  // answering_paused・残り時間の計算を全てサーバー側で行うsync_answering_pause_if_due
+  // RPCの単一呼び出しへ統合されたため、「RPC呼び出しより前に凍結を再確認する」
+  // ことを検証する形へ更新した。
+  {
+    const pauseFn = src.match(/async function syncAnsweringPause\([\s\S]*?\n\}\n/);
+    assert.ok(pauseFn, "syncAnsweringPause が見つからない");
+    const guardIdx = pauseFn![0].indexOf(
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+    );
+    const rpcIdx = pauseFn![0].indexOf('.rpc("sync_answering_pause_if_due"');
+    assert.ok(
+      guardIdx !== -1 && rpcIdx !== -1 && guardIdx < rpcIdx,
+      "syncAnsweringPause の sync_answering_pause_if_due 呼び出し直前ガードが無い",
+    );
+  }
   console.log("PASS: 配線-8（各ヘルパーが世代/liveId を受け取り DB 書き込み直前に再確認）");
 }
 
@@ -266,10 +299,9 @@ const count = (needle: string) => src.split(needle).length - 1;
   assert.ok(/if \(tickTimer === null\) return false;/.test(fn[0]), "tickTimer の確認が無い");
   assert.ok(/if \(subscribedLiveId !== live\.id\) return false;/.test(fn[0]), "subscribedLiveId の確認が無い");
   assert.ok(/if \(runtimeReadyLiveId !== live\.id\) return false;/.test(fn[0]), "runtimeReadyLiveId の確認が無い");
-  assert.ok(
-    /if \(live\.current_phase === "answering" && lastAnsweringTickAt === null\) return false;/.test(fn[0]),
-    "answering タイマー復元の確認が無い",
-  );
+  // 4回目レビュー対応：ローカル残り時間カウンタを廃止したため、answeringタイマー復元は
+  // 進行環境確立の条件から外れた（回答終了はDBのnow()だけで判断する）。
+  assert.ok(!/lastAnsweringTickAt/.test(fn[0]), "廃止したローカルタイマーが進行環境の条件に残っている");
   console.log("PASS: 配線-14（isHostRuntimeEstablished の完全readyの条件）");
 }
 
@@ -563,18 +595,45 @@ const count = (needle: string) => src.split(needle).length - 1;
 // 18: 組結果15秒（制約）。
 {
   const timing = readFileSync(join(process.cwd(), "src", "data", "liveRoomTiming.ts"), "utf8");
-  const prod = timing.match(/const PRODUCTION_TIMING = \{[\s\S]*?\n\} as const;/);
-  assert.ok(prod, "PRODUCTION_TIMING が見つからない");
-  assert.ok(/groupResultMs:\s*15_000\b/.test(prod[0]), "PRODUCTION_TIMING.groupResultMs が 15_000 でない");
+  const prod = timing.match(/export const STANDARD_TIMING = \{[\s\S]*?\n\} as const;/);
+  assert.ok(prod, "STANDARD_TIMING が見つからない");
+  assert.ok(/groupResultMs:\s*15_000\b/.test(prod[0]), "STANDARD_TIMING.groupResultMs が 15_000 でない");
   console.log("PASS: 配線-18（組結果の本番値は15秒のまま）");
 }
 
 // 19: 採点3点制・回答席/フリップ/音声演出の主要ロジックが不変（制約）。
+// 2026-09-25（0079対応）：満点(3点)判定・reveal_sequence_untilの設定は、採点確定
+// 処理の原子化(resolve_answer_if_due RPCへの統合)に伴いSQL側へ移動した。
+// クライアント側のボット3点制ロジックは無変更のまま、移動先のSQLで同じ
+// 「points=3の件数」「REVEAL_SEQUENCE_MSと同じ7820ms」を使っていることを確認する。
 {
   assert.ok(/points: isPerfectRound \? 3 : randomBotScore\(\)/.test(src), "ボット採点の3点制ロジックが変わっている");
-  assert.ok(/const topScoreVotes = freshScores\.filter\(\(s\) => s\.points === 3\)\.length;/.test(src), "満点(3点)判定ロジックが変わっている");
-  assert.ok(/REVEAL_SEQUENCE_MS/.test(src) && /reveal_sequence_until/.test(src), "フリップ/演出シーケンス配線が変わっている");
-  console.log("PASS: 配線-19（採点3点制・演出シーケンスのロジックは不変）");
+  assert.ok(
+    /\.rpc\("resolve_answer_if_due"/.test(src),
+    "採点確定処理がresolve_answer_if_due RPC経由でなくなっている",
+  );
+  const migration = readFileSync(
+    join(process.cwd(), "supabase", "migrations", "0079_live_server_authoritative_progression.sql"),
+    "utf8",
+  );
+  const resolveFn = migration.match(/create or replace function public\.resolve_answer_if_due[\s\S]*?\n\$\$;/);
+  assert.ok(resolveFn, "resolve_answer_if_due の定義が0079に見つからない");
+  assert.ok(
+    /count\(\*\) filter \(where s\.points = 3\)/.test(resolveFn[0]),
+    "満点(3点)判定ロジックが変わっている（resolve_answer_if_due）",
+  );
+  const timingSrc = readFileSync(join(process.cwd(), "src", "data", "liveRoomTiming.ts"), "utf8");
+  assert.ok(
+    /export const REVEAL_SEQUENCE_MS =\s*\n\s*SCORE_REVEAL_DELAY_MS \+ LIVE_ROOM_TIMING\.scoreDisplayMs \+ LIVE_ROOM_TIMING\.gateTailMs;/.test(
+      timingSrc,
+    ),
+    "REVEAL_SEQUENCE_MSの計算式が変わっている",
+  );
+  assert.ok(
+    /interval '7820 milliseconds'/.test(resolveFn[0]),
+    "resolve_answer_if_dueのreveal_sequence演出時間(7820ms=REVEAL_SEQUENCE_MSと同じ値)が変わっている",
+  );
+  console.log("PASS: 配線-19（採点3点制ロジックは不変、演出シーケンス設定は原子化されSQL側でも同じ値を使う）");
 }
 
 console.log("ALL LIVE_HOST_SNAPSHOTS WIRING CHECKS PASSED");

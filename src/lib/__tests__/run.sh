@@ -45,6 +45,18 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../guestStatus.ts"
   "$SCRIPT_DIR/../referralSurveySummary.ts"
   "$SCRIPT_DIR/../singleFlight.ts"
+  "$SCRIPT_DIR/../legalInfo.ts"
+  "$SCRIPT_DIR/../consentCheck.ts"
+  "$SCRIPT_DIR/../serverClock.ts"
+  "$SCRIPT_DIR/../serverClockAutoSync.ts"
+  "$SCRIPT_DIR/../topicRevealSfx.ts"
+  "$SCRIPT_DIR/../answeringAdvance.ts"
+  "$SCRIPT_DIR/../liveRemaining.ts"
+  "$SCRIPT_DIR/../topicRevealSfxScheduler.ts"
+  "$SCRIPT_DIR/../bgmSync.ts"
+  "$SCRIPT_DIR/../bgmCorrection.ts"
+  "$SCRIPT_DIR/../bgmStartIntent.ts"
+  "$SCRIPT_DIR/../bgmStartPlan.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -413,5 +425,29 @@ else
   FAILED=1
 fi
 rm -rf "$SNS_MUTATION_RACE_DIR"
+
+# src/lib/__tests__/store/useConsentGateStore.check.ts も同じ理由（useAuthStore.tsが
+# "@/..."エイリアス・実際のSupabaseクライアント生成を含む）で専用tsconfig経由にする。
+# 2026-09-25（利用規約同意ゲート対応）：未同意/同意済み/旧バージョン/キャンセルの
+# 各状態遷移で、実際のsignInWithX/signInAsGuestを呼ぶかどうか・localStorageへの
+# 記録が正しく行われるかを検証する。
+CONSENT_GATE_DIR="$(mktemp -d)"
+CONSENT_GATE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.consentGate.json"
+CONSENT_GATE_ENTRY="$CONSENT_GATE_DIR/src/lib/__tests__/store/useConsentGateStore.check.js"
+
+echo "--- useConsentGateStore.check.ts ---"
+if npx tsc -p "$CONSENT_GATE_TSCONFIG" --outDir "$CONSENT_GATE_DIR" && [ -f "$CONSENT_GATE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$CONSENT_GATE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$CONSENT_GATE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useConsentGateStore.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$CONSENT_GATE_DIR"
 
 exit $FAILED

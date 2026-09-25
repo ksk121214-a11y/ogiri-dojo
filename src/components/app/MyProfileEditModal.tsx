@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
 import { AVATAR_ICON_PRESETS, getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
-import { isConfirmedMember } from "@/lib/guestStatus";
+import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore, type DojoProfile } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
 
+import AccountDeletionRequestModal from "@/components/app/AccountDeletionRequestModal";
 import AvatarGlyph from "@/components/app/AvatarGlyph";
 import styles from "@/components/home/StadiumHome.module.css";
 
@@ -42,12 +43,19 @@ export default function MyProfileEditModal({
   }, [authUserId, openedForUserId, onClose]);
 
   const isMember = isConfirmedMember({ authUser, profile, profileLoading });
+  // アカウント削除の申請自体は、Xログインの通常会員だけでなく、匿名セッションが
+  // 有効なゲストにも認めている（authUser自体があれば、認証済みユーザーIDにDB側で
+  // 結び付いた申請ができる）。profile未取得中の一瞬だけ誤ってこのUIを出さないよう、
+  // authUserの有無だけで判定する（プロフィール編集フォーム自体の可否＝isMemberとは
+  // 別の、より緩い条件）。
+  const canRequestDeletion = !!authUser;
 
   // 2026-09-13（再々レビュー2回目対応）：確定会員でない間（ゲスト・未ログイン・
   // profile取得中・authUserとprofileのid不一致のいずれか）は、フォーム自体を
   // 一切表示・送信しない。openedForUserIdの変化を待たずとも、profileが一時的に
   // 不整合になった場合にも安全側へ倒す。
   if (!isMember || !profile) {
+    const isGuest = isGuestUser(authUser, profile);
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
@@ -59,7 +67,7 @@ export default function MyProfileEditModal({
         >
           <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
           <p className="font-sans text-sm text-[var(--ink)]/70">
-            ログインするとプロフィールを編集できます。
+            {isGuest ? "ゲスト参加中です。Xでログインするとプロフィールを編集できます。" : "ログインするとプロフィールを編集できます。"}
           </p>
           <div className="flex justify-end">
             <button
@@ -70,6 +78,7 @@ export default function MyProfileEditModal({
               閉じる
             </button>
           </div>
+          {canRequestDeletion && <AccountDeletionSection />}
         </div>
       </div>
     );
@@ -77,6 +86,25 @@ export default function MyProfileEditModal({
 
   return (
     <MyProfileEditForm profile={profile} openedForUserId={openedForUserId} onClose={onClose} />
+  );
+}
+
+// プロフィール編集モーダルの末尾（会員向けフォーム内・ゲスト向け簡易パネル内の
+// 両方）に置く、アカウント削除申請への導線。ログイン中（会員・ゲストいずれも）
+// であればアプリ内から申請できる（AccountDeletionRequestModal参照）。
+function AccountDeletionSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 border-t border-[var(--ink)]/10 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="font-sans text-xs text-[var(--ink)]/50 underline decoration-current/40 underline-offset-2"
+      >
+        アカウントの削除を申請する
+      </button>
+      {open && <AccountDeletionRequestModal onClose={() => setOpen(false)} />}
+    </div>
   );
 }
 
@@ -280,6 +308,8 @@ function MyProfileEditForm({
             {submitting ? "保存中…" : "保存する"}
           </button>
         </div>
+
+        <AccountDeletionSection />
       </form>
     </div>
   );

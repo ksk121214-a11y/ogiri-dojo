@@ -5,8 +5,10 @@ import { useEffect, useRef } from "react";
 
 import ScoringPhysicsBoard from "@/components/live-demo/ScoringPhysicsBoard";
 import ScreenShell from "@/components/live-demo/ScreenShell";
-import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playSfx } from "@/lib/sfx";
+import { serverClock } from "@/lib/serverClockInstance";
+import { createTopicRevealSfxScheduler } from "@/lib/topicRevealSfxScheduler";
+import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
 // public/sounds/topic-reveal.mp3（歓声と拍手）の実測尺（afinfoで確認、約4.1秒）。
@@ -49,44 +51,34 @@ export default function TopicRevealView() {
   // - 多少遅れている場合は、経過分(overdueMs)だけ音源の途中から今すぐ再生することで、
   //   終了時刻を本来の時刻に揃える（重なり時間が約2秒のまま保たれる）。
   // - 音源の尺をまるごと過ぎているほど遅れている場合は、不自然な音になるため再生を省略する。
-  const scheduledRef = useRef(false);
+  // 5回目レビュー対応：開始時刻・途中再生位置はサーバー同期時計で計算し、予約は
+  // サーバー時計のfresh化・revision変化（初回・再同期・オンライン復帰・タブ再表示後の
+  // 再同期）のたびに作り直す。タイマー発火時も再判定する（詳細は
+  // topicRevealSfxScheduler.ts）。同期前は予約しない。最初のお題でも2回目以降でも同じ経路。
+  const clock = useServerClockState();
+  const deadline = live?.phase_deadline ?? null;
+  const schedulerRef = useRef<ReturnType<typeof createTopicRevealSfxScheduler> | null>(null);
   useEffect(() => {
-    if (scheduledRef.current) return;
-    if (!live?.phase_deadline) return; // phase_deadlineが取得できるまで待つ（フォールバックはeffect2つ目で担保）
-    scheduledRef.current = true;
-    const deadlineAt = new Date(live.phase_deadline).getTime();
-    const idealStartAt = deadlineAt - TOPIC_REVEAL_SE_MS + OVERLAP_MS; // 本来再生を開始すべき絶対時刻
-    const overdueMs = Date.now() - idealStartAt; // 正の値＝その時刻を既にこれだけ過ぎている
-
-    if (overdueMs <= 0) {
-      // 通常ケース：まだ開始時刻前なので、そのタイミングまで待ってから先頭から再生する
-      // （従来と全く同じ計算式・同じタイミング）。
-      setTimeout(() => playSfx("topicReveal"), -overdueMs);
-      return;
-    }
-    if (overdueMs >= TOPIC_REVEAL_SE_MS) {
-      // 遅れが音源の尺以上＝鳴らしても重なり演出として成立しないほど遅い。何もしない。
-      return;
-    }
-    // 0秒直前のリロード・途中復帰：経過分だけオフセットして今すぐ再生し、終了時刻を揃える。
-    playSfx("topicReveal", { offsetSec: overdueMs / 1000 });
-  }, [live?.phase_deadline]);
-
-  // phase_deadlineが取得できない環境（旧マイグレーション未適用等）向けの保険。
-  // マウント直後にphase_deadlineが無ければ、従来どおりマウント基準の固定delayで
-  // スケジュールする（上のeffectがphase_deadline取得後にscheduledRef経由で
-  // 二重発火を防ぐ）。
-  useEffect(() => {
-    if (live?.phase_deadline) return; // 上のeffectに任せる
-    const delay = Math.max(0, LIVE_ROOM_TIMING.topicRevealMs - TOPIC_REVEAL_SE_MS + OVERLAP_MS);
-    const fallback = setTimeout(() => {
-      if (scheduledRef.current) return;
-      scheduledRef.current = true;
-      playSfx("topicReveal");
-    }, delay);
-    return () => clearTimeout(fallback);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const scheduler = createTopicRevealSfxScheduler({
+      nowIfFresh: () => serverClock.nowIfFresh(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+      play: (offsetSec) => playSfx("topicReveal", offsetSec > 0 ? { offsetSec } : undefined),
+      seMs: TOPIC_REVEAL_SE_MS,
+      overlapMs: OVERLAP_MS,
+    });
+    schedulerRef.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      schedulerRef.current = null;
+    };
   }, []);
+  useEffect(() => {
+    schedulerRef.current?.update(deadline);
+  }, [deadline, clock.fresh, clock.revision]);
+  // 6回目レビュー対応：visibilitychange等での直接の再評価はしない。復帰時は時計側が先に
+  // stale化して再同期し、fresh化・revision変化の通知(上のeffect)を受けてから予約し直す
+  // （復帰直後の古いアンカーで再生・skipを確定させないため）。
 
   if (!currentTurn || !currentTopic) return null;
 

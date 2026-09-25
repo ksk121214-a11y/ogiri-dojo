@@ -123,6 +123,10 @@ const baseLive: LiveRow = {
   rank_rewards_applied: false,
   live_mode: "official",
   official_sequence_number: 1,
+  emergency_closed: false,
+  emergency_close_reason: null,
+  next_reveal_pending_at: null,
+  timing_profile: "standard",
 };
 
 const participants: ParticipantRow[] = [

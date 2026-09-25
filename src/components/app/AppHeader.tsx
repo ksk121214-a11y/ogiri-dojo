@@ -8,6 +8,7 @@ import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 const NAV_LINKS = [
@@ -38,7 +39,8 @@ export default function AppHeader() {
   const rank = getRankByMeter(member ? (profile?.masteryMeter ?? 0) : 0);
   const displayName = member ? (profile?.displayName ?? "…") : null;
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const signOut = useAuthStore((s) => s.signOut);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
   const xScreenName =

@@ -7,6 +7,7 @@ import PointHistoryModal from "@/components/app/PointHistoryModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 import styles from "./StadiumHome.module.css";
@@ -35,7 +36,8 @@ const SHOW_POINTS_BALANCE = false;
 export default function AccountSummary() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする（下記コメント参照）。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
   const [historyOpen, setHistoryOpen] = useState(false);

@@ -16,6 +16,7 @@ export default function TimerRing({
   paused = false,
   darkText = false,
   palette = "dojo",
+  syncing = false,
 }: {
   remainingMs: number;
   totalMs: number;
@@ -29,14 +30,19 @@ export default function TimerRing({
   // （design-preview-2は今もこのファイルをそのままimportしており、他の呼び出し元の
   // 見た目に影響を与えないため）。
   palette?: "dojo" | "neon2";
+  // サーバー時刻との同期前：端末時刻由来の誤った秒数を出さず「同期中…」を表示する。
+  syncing?: boolean;
 }) {
-  const ratio =
-    totalMs > 0 ? Math.max(0, Math.min(1, remainingMs / totalMs)) : 0;
+  const ratio = syncing
+    ? 1
+    : totalMs > 0
+      ? Math.max(0, Math.min(1, remainingMs / totalMs))
+      : 0;
   const radius = size / 2 - 6;
   const circumference = 2 * Math.PI * radius;
   const dashoffset = circumference * (1 - ratio);
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  const urgent = ratio < 0.25;
+  const urgent = !syncing && ratio < 0.25;
 
   // ラスト3秒（3→2→1）に入った瞬間だけカウント音を鳴らす。前回描画時の秒数と
   // 比較して「減った瞬間」だけ発火させ、remainingMsが細かく更新されるたびに
@@ -45,10 +51,10 @@ export default function TimerRing({
   useEffect(() => {
     const prev = prevSecondsRef.current;
     prevSecondsRef.current = seconds;
-    if (!paused && seconds < prev && seconds >= 1 && seconds <= 3) {
+    if (!paused && !syncing && seconds < prev && seconds >= 1 && seconds <= 3) {
       playSfx("countdownTick");
     }
-  }, [seconds, paused]);
+  }, [seconds, paused, syncing]);
   const ringColorClass =
     palette === "neon2"
       ? paused
@@ -120,7 +126,11 @@ export default function TimerRing({
                   : "text-dojo-washi-white"
         }`}
       >
-        <span className="text-xl leading-none">{seconds}</span>
+        {syncing ? (
+          <span className="text-[9px] leading-tight">同期中…</span>
+        ) : (
+          <span className="text-xl leading-none">{seconds}</span>
+        )}
         {label && (
           <span
             className={`mt-0.5 whitespace-nowrap text-[9px] leading-tight font-normal ${

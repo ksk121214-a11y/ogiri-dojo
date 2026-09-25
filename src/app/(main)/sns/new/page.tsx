@@ -10,6 +10,7 @@ import { isGuestUser } from "@/lib/guestStatus";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -27,7 +28,8 @@ export default function SnsNewTopicPage() {
   const addTopic = useSnsStore((s) => s.addTopic);
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

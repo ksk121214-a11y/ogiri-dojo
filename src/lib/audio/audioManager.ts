@@ -21,6 +21,9 @@
 //   needsAudioResumeをtrueにして、UI側（SoundSettingsToggle/SoundToggle）が
 //   「BGMを再開」ボタンを出せるようにする。
 
+import { decideBgmCorrection, type BgmCorrectionResult } from "@/lib/bgmCorrection";
+import { decideBgmRetry, decideBgmStart, registerMetadataListenerOnce, resolveBgmOffsetSec, resolveFallbackSeekSec } from "@/lib/bgmStartPlan";
+import { createBgmStartIntent } from "@/lib/bgmStartIntent";
 import { BASE_PATH } from "@/lib/basePath";
 
 // ============================================================
@@ -272,6 +275,8 @@ interface BgmPlayback {
   loadPromise: Promise<void> | null;
   // AudioContextが使えない環境向けのフォールバック。
   fallbackAudio: HTMLAudioElement | null;
+  // フォールバック：メタデータ待ちのloadedmetadataリスナーが登録済みか（重複登録・二重再生の防止）。
+  metadataWaiting?: boolean;
 }
 
 const bgmPlaybacks = new Map<BgmName, BgmPlayback>();
@@ -563,9 +568,9 @@ export function playSfx(name: SfxName, opts?: { offsetSec?: number }): void {
 // ============================================================
 
 let currentBgm: { name: BgmName; playback: BgmPlayback } | null = null;
-// bgmEnabled=falseの間に要求された曲名（有効化された瞬間にこれを再生する）。
-let pendingBgmName: BgmName | null = null;
-let pendingBgmStartAtMs: number | undefined;
+// 「今この曲を、この位置から鳴らしたい」最新の意図。bgmEnabled=falseの間や読込中は、
+// ここへ保存された曲・位置が有効化時・読込完了時に使われる（bgmStartIntent.ts参照）。
+const bgmIntent = createBgmStartIntent();
 const fadeTimers = new Map<BgmPlayback, ReturnType<typeof setInterval>>();
 
 function fadeBgm(playback: BgmPlayback, from: number, to: number, ms: number, onDone?: () => void) {
@@ -590,17 +595,80 @@ function fadeBgm(playback: BgmPlayback, from: number, to: number, ms: number, on
 
 // 指定オフセット(秒)から再生を試みる。失敗（AudioContextが依然suspended等）時は
 // needsAudioResumeを立てて、UI（音声設定メニュー内の「BGMを再開」）から再試行できるようにする。
-function attemptStartBgm(playback: BgmPlayback, offsetSec: number) {
+function attemptStartBgm(
+  playback: BgmPlayback,
+  offsetSec: number,
+  opts?: { userGesture?: boolean },
+) {
   if (playback.fallbackAudio) {
-    const result = playback.fallbackAudio.play();
-    if (result && typeof result.then === "function") {
-      result
-        .then(() => setState({ needsAudioResume: false }))
-        .catch((err) => {
-          console.warn("[audio] BGM再生に失敗（ユーザー操作での再開待ち）", err);
-          setState({ needsAudioResume: true });
-        });
+    const audio = playback.fallbackAudio;
+    const play = () => {
+      try {
+        const result = audio.play();
+        if (result && typeof result.then === "function") {
+          result
+            .then(() => setState({ needsAudioResume: false }))
+            .catch((err) => {
+              console.warn("[audio] BGM再生に失敗（ユーザー操作での再開待ち）", err);
+              setState({ needsAudioResume: true });
+            });
+        }
+      } catch (err) {
+        console.warn("[audio] BGM再生に失敗（ユーザー操作での再開待ち）", err);
+        setState({ needsAudioResume: true });
+      }
+    };
+    // 8回目レビュー対応：offsetSecをcurrentTimeへ反映してから再生する（durationでmodulo、
+    // 負数・NaN・Infinityは防御）。メタデータ未取得なら、loadedmetadata後に「その時点の
+    // 最新のbgmIntent位置」を再計算して反映する。待機中に曲変更・OFF・stop・ページ離脱が
+    // あった場合は古い処理で再生しない。同じplaybackへのリスナーは重複登録しない。
+    const seek = resolveFallbackSeekSec(offsetSec, audio.duration);
+    if (seek !== null) {
+      try {
+        audio.currentTime = seek;
+      } catch {
+        // 設定できない場合は現在位置のまま再生する。
+      }
+      play();
+      return;
     }
+    // 9回目レビュー対応：ユーザー操作(タップ/「BGMを再開」)による再開では、メタデータ未取得でも
+    // そのイベント内で同期的にplay()を試す（loadedmetadata後のplay()はイベントの外になり、
+    // ブラウザの自動再生制限で再び拒否され得るため）。メタデータ待機中(metadataWaiting)の
+    // 再タップも、この同期playを試すため無視されない。位置は取得後にseekで最新位置へ合わせる。
+    if (opts?.userGesture) play();
+    // 待機フラグの確認とtrueへの設定はリスナー登録の前に行う（registerMetadataListenerOnce）。
+    registerMetadataListenerOnce(
+      playback,
+      (onLoaded) => audio.addEventListener("loadedmetadata", onLoaded, { once: true }),
+      () => {
+        if (currentBgm?.playback !== playback) return; // 曲変更・stop後
+        if (
+          decideBgmStart({
+            intentCurrent: bgmIntent.name !== null,
+            nameMatches: bgmIntent.name === currentBgm.name,
+            enabled: state.bgmEnabled,
+            alreadyPlaying: false, // 再生中でも位置の補正は行う（二重play回避は下のpausedで判断）
+          }) !== "start"
+        ) {
+          return;
+        }
+        const latest = resolveFallbackSeekSec(
+          resolveBgmOffsetSec(bgmIntent.startAtMs, audio.duration, offsetSec),
+          audio.duration,
+        );
+        if (latest !== null) {
+          try {
+            audio.currentTime = latest;
+          } catch {
+            // 無視してよい。
+          }
+        }
+        // ユーザー操作中のplay()が成功して既に再生中なら、二重にplay()しない（位置だけ補正）。
+        // 失敗して停止したままなら、ここで再試行する（失敗時はneedsAudioResume=trueで次のタップを待つ）。
+        if (audio.paused) play();
+      },
+    );
     return;
   }
   const ctx = getAudioContext();
@@ -635,10 +703,22 @@ function fadeOutAllBgmExcept(keepName: BgmName): void {
   });
 }
 
-function activateBgm(name: BgmName, startAtMs?: number) {
+function activateBgm(name: BgmName) {
+  const myGen = bgmIntent.gen;
+  // 読込・メタデータ待ちの完了時に、開始時の引数ではなく最新の希望開始位置を読む。
+  const latestStartAtMs = () =>
+    bgmIntent.isCurrent(myGen) && bgmIntent.name === name ? bgmIntent.startAtMs : undefined;
   if (currentBgm?.name === name) {
     if (isBgmPaused(currentBgm.playback)) {
-      attemptStartBgm(currentBgm.playback, getBgmOffsetSec(currentBgm.playback, getAudioContext()));
+      // 7回目レビュー対応：OFF→ON再開は、古い停止位置ではなく意図(intent)の「今この
+      // 瞬間の有効な位置」（基準＋経過）から始める（無ければ従来どおり停止位置）。
+      const pb = currentBgm.playback;
+      const durationSec = pb.fallbackAudio ? pb.fallbackAudio.duration : (pb.buffer?.duration ?? 0);
+      const fallbackSec = getBgmOffsetSec(pb, getAudioContext());
+      attemptStartBgm(
+        pb,
+        bgmIntent.name === name ? resolveBgmOffsetSec(bgmIntent.startAtMs, durationSec, fallbackSec) : fallbackSec,
+      );
     }
     // 2026-08-29:「同じ曲のまま」の要求でも、必ず正しい音量へ向けてフェードし直す。
     // これが無いと2つのバグが起きる：
@@ -670,23 +750,8 @@ function activateBgm(name: BgmName, startAtMs?: number) {
       audio.addEventListener("canplaythrough", clearLoading, { once: true });
       audio.addEventListener("error", clearLoading, { once: true });
     }
-    const seekTo = (ms: number) => {
-      if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        audio.currentTime = (ms / 1000) % audio.duration;
-      }
-    };
-    if (startAtMs != null && startAtMs > 0) {
-      if (audio.readyState >= 1) seekTo(startAtMs);
-      else audio.addEventListener("loadedmetadata", () => seekTo(startAtMs), { once: true });
-    } else {
-      try {
-        audio.currentTime = 0;
-      } catch {
-        // まだメタデータが読めていない場合は無視してよい（0を指すのが既定のため）。
-      }
-    }
     currentBgm = { name, playback };
-    attemptStartBgm(playback, 0);
+    attemptStartBgm(playback, (latestStartAtMs() ?? 0) / 1000);
     fadeBgm(playback, 0, BGM_VOLUME[name], FADE_MS);
     return;
   }
@@ -696,11 +761,21 @@ function activateBgm(name: BgmName, startAtMs?: number) {
   const startWhenReady = () => {
     // 待っている間に、この要求が既に追い越されていないか確認する
     // （別の曲へ切り替わった／再びOFFになった等）。
-    if (currentBgm?.name !== name && pendingBgmName !== name) return;
-    let offsetSec = 0;
-    if (startAtMs != null && startAtMs > 0 && playback.buffer && playback.buffer.duration > 0) {
-      offsetSec = (startAtMs / 1000) % playback.buffer.duration;
+    // 7回目レビュー対応：読込完了時にも最新のbgmEnabledを再確認する。読込中にOFFに
+    // された場合は再生・フェードインを行わない（デコード済みの音源と最新の希望位置は
+    // 保持し、ONにした時に初めて再生する）。bgmLoadingも残さない。
+    const startDecision = decideBgmStart({
+      intentCurrent: bgmIntent.isCurrent(myGen),
+      nameMatches: bgmIntent.name === name,
+      enabled: state.bgmEnabled,
+      alreadyPlaying: !isBgmPaused(playback),
+    });
+    if (startDecision === "skip_stale") return;
+    if (startDecision !== "start") {
+      clearLoading();
+      return;
     }
+    const offsetSec = resolveBgmOffsetSec(latestStartAtMs(), playback.buffer?.duration ?? 0, 0);
     currentBgm = { name, playback };
     attemptStartBgm(playback, offsetSec);
     fadeBgm(playback, 0, BGM_VOLUME[name], FADE_MS);
@@ -715,20 +790,67 @@ function activateBgm(name: BgmName, startAtMs?: number) {
   }
 }
 
+// 6回目レビュー対応：サーバー時計の同期後に、BGMを正しい位置へ補正する。結果を理由つきで
+// 返す（bgmCorrection.ts）。OFF・読込中でも、正しい将来の開始位置を意図(intent)へ保存し
+// （queued）、実際の再生開始時にその最新値が使われる。補正済み判断は呼び出し側plannerが
+// この結果を見て行う。
+export function correctBgmPosition(name: BgmName, targetMs: number, toleranceMs = 1500): BgmCorrectionResult {
+  if (typeof window === "undefined") return "not_ready";
+  const cur = currentBgm && currentBgm.name === name ? currentBgm.playback : null;
+  const ctx = getAudioContext();
+  let position: { durationMs: number; currentPosMs: number } | null = null;
+  let loading = false;
+  if (cur) {
+    if (cur.fallbackAudio) {
+      const d = cur.fallbackAudio.duration;
+      if (Number.isFinite(d) && d > 0) {
+        position = { durationMs: d * 1000, currentPosMs: cur.fallbackAudio.currentTime * 1000 };
+      } else loading = true;
+    } else if (cur.buffer && ctx && cur.buffer.duration > 0) {
+      position = { durationMs: cur.buffer.duration * 1000, currentPosMs: getBgmOffsetSec(cur, ctx) * 1000 };
+    } else loading = true;
+  }
+  const decision = decideBgmCorrection(
+    {
+      plannedName: bgmIntent.name,
+      enabled: state.bgmEnabled,
+      currentName: currentBgm?.name ?? null,
+      loading,
+      position,
+    },
+    name,
+    targetMs,
+    toleranceMs,
+  );
+  if (decision.effect === "seek" && cur && position) {
+    const target = (((targetMs % position.durationMs) + position.durationMs) % position.durationMs) / 1000;
+    if (cur.fallbackAudio) {
+      cur.fallbackAudio.currentTime = target;
+    } else if (ctx && cur.buffer) {
+      if (cur.isPlaying) startBgmSource(cur, ctx, target);
+      else cur.offsetAtStart = target;
+    }
+  }
+  if (decision.result === "corrected" || decision.result === "within_tolerance" || decision.result === "queued") {
+    // ON/OFFの切り替えや再開でも、古い位置(0秒等)へ戻らないよう最新値を保存する。
+    bgmIntent.updateStart(name, targetMs);
+  }
+  return decision.result;
+}
+
 // 画面側（AmbientBgmController・/live・/live-demo・CurtainOverlay）が
 // 「今この曲を鳴らしたい」と宣言するための関数。bgmEnabled=falseの間は
 // 実際のダウンロード・再生を行わず、要求だけを覚えておく
 // （有効化された瞬間にpendingの曲を再生する）。
 export function playBgm(name: BgmName, opts?: { startAtMs?: number }): void {
   if (typeof window === "undefined") return;
-  pendingBgmName = name;
-  pendingBgmStartAtMs = opts?.startAtMs;
+  bgmIntent.request(name, opts?.startAtMs);
 
   if (!state.bgmEnabled) {
     setState({ currentBgmTrack: name });
     return;
   }
-  activateBgm(name, opts?.startAtMs);
+  activateBgm(name);
 }
 
 // 2026-08-29:「BGMが重なって鳴る／OFFにしても止まらない」対策。currentBgmという
@@ -747,8 +869,7 @@ function fadeOutAndPauseAllBgmNodes(): void {
 }
 
 export function stopBgm(): void {
-  pendingBgmName = null;
-  pendingBgmStartAtMs = undefined;
+  bgmIntent.clear();
   currentBgm = null;
   setState({ currentBgmTrack: null, bgmLoading: false });
   fadeOutAndPauseAllBgmNodes();
@@ -758,16 +879,37 @@ export function stopBgm(): void {
 // 「BGMを再開」ボタン・ページ内最初のタップ、どちらからも呼べる。
 export function retryCurrentBgm(): void {
   if (typeof window === "undefined") return;
-  resumeAudioContext();
-  if (currentBgm && isBgmPaused(currentBgm.playback) && state.bgmEnabled) {
-    attemptStartBgm(currentBgm.playback, getBgmOffsetSec(currentBgm.playback, getAudioContext()));
-    fadeBgm(
-      currentBgm.playback,
-      getBgmVolume(currentBgm.playback),
-      BGM_VOLUME[currentBgm.name],
-      FADE_MS,
+  // 9回目レビュー対応：再開が必要か（stalledか）は、AudioContextをresumeする「前」の状態で
+  // 判定する（先にresumeするとctx.stateがrunningになり、suspended中に古い位置で作られた
+  // sourceを作り直さず終わってしまうため）。手順は
+  //   1) resume前の状態で再開要否を判定 → 2) 必要なら最新位置からsourceを作り直す
+  //   3) AudioContextをresume
+  // の順。attemptStartBgm(Web Audio)内にもresumeがあるが、resume()は冪等で、needsAudioResume
+  // の成功/失敗管理は従来どおりそちらが行う。currentBgmが無い場合も、効果音等のために
+  // AudioContextをアンロックする従来の目的は維持する（3)は常に実行）。
+  const ctx = getAudioContext();
+  const cur = currentBgm;
+  const decision = cur
+    ? decideBgmRetry({
+        enabled: state.bgmEnabled,
+        hasCurrent: true,
+        paused: isBgmPaused(cur.playback),
+        webAudioStalled: !cur.playback.fallbackAudio && cur.playback.isPlaying && !!ctx && ctx.state !== "running",
+      })
+    : "skip";
+  if (decision === "restart" && cur) {
+    const pb = cur.playback;
+    const durationSec = pb.fallbackAudio ? pb.fallbackAudio.duration : (pb.buffer?.duration ?? 0);
+    const fallbackSec = getBgmOffsetSec(pb, ctx);
+    // ユーザー操作経路：HTMLAudioはこのイベント内で同期的にplay()を試す。
+    attemptStartBgm(
+      pb,
+      bgmIntent.name === cur.name ? resolveBgmOffsetSec(bgmIntent.startAtMs, durationSec, fallbackSec) : fallbackSec,
+      { userGesture: true },
     );
+    fadeBgm(pb, getBgmVolume(pb), BGM_VOLUME[cur.name], FADE_MS);
   }
+  resumeAudioContext();
 }
 
 // ============================================================
@@ -779,8 +921,8 @@ export function setBgmEnabled(next: boolean): void {
   writeStoredMuted(BGM_MUTE_STORAGE_KEY, !next);
 
   if (next) {
-    if (pendingBgmName) {
-      activateBgm(pendingBgmName, pendingBgmStartAtMs);
+    if (bgmIntent.name) {
+      activateBgm(bgmIntent.name as BgmName);
     }
   } else {
     // currentBgmだけでなく、万一取り残されて鳴っている曲があっても確実に止める

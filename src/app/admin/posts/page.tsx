@@ -16,7 +16,9 @@ interface PostRow {
   id: string;
   kind: PostKind;
   body: string;
-  author_id: string;
+  // 2026-09-25（0078）：アカウント削除で本人の投稿は物理削除せずis_hidden化する
+  // ようにしたため、author_idはon delete set nullでNULLになりうる。
+  author_id: string | null;
   created_at: string;
   is_hidden: boolean;
   hidden_reason: string | null;
@@ -71,7 +73,7 @@ export default function AdminPostsPage() {
     setRows(combined);
     setReportedTargetIds(new Set((reports ?? []).map((r) => r.target_id as string)));
 
-    const authorIds = [...new Set(combined.map((r) => r.author_id))];
+    const authorIds = [...new Set(combined.map((r) => r.author_id).filter((id): id is string => id !== null))];
     if (authorIds.length > 0) {
       const { data: authorData } = await supabase.rpc("sns_author_names", { p_ids: authorIds });
       const map: Record<string, string> = {};
@@ -217,7 +219,8 @@ export default function AdminPostsPage() {
                         {truncate(row.body, 40)}
                       </p>
                       <p className="mt-0.5">
-                        {KIND_LABEL[row.kind]}　投稿者：{names[row.author_id] ?? row.author_id.slice(0, 8)}
+                        {KIND_LABEL[row.kind]}　投稿者：
+                        {row.author_id ? (names[row.author_id] ?? row.author_id.slice(0, 8)) : "（退会済み）"}
                         　{new Date(row.created_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
                       </p>
                     </div>

@@ -11,12 +11,13 @@ import ScoringPhysicsBoard, { type ScoreEvent } from "@/components/live-demo/Sco
 import ScreenShell from "@/components/live-demo/ScreenShell";
 import TimerRing from "@/components/live-demo/TimerRing";
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
-import { LIVE_ROOM_TIMING, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
+import { getLiveRoomTiming, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
 import { fitAspect, useElementSize } from "@/lib/useElementSize";
 import { playSfx } from "@/lib/sfx";
-import { useTickingNow } from "@/lib/useTickingNow";
+import { answeringRemaining, judgingRemaining } from "@/lib/liveRemaining";
+import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 import AnswerRevealCard from "./AnswerRevealCard";
 import LaughMarkOverlay from "./LaughMarkOverlay";
@@ -43,8 +44,12 @@ export default function AudienceAnsweringView() {
   // 2026-09-08（P1-8/9セキュリティレビュー対応）：他のuseLiveFollowerStoreフックと
   // 同じ並び（早期returnより前）で呼ぶ。Rules of Hooks違反を避けるため。
   const pendingCue = useLiveFollowerStore((s) => s.pendingCue);
+  // 3回目レビュー対応（項目2）：このライブが実際に使うtiming_profileから解決する
+  // （DB側の進行RPCが参照するのと同じlives.timing_profile。画面表示とDB判定の
+  // 時間設定が食い違わないようにする）。
+  const timing = getLiveRoomTiming(live?.timing_profile);
 
-  const now = useTickingNow(150);
+  const clock = useServerClockState(150);
   // 表示中の回答のIDと紐づけて持つことで、次の回答に切り替わったら
   // 自動的に(このエフェクト無しで)前の回答へのエラー表示を出さなくなる。
   const [scoreError, setScoreError] = useState<{ answerId: string; message: string } | null>(
@@ -58,7 +63,7 @@ export default function AudienceAnsweringView() {
   // 確定した瞬間も回答カード・採点ボタンを表示し続ける猶予ぶんだけ残す
   // （activeAnswerは確定と同時にnullになるため）。revealGraceMsを明示的に渡し、
   // 玉が弾け始める・得点が出るタイミングと揃える。
-  const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, LIVE_ROOM_TIMING.revealGraceMs);
+  const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, timing.revealGraceMs);
 
   // 回答フリップが消えたあと(猶予表示が切れたあと)にその人の回答席で見えるように、
   // 回答フリップの猶予より長く持たせる。参加者ID→点数のマップにしている理由・
@@ -96,13 +101,13 @@ export default function AudienceAnsweringView() {
               delete next[participantId];
               return next;
             });
-          }, LIVE_ROOM_TIMING.scoreDisplayMs);
+          }, timing.scoreDisplayMs);
           pendingTimersRef.current.add(hideTimer);
         }, SCORE_REVEAL_DELAY_MS);
         pendingTimersRef.current.add(revealTimer);
       }
     }
-  }, [activeAnswer, turnAnswers]);
+  }, [activeAnswer, turnAnswers, timing.scoreDisplayMs]);
 
   useEffect(() => {
     const timers = pendingTimersRef.current;
@@ -181,18 +186,14 @@ export default function AudienceAnsweringView() {
   // 確定させたturns.eligible_judge_count（全クライアント共通）を使う（0049）。
   const maxBalls = Math.max(3, currentTurn.eligible_judge_count * 3);
 
-  const answeringRemainingMs =
-    live.answering_paused && live.answering_remaining_ms != null
-      ? live.answering_remaining_ms
-      : live.phase_deadline
-        ? Math.max(0, new Date(live.phase_deadline).getTime() - now)
-        : 0;
-  const judgingRemainingMs = displayedAnswer?.judging_ends_at
-    ? Math.max(0, new Date(displayedAnswer.judging_ends_at).getTime() - now)
-    : 0;
+  const answeringRemainingState = answeringRemaining(live, clock);
+  const judgingRemainingState = judgingRemaining(displayedAnswer?.judging_ends_at, clock);
+  const answeringRemainingMs = answeringRemainingState.ms;
+  const judgingRemainingMs = judgingRemainingState.ms;
   // 時間切れギリギリで押しても、司会側で先に確定してしまい採点が反映されないことがある。
   // 押せてしまうと「変えたのに戻る」ように見えるだけなので、時間切れなら先にボタン自体を止める。
-  const judgingTimeUp = judgingRemainingMs <= 0;
+  // 同期前は端末時刻由来の「時間切れ」を決めない（採点可否の最終判断はDB側）。
+  const judgingTimeUp = !judgingRemainingState.syncing && judgingRemainingMs <= 0;
 
   const handleScore = async (points: 0 | 1 | 2 | 3) => {
     // 2026-09-13（ゲスト観客対応）：採点ボタン自体はcanJudge=falseの間
@@ -255,18 +256,27 @@ export default function AudienceAnsweringView() {
                     ? boardAnswer.judge_count > 0 && boardAnswer.top_score_votes === boardAnswer.judge_count
                     : null
                 }
-                resolvedPopDelayMs={LIVE_ROOM_TIMING.revealGraceMs + LIVE_ROOM_TIMING.ballPopPauseMs}
+                resolvedPopDelayMs={timing.revealGraceMs + timing.ballPopPauseMs}
                 roundKey={boardRoundId}
               />
-              <div className="absolute right-8 top-5">
+              <div className="absolute right-8 top-5 flex flex-col items-center gap-0.5">
                 <TimerRing
                   remainingMs={answeringRemainingMs}
-                  totalMs={LIVE_ROOM_TIMING.answerMs}
+                  syncing={answeringRemainingState.syncing}
+                  totalMs={timing.answerMs}
                   paused={live.answering_paused}
                   size={40}
                   darkText
                   palette="neon2"
                 />
+                {/* 2026-09-25追加：残り時間が一時停止中（審査・演出待ち）は、
+                    数字が0のまま止まって見えるだけだと停止したのか分からない
+                    ため、処理中であることが分かる文言を添える。 */}
+                {live.answering_paused && (
+                  <span className="whitespace-nowrap rounded bg-black/40 px-1 text-[9px] font-bold text-white/90">
+                    審査中…
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -324,7 +334,8 @@ export default function AudienceAnsweringView() {
                     disabled={judgingTimeUp}
                     onScore={handleScore}
                     remainingMs={judgingRemainingMs}
-                    totalMs={LIVE_ROOM_TIMING.judgeMs}
+                    syncing={judgingRemainingState.syncing}
+                    totalMs={timing.judgeMs}
                     scaleUp={false}
                   />
                   {scoreError && scoreError.answerId === displayedAnswer.id && (

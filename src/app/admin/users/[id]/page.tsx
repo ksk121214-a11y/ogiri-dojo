@@ -360,7 +360,7 @@ export default function AdminUserDetailPage() {
   const handleDelete = async () => {
     if (pendingAction) return;
     const confirmed = window.confirm(
-      "アカウントを完全に削除しますか？この操作は取り消せません。投稿等の関連データも失われます。",
+      "アカウントを完全に削除しますか？この操作は取り消せません。本人が投稿したお題・回答・ツッコミは非表示化されます（本文はモデレーション等のため内部に残ります）。他の利用者が投稿した回答・ツッコミの行は物理的に削除されません。",
     );
     if (!confirmed) return;
     setPendingAction("delete");

@@ -10,12 +10,13 @@ import ScoringPhysicsBoard, { type ScoreEvent } from "@/components/live-demo/Sco
 import ScreenShell from "@/components/live-demo/ScreenShell";
 import StageHeaderBanner from "@/components/live-demo/StageHeaderBanner";
 import TimerRing from "@/components/live-demo/TimerRing";
-import { LIVE_ROOM_TIMING, MAX_ANSWERS_PER_PLAYER, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
+import { getLiveRoomTiming, MAX_ANSWERS_PER_PLAYER, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
 import { fitAspect, useElementSize } from "@/lib/useElementSize";
 import { playSfx } from "@/lib/sfx";
-import { useTickingNow } from "@/lib/useTickingNow";
+import { answeringRemaining, judgingRemaining } from "@/lib/liveRemaining";
+import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 import AnswerRevealCard from "./AnswerRevealCard";
 import LaughMarkOverlay from "./LaughMarkOverlay";
@@ -43,8 +44,12 @@ export default function StageAnsweringView() {
   // 2026-09-08（P1-8/9セキュリティレビュー対応）：他のuseLiveFollowerStoreフックと
   // 同じ並び（早期returnより前）で呼ぶ。Rules of Hooks違反を避けるため。
   const pendingCue = useLiveFollowerStore((s) => s.pendingCue);
+  // 3回目レビュー対応（項目2）：このライブが実際に使うtiming_profileから解決する
+  // （DB側の進行RPCが参照するのと同じlives.timing_profile。画面表示とDB判定の
+  // 時間設定が食い違わないようにする）。
+  const timing = getLiveRoomTiming(live?.timing_profile);
 
-  const now = useTickingNow(150);
+  const clock = useServerClockState(150);
 
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -89,13 +94,13 @@ export default function StageAnsweringView() {
               delete next[participantId];
               return next;
             });
-          }, LIVE_ROOM_TIMING.scoreDisplayMs);
+          }, timing.scoreDisplayMs);
           pendingTimersRef.current.add(hideTimer);
         }, SCORE_REVEAL_DELAY_MS);
         pendingTimersRef.current.add(revealTimer);
       }
     }
-  }, [activeAnswer, turnAnswers]);
+  }, [activeAnswer, turnAnswers, timing.scoreDisplayMs]);
 
   useEffect(() => {
     const timers = pendingTimersRef.current;
@@ -154,7 +159,7 @@ export default function StageAnsweringView() {
   // 確定した瞬間も回答カードを表示し続ける猶予ぶんだけ残す（activeAnswerは確定と同時にnullになるため）。
   // revealGraceMsを明示的に渡すことで、玉が弾け始めるタイミング(resolvedPopDelayMs)や
   // 得点表示のタイミング(SCORE_REVEAL_DELAY_MS)と揃える。
-  const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, LIVE_ROOM_TIMING.revealGraceMs);
+  const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, timing.revealGraceMs);
 
   const scoreEvents: ScoreEvent[] = useMemo(
     () =>
@@ -206,15 +211,10 @@ export default function StageAnsweringView() {
   const busyByTurnAnswers = cueForCurrentTurn?.busy ?? false;
   const busyWithOthers = live.answering_paused || busyByTurnAnswers;
 
-  const answeringRemainingMs =
-    live.answering_paused && live.answering_remaining_ms != null
-      ? live.answering_remaining_ms
-      : live.phase_deadline
-        ? Math.max(0, new Date(live.phase_deadline).getTime() - now)
-        : 0;
-  const judgingRemainingMs = displayedAnswer?.judging_ends_at
-    ? Math.max(0, new Date(displayedAnswer.judging_ends_at).getTime() - now)
-    : 0;
+  const answeringRemainingState = answeringRemaining(live, clock);
+  const judgingRemainingState = judgingRemaining(displayedAnswer?.judging_ends_at, clock);
+  const answeringRemainingMs = answeringRemainingState.ms;
+  const judgingRemainingMs = judgingRemainingState.ms;
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -264,13 +264,14 @@ export default function StageAnsweringView() {
                     ? boardAnswer.judge_count > 0 && boardAnswer.top_score_votes === boardAnswer.judge_count
                     : null
                 }
-                resolvedPopDelayMs={LIVE_ROOM_TIMING.revealGraceMs + LIVE_ROOM_TIMING.ballPopPauseMs}
+                resolvedPopDelayMs={timing.revealGraceMs + timing.ballPopPauseMs}
                 roundKey={boardRoundId}
               />
               <div className="absolute right-8 top-5">
                 <TimerRing
                   remainingMs={answeringRemainingMs}
-                  totalMs={LIVE_ROOM_TIMING.answerMs}
+                  syncing={answeringRemainingState.syncing}
+                  totalMs={timing.answerMs}
                   paused={busyWithOthers}
                   size={40}
                   darkText
@@ -336,7 +337,8 @@ export default function StageAnsweringView() {
                     myScore={null}
                     resolved={displayedAnswer.resolved}
                     remainingMs={judgingRemainingMs}
-                    totalMs={LIVE_ROOM_TIMING.judgeMs}
+                    syncing={judgingRemainingState.syncing}
+                    totalMs={timing.judgeMs}
                     scaleUp={false}
                   />
                 </div>
@@ -390,7 +392,8 @@ export default function StageAnsweringView() {
             {busyWithOthers && (
               <TimerRing
                 remainingMs={judgingRemainingMs}
-                totalMs={LIVE_ROOM_TIMING.judgeMs}
+                syncing={judgingRemainingState.syncing}
+                totalMs={timing.judgeMs}
                 size={40}
                 palette="neon2"
               />

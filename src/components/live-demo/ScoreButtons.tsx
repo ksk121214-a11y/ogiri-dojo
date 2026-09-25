@@ -28,6 +28,7 @@ export default function ScoreButtons({
   remainingMs,
   totalMs,
   scaleUp = true,
+  syncing = false,
 }: {
   isJudge: boolean;
   myScore: 0 | 1 | 2 | 3 | null;
@@ -37,6 +38,7 @@ export default function ScoreButtons({
   remainingMs?: number;
   totalMs?: number;
   scaleUp?: boolean;
+  syncing?: boolean;
 }) {
   const showTimer = remainingMs !== undefined && totalMs !== undefined;
 
@@ -70,7 +72,7 @@ export default function ScoreButtons({
           <ScoreIcon points={btn.points} scaleUp={scaleUp} />
         </button>
       ))}
-      {showTimer && <TimerRing remainingMs={remainingMs!} totalMs={totalMs!} size={44} />}
+      {showTimer && <TimerRing remainingMs={remainingMs!} totalMs={totalMs!} size={44} syncing={syncing} />}
     </div>
   );
 }

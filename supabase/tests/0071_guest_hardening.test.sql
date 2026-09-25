@@ -131,6 +131,10 @@ begin
   select mastery_meter, total_points, points_balance, live_count into v_guest_before
     from public.profiles where id = v_guest_uid;
 
+  -- 0079対応：close_liveはfinal_resultからしか実行できなくなったため、テストの
+  -- 前提を崩さないよう明示的にfinal_resultへ進めてから呼ぶ。
+  update public.lives set current_phase = 'final_result' where id = v_live_id;
+
   set local role authenticated;
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select * into v_close_result from public.close_live(v_live_id);

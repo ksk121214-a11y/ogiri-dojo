@@ -541,6 +541,10 @@ export const useLiveDesignPreviewStore = create<LiveDesignPreviewState>()((set, 
       rank_rewards_applied: false,
       live_mode: "test",
       official_sequence_number: null,
+      emergency_closed: false,
+      emergency_close_reason: null,
+      next_reveal_pending_at: null,
+      timing_profile: "standard",
     };
     set({
       live,

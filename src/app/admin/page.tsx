@@ -29,10 +29,11 @@ interface DashboardState {
   postsNeedingReviewCount: number;
   suspendedUserCount: number;
   unacknowledgedKickedCount: number;
+  pendingDeletionRequestCount: number;
 }
 
 async function loadDashboard(): Promise<DashboardState> {
-  const [liveRes, reportsOpenRes, reportsForPostsRes, suspendedRes, unacknowledgedKickedRes] = await Promise.all([
+  const [liveRes, reportsOpenRes, reportsForPostsRes, suspendedRes, unacknowledgedKickedRes, pendingDeletionRes] = await Promise.all([
     supabase
       .from("lives")
       .select("id, current_phase, scheduled_at, max_players")
@@ -50,6 +51,10 @@ async function loadDashboard(): Promise<DashboardState> {
       .select("id", { count: "exact", head: true })
       .eq("type", "kicked")
       .is("acknowledged_at", null),
+    supabase
+      .from("account_deletion_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending"),
   ]);
 
   let playerCount = 0;
@@ -84,6 +89,7 @@ async function loadDashboard(): Promise<DashboardState> {
     postsNeedingReviewCount,
     suspendedUserCount,
     unacknowledgedKickedCount: unacknowledgedKickedRes.count ?? 0,
+    pendingDeletionRequestCount: pendingDeletionRes.count ?? 0,
   };
 }
 
@@ -101,6 +107,7 @@ export default function AdminHomePage() {
     postsNeedingReviewCount: 0,
     suspendedUserCount: 0,
     unacknowledgedKickedCount: 0,
+    pendingDeletionRequestCount: 0,
   });
 
   useEffect(() => {
@@ -151,6 +158,12 @@ export default function AdminHomePage() {
           : state.suspendedUserCount > 0
             ? `停止中${state.suspendedUserCount}人`
             : undefined,
+    },
+    {
+      label: "アカウント削除申請",
+      description: "アプリ内から届いたアカウント削除申請を確認します。",
+      href: "/admin/account-deletion-requests",
+      badge: state.pendingDeletionRequestCount > 0 ? `未対応${state.pendingDeletionRequestCount}件` : undefined,
     },
     {
       label: "運営操作履歴",

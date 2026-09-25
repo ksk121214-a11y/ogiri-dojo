@@ -1,5 +1,17 @@
 -- 0065 回帰テスト：フェーズ遷移RPC（host_advance_answering_to_group_result /
 -- host_advance_group_result_to_next）の権限・冪等性・ロールバックの確認。
+--
+-- 2026-09-25改訂（0079対応）：両RPCの契約が変わったため、それに合わせて
+-- 全面的に更新した。
+--   - 締切(timestamptz)をクライアントから受け取る旧方式をやめ、duration_ms
+--     (整数・省略可)のみを受け取り、締切は必ずサーバー側のnow()から生成する
+--     方式になった（関数シグネチャが(uuid,uuid,timestamptz)→(uuid,uuid,integer)
+--     へ変わった）。
+--   - is_host()必須をやめ、auth.uid()が取れていれば（一般の認証済みユーザー・
+--     ゲストでも）呼べるようになった。行ロック・期待するphase/turn_id・
+--     「DBのnow()で締切を本当に過ぎているか」・一時停止中でないか・未表示/
+--     未確定の回答が残っていないか、を全てサーバー側で確認するため、呼び出し元の
+--     権限に関わらず安全（早送りができない）ことをテストの主眼にする。
 -- 実行方法はsupabase/tests/run.sh参照。
 
 \set ON_ERROR_STOP on
@@ -52,8 +64,8 @@ begin
   perform public.begin_game(v_live_id);
 end $$;
 
--- activeな組(turnA)・pendingな組(turnB)を動的に特定する（0063/0064テストと同じ理由：
--- ランダム組分けの結果に依存しない）。
+-- activeな組(turnA)・pendingな組(turnB)を動的に特定する（ランダム組分けの結果に
+-- 依存しない）。
 create temporary table _t0065_ctx as
 select
   l.id as live_id,
@@ -79,20 +91,20 @@ end $$;
 reset role;
 
 -- ============================================================
--- テスト0: PUBLIC/anonは両RPCのEXECUTE権限を持たない。
+-- テスト0: PUBLIC/anonは両RPC(新シグネチャ)のEXECUTE権限を持たない。
 -- ============================================================
 do $$
 begin
-  if has_function_privilege('public', 'host_advance_answering_to_group_result(uuid,uuid,timestamptz)', 'EXECUTE') then
+  if has_function_privilege('public', 'host_advance_answering_to_group_result(uuid,uuid,integer)', 'EXECUTE') then
     raise exception 'FAIL: PUBLICがhost_advance_answering_to_group_resultのEXECUTEを持っている';
   end if;
-  if has_function_privilege('anon', 'host_advance_answering_to_group_result(uuid,uuid,timestamptz)', 'EXECUTE') then
+  if has_function_privilege('anon', 'host_advance_answering_to_group_result(uuid,uuid,integer)', 'EXECUTE') then
     raise exception 'FAIL: anonがhost_advance_answering_to_group_resultのEXECUTEを持っている';
   end if;
-  if has_function_privilege('public', 'host_advance_group_result_to_next(uuid,uuid,timestamptz)', 'EXECUTE') then
+  if has_function_privilege('public', 'host_advance_group_result_to_next(uuid,uuid,integer)', 'EXECUTE') then
     raise exception 'FAIL: PUBLICがhost_advance_group_result_to_nextのEXECUTEを持っている';
   end if;
-  if has_function_privilege('anon', 'host_advance_group_result_to_next(uuid,uuid,timestamptz)', 'EXECUTE') then
+  if has_function_privilege('anon', 'host_advance_group_result_to_next(uuid,uuid,integer)', 'EXECUTE') then
     raise exception 'FAIL: anonがhost_advance_group_result_to_nextのEXECUTEを持っている';
   end if;
   raise notice 'PASS: PUBLIC/anonはどちらのRPCのEXECUTE権限も持たない';
@@ -109,7 +121,7 @@ begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
   set local role anon;
   begin
-    perform public.host_advance_answering_to_group_result(v_live_id, v_turn_a, now() + interval '15 seconds');
+    perform public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
     raise exception 'FAIL: anonがhost_advance_answering_to_group_resultを実行できてしまった';
   exception
     when insufficient_privilege then
@@ -118,56 +130,136 @@ begin
 end $$;
 
 -- ============================================================
--- テスト1: 非host（一般authenticatedユーザー）がhost_advance_answering_to_group_result
---          を呼ぶと拒否される（is_host()確認）。
+-- テスト1（0079対応・重要）：非host（一般authenticatedユーザー）が呼んでも、
+--          締切がまだ来ていなければ安全にupdated=falseになる（早送り不可）。
+--          0065旧版は「非hostは拒否」だったが、0079で「認証済みなら誰でも
+--          呼べるが、サーバー側の期限確認を通らない限り何も進まない」方式に
+--          変わったため、この観点でテストし直す。
 -- ============================================================
 do $$
 declare
   v_turn_a uuid;
   v_live_id uuid;
+  v_result record;
 begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
 
+  -- answering・締切はまだ先、という状態を用意する。
+  update public.lives
+    set current_phase = 'answering', current_turn_id = v_turn_a, phase_deadline = now() + interval '30 seconds'
+    where id = v_live_id;
+
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-0000000000ff', true);
-  begin
-    perform public.host_advance_answering_to_group_result(v_live_id, v_turn_a, now() + interval '15 seconds');
-    raise exception 'FAIL: 非hostがhost_advance_answering_to_group_resultを実行できてしまった';
-  exception
-    when others then
-      if sqlerrm <> 'not authorized' then
-        raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm;
-      end if;
-      raise notice 'PASS: 非hostはhost_advance_answering_to_group_resultを実行できない';
-  end;
+  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
+
+  if v_result.updated is not false then
+    raise exception 'FAIL: 締切前なのに非hostの呼び出しでupdated=trueになった（早送りできてしまう）';
+  end if;
+  if (v_result.live).current_phase <> 'answering' then
+    raise exception 'FAIL: 締切前なのにcurrent_phaseが変化した';
+  end if;
+
+  raise notice 'PASS: 非hostでも呼べるが、締切前は安全にupdated=falseで拒否される（早送り不可）';
 end $$;
 
 -- ============================================================
--- テスト2: 事前状態をanswering/turnAへ整える → hostが正しいexpected値で呼ぶと成功し、
---          livesとturnsが同一トランザクションで更新される。
+-- テスト1b（0079対応）：一時停止中(answering_paused=true)は、締切を過ぎていても
+--          進めない。
+-- ============================================================
+do $$
+declare
+  v_turn_a uuid;
+  v_live_id uuid;
+  v_result record;
+begin
+  select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
+
+  update public.lives
+    set current_phase = 'answering', current_turn_id = v_turn_a,
+        phase_deadline = now() - interval '1 second', answering_paused = true, answering_remaining_ms = 5000
+    where id = v_live_id;
+
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
+  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
+
+  if v_result.updated is not false then
+    raise exception 'FAIL: 一時停止中なのにupdated=trueになった';
+  end if;
+
+  update public.lives set answering_paused = false, answering_remaining_ms = null where id = v_live_id;
+  raise notice 'PASS: 一時停止中は締切を過ぎていても進まない';
+end $$;
+
+-- ============================================================
+-- テスト1c（0079対応）：未表示・未確定の回答が残っている間は、締切を過ぎていても
+--          進めない。
+-- ============================================================
+do $$
+declare
+  v_turn_a uuid;
+  v_live_id uuid;
+  v_participant_a uuid;
+  v_answer_id uuid;
+  v_result record;
+begin
+  select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
+  select id into v_participant_a from public.participants
+    where live_id = v_live_id and user_id = 'a5000000-0000-0000-0000-00000000000a';
+
+  insert into public.answers (id, turn_id, participant_id, seq, body)
+    values (gen_random_uuid(), v_turn_a, v_participant_a, 999, '0065テスト未確定回答')
+    returning id into v_answer_id;
+
+  update public.lives
+    set current_phase = 'answering', current_turn_id = v_turn_a, phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
+
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
+  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
+
+  if v_result.updated is not false then
+    raise exception 'FAIL: 未表示の回答が残っているのにupdated=trueになった';
+  end if;
+
+  reset role; -- authenticatedにはanswersのdelete policyが無いため、片付けはpostgresロールで行う
+  delete from public.answers where id = v_answer_id;
+  raise notice 'PASS: 未表示・未確定の回答が残っている間は締切を過ぎていても進まない';
+end $$;
+
+-- ============================================================
+-- テスト2: 事前状態をanswering/turnAへ整え、締切を過ぎた状態にする →
+--          非hostでも成功し、livesとturnsが同一トランザクションで更新される
+--          （早送りはできないが、締切到達後は誰が呼んでも進む、を確認する）。
 -- ============================================================
 do $$
 declare
   v_live_id uuid;
   v_turn_a uuid;
-  v_deadline timestamptz := now() + interval '15 seconds';
   v_result record;
   v_turn_status text;
 begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
 
-  update public.lives set current_phase = 'answering', current_turn_id = v_turn_a where id = v_live_id;
+  update public.lives
+    set current_phase = 'answering', current_turn_id = v_turn_a, phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
   update public.turns set status = 'active' where id = v_turn_a;
 
   set local role authenticated;
-  perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
-  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, v_deadline);
+  perform set_config('myapp.uid', 'a5000000-0000-0000-0000-0000000000ff', true); -- 非host
+  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
 
   if v_result.updated is not true then
-    raise exception 'FAIL: 正しいexpected値での呼び出しがupdated=trueにならなかった';
+    raise exception 'FAIL: 締切到達後の呼び出しがupdated=trueにならなかった';
   end if;
   if (v_result.live).current_phase <> 'group_result' then
     raise exception 'FAIL: 戻り値のliveのcurrent_phaseがgroup_resultになっていない';
+  end if;
+  if (v_result.live).phase_deadline is null or (v_result.live).phase_deadline <= now() then
+    raise exception 'FAIL: group_resultの新しい締切がnow()より未来になっていない';
   end if;
 
   reset role;
@@ -176,7 +268,7 @@ begin
     raise exception 'FAIL: turnAのstatusがdoneになっていない(got=%)', v_turn_status;
   end if;
 
-  raise notice 'PASS: answering→group_resultの遷移で、livesとturnsが同一トランザクションで正しく更新される';
+  raise notice 'PASS: 締切到達後は非hostの呼び出しでも進み、livesとturnsが同一トランザクションで正しく更新される';
 end $$;
 
 -- ============================================================
@@ -196,9 +288,7 @@ begin
 
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
-  select * into v_result from public.host_advance_answering_to_group_result(
-    v_live_id, v_turn_a, now() + interval '15 seconds'
-  );
+  select * into v_result from public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
 
   if v_result.updated is not false then
     raise exception 'FAIL: 既に遷移済みのはずなのにupdated=trueが返った（二重遷移の恐れ）';
@@ -235,7 +325,9 @@ begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
 
   -- 状態をanswering/turnAへ戻す（テスト2・3で既にgroup_resultへ進んでいるため）。
-  update public.lives set current_phase = 'answering', current_turn_id = v_turn_a where id = v_live_id;
+  update public.lives
+    set current_phase = 'answering', current_turn_id = v_turn_a, phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
   update public.turns set status = 'active' where id = v_turn_a;
 
   select current_phase into v_phase_before from public.lives where id = v_live_id;
@@ -257,7 +349,7 @@ begin
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
   begin
-    perform public.host_advance_answering_to_group_result(v_live_id, v_turn_a, now() + interval '15 seconds');
+    perform public.host_advance_answering_to_group_result(v_live_id, v_turn_a, 15000);
   exception
     when others then
       if sqlerrm = '0065_FORCED_FAILURE_FOR_TEST' then
@@ -298,36 +390,36 @@ declare
   v_turn_a uuid;
 begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
-  update public.lives set current_phase = 'group_result', current_turn_id = v_turn_a where id = v_live_id;
+  update public.lives
+    set current_phase = 'group_result', current_turn_id = v_turn_a, phase_deadline = now() + interval '30 seconds'
+    where id = v_live_id;
   update public.turns set status = 'done' where id = v_turn_a;
 end $$;
 
 -- ============================================================
--- テスト5: 非hostがhost_advance_group_result_to_nextを呼ぶと拒否される。
+-- テスト5（0079対応）：締切がまだ来ていなければ、非hostは呼べても安全に
+--          updated=falseになる。
 -- ============================================================
 do $$
 declare
   v_live_id uuid;
   v_turn_a uuid;
+  v_result record;
 begin
   select live_id, turn_a_id into v_live_id, v_turn_a from _t0065_ctx;
 
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-0000000000ff', true);
-  begin
-    perform public.host_advance_group_result_to_next(v_live_id, v_turn_a, now() + interval '13 seconds');
-    raise exception 'FAIL: 非hostがhost_advance_group_result_to_nextを実行できてしまった';
-  exception
-    when others then
-      if sqlerrm <> 'not authorized' then
-        raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm;
-      end if;
-      raise notice 'PASS: 非hostはhost_advance_group_result_to_nextを実行できない';
-  end;
+  select * into v_result from public.host_advance_group_result_to_next(v_live_id, v_turn_a, 13000);
+
+  if v_result.updated is not false then
+    raise exception 'FAIL: 組結果の締切前なのにupdated=trueになった（早送りできてしまう）';
+  end if;
+  raise notice 'PASS: 組結果の締切前は非hostの呼び出しでも進まない';
 end $$;
 
 -- ============================================================
--- テスト6: hostが正しいexpected値で呼ぶと、次ターン(turnB)を特定してactive化し、
+-- テスト6: 締切を過ぎた状態で呼ぶと、次ターン(turnB)を特定してactive化し、
 --          livesを同一トランザクションでtopic_revealへ進める。
 -- ============================================================
 do $$
@@ -340,14 +432,14 @@ declare
 begin
   select live_id, turn_a_id, turn_b_id into v_live_id, v_turn_a, v_turn_b from _t0065_ctx;
 
+  update public.lives set phase_deadline = now() - interval '1 second' where id = v_live_id;
+
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
-  select * into v_result from public.host_advance_group_result_to_next(
-    v_live_id, v_turn_a, now() + interval '13 seconds'
-  );
+  select * into v_result from public.host_advance_group_result_to_next(v_live_id, v_turn_a, 13000);
 
   if v_result.updated is not true then
-    raise exception 'FAIL: 正しいexpected値での呼び出しがupdated=trueにならなかった';
+    raise exception 'FAIL: 締切到達後の呼び出しがupdated=trueにならなかった';
   end if;
   if v_result.advanced_to <> 'topic_reveal' then
     raise exception 'FAIL: advanced_toがtopic_revealになっていない(got=%)', v_result.advanced_to;
@@ -385,9 +477,7 @@ begin
 
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
-  select * into v_result from public.host_advance_group_result_to_next(
-    v_live_id, v_turn_a, now() + interval '13 seconds'
-  );
+  select * into v_result from public.host_advance_group_result_to_next(v_live_id, v_turn_a, 13000);
 
   if v_result.updated is not false then
     raise exception 'FAIL: 既に遷移済みのはずなのにupdated=trueが返った（二重遷移の恐れ）';
@@ -413,14 +503,14 @@ declare
 begin
   select live_id, turn_b_id into v_live_id, v_turn_b from _t0065_ctx;
 
-  update public.lives set current_phase = 'group_result', current_turn_id = v_turn_b where id = v_live_id;
+  update public.lives
+    set current_phase = 'group_result', current_turn_id = v_turn_b, phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
   update public.turns set status = 'done' where id = v_turn_b;
 
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
-  select * into v_result from public.host_advance_group_result_to_next(
-    v_live_id, v_turn_b, now() + interval '13 seconds'
-  );
+  select * into v_result from public.host_advance_group_result_to_next(v_live_id, v_turn_b, 13000);
 
   if v_result.updated is not true then
     raise exception 'FAIL: 最後のターンからの遷移がupdated=trueにならなかった';
@@ -458,7 +548,9 @@ begin
   select live_id, turn_a_id, turn_b_id into v_live_id, v_turn_a, v_turn_b from _t0065_ctx;
 
   -- 状態をgroup_result/turnAへ戻す（次ターン=turnBが存在する状態）。
-  update public.lives set current_phase = 'group_result', current_turn_id = v_turn_a where id = v_live_id;
+  update public.lives
+    set current_phase = 'group_result', current_turn_id = v_turn_a, phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
   update public.turns set status = 'done' where id = v_turn_a;
   update public.turns set status = 'pending' where id = v_turn_b;
 
@@ -481,7 +573,7 @@ begin
   set local role authenticated;
   perform set_config('myapp.uid', 'a5000000-0000-0000-0000-00000000000f', true);
   begin
-    perform public.host_advance_group_result_to_next(v_live_id, v_turn_a, now() + interval '13 seconds');
+    perform public.host_advance_group_result_to_next(v_live_id, v_turn_a, 13000);
   exception
     when others then
       if sqlerrm = '0065_FORCED_FAILURE_FOR_TEST_2' then

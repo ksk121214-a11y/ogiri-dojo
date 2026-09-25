@@ -6,6 +6,7 @@ import { useState } from "react";
 import NotificationBell from "@/components/app/NotificationBell";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 import SoundSettingsToggle from "./SoundSettingsToggle";
@@ -29,7 +30,8 @@ export default function StadiumHeader() {
   const profileLoading = useProfileStore((s) => s.loading);
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const signOut = useAuthStore((s) => s.signOut);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
   // 2026-09-01: 未ログイン時にローカルのダミー名（useUserStore）が実データであるかの

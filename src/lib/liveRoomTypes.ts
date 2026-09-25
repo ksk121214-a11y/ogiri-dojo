@@ -54,6 +54,23 @@ export interface LiveRow {
   // （0017、test/official問わず増え続ける内部カウンター）とは別物で、表示用の
   // 番号は必ずこちら（またはformatLiveTicketLabel経由）を使うこと。
   official_sequence_number: number | null;
+  // 0079追加：通常終了(final_resultから、報酬付与あり)と緊急中止(進行中の任意
+  // フェーズから、報酬付与なし)を区別するための列。emergency_closed=trueの
+  // ライブにはapply_live_rank_rewardsが（close_live経由・手動retry経由の
+  // どちらからも）実行できない。
+  emergency_closed: boolean;
+  emergency_close_reason: string | null;
+  // 2026-09-25追加：未発表回答の表示前の約2.2秒（ドラマチックポーズ）を
+  // DB時刻だけで管理するためのタイマー。answeringフェーズ専用で、値がある間は
+  // reveal_next_answer_if_dueがまだ実際にはrevealしない（クライアント表示上
+  // 直接使う必要は無いが、補助tick側の「resyncすべきか」の判定に使う）。
+  next_reveal_pending_at: string | null;
+  // 2026-09-25追加（3回目レビュー対応・項目2）：このライブが実際に使う信頼済み
+  // 時間プロファイル。'standard'=本番相当、'short_test'=通し稽古用の短縮値。
+  // 進行RPC・画面表示のどちらも、クライアントのビルド時フラグ
+  // (NEXT_PUBLIC_LIVE_TIMING_MODE)ではなくこの列を見て時間を決める
+  // （src/data/liveRoomTiming.tsのgetLiveRoomTiming参照）。
+  timing_profile: "standard" | "short_test";
 }
 
 export interface GroupRow {

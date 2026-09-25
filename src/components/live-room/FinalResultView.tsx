@@ -16,6 +16,7 @@ import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSe
 import { computePointBreakdown } from "@/lib/pointBreakdown";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import type { FinalResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -97,7 +98,10 @@ export default function FinalResultView({
   const totalSteps = podiumTiers.length;
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：Xログイン実処理(useAuthStore)を直接
+  // 呼ばず、共通の同意ゲート(useConsentGateStore)経由にする。未同意端末では
+  // ここでモーダルを挟んでから、内部でuseAuthStore.signInWithXが呼ばれる。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   // 2026-09-13（0070ゲスト参加レビュー対応）：profile?.isGuestだけでなく
   // authUser.is_anonymousも併せて判定する共通関数（src/lib/guestStatus.ts）を使う
   // （profile取得前・取得失敗でも匿名ユーザーを通常会員として扱わないため）。

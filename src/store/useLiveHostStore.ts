@@ -12,7 +12,7 @@
 import { create } from "zustand";
 
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
-import { LIVE_ROOM_TIMING, REVEAL_SEQUENCE_MS, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import { getLiveRoomTiming, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import { logAdminAction } from "@/lib/adminActionLog";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
 import {
@@ -41,6 +41,8 @@ import {
   type SliceLoadOutcome,
 } from "@/lib/liveHostSnapshots";
 import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
+import { createAnsweringAdvancer, tryAdvanceAnswering } from "@/lib/answeringAdvance";
+import { serverClock } from "@/lib/serverClockInstance";
 import { supabase } from "@/lib/supabase";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
 import type {
@@ -56,13 +58,23 @@ import type {
   TurnRow,
 } from "@/lib/liveRoomTypes";
 
-const PHASE_DURATIONS_MS: Partial<Record<LivePhase, number>> = {
-  interlude: LIVE_ROOM_TIMING.interludeMs,
-  opening: LIVE_ROOM_TIMING.openingMs,
-  topic_reveal: LIVE_ROOM_TIMING.topicRevealMs,
-  answering: LIVE_ROOM_TIMING.answerMs,
-  group_result: LIVE_ROOM_TIMING.groupResultMs,
-};
+// 3回目レビュー対応（項目2）：以前はビルド時のNEXT_PUBLIC_LIVE_TIMING_MODEだけで
+// 決まる固定値だったが、今はこのライブ行が実際に持つtiming_profile
+// （lives.timing_profile、DB側の進行RPCが参照するのと同じ値）から都度計算する。
+// これにより「画面はshort_test相当で早く進もうとするのに、DBはstandardの締切
+// のままで拒否される」という食い違いが起きなくなる。
+function getPhaseDurationsMs(
+  timingProfile: string | null | undefined,
+): Partial<Record<LivePhase, number>> {
+  const timing = getLiveRoomTiming(timingProfile);
+  return {
+    interlude: timing.interludeMs,
+    opening: timing.openingMs,
+    topic_reveal: timing.topicRevealMs,
+    answering: timing.answerMs,
+    group_result: timing.groupResultMs,
+  };
+}
 
 // 運営者専用管理画面の追加（第1段階）：ライブ準備画面のフォーム入力値。
 // 2026-08-30：「簡単な説明」「受付開始/終了時刻」はどの画面にも表示に使われて
@@ -84,6 +96,12 @@ export interface LivePreparationInput {
   // 2026-09-22追加：本番開催番号の手動指定。nullなら従来どおり自動採番する
   // （liveMode==="test"のときは呼び出し元が必ずnullにする）。
   manualOfficialSequenceNumber: number | null;
+  // 2026-09-25追加（3回目レビュー対応・項目2）：このライブが使う信頼済み時間
+  // プロファイル。'short_test'はliveMode==="test"の場合のみ指定できる
+  // （official（本番）ではDB制約でも強制的に'standard'に固定される）。
+  // 呼び出し元（司会準備画面）は、通し稽古用ビルド(NEXT_PUBLIC_LIVE_TIMING_MODE
+  // =test)でテストライブを作る時だけ"short_test"を渡す想定。
+  timingProfile: "standard" | "short_test";
 }
 
 interface LiveHostState {
@@ -165,7 +183,13 @@ interface LiveHostState {
   // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
   updateCapacity: (input: { maxPlayers: number | null; groupCount: number }) => Promise<{ ok: boolean; reason?: string }>;
   beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
+  // 2026-09-25（0079対応）：通常終了はfinal_resultからのみ実行できる
+  // （report_applied等の報酬付与を伴う）。
   closeLive: () => Promise<{ ok: boolean; reason?: string }>;
+  // 2026-09-25追加：緊急中止。進行中の任意フェーズから実行できるが、報酬
+  // （ポイント・段位・実績・参加回数）は一切付与しない。誤操作防止のため、
+  // 呼び出し側（司会画面）でより強い確認文言を表示すること。
+  emergencyCloseLive: (reason?: string) => Promise<{ ok: boolean; reason?: string }>;
   // 2026-09-03: closeLiveのポイント付与が失敗した場合に、closed後いつでも
   // 単独で再試行するためのアクション（管理画面のライブ結果詳細から呼ぶ）。
   retryRankRewards: (liveId: string) => Promise<{ ok: boolean; reason?: string }>;
@@ -204,7 +228,6 @@ let initInFlight: Promise<void> | null = null;
 // ホストクライアントが参加者IDを指定する余地自体が無く、一般参加者へのなりすましは
 // 構造的に不可能（観客側の既存 Postgres Changes 購読へそのまま届く）。
 let lastBotTsukkomiAt = 0;
-let pendingRevealAt: number | null = null; // 次の回答をrevealする予定時刻（ホスト内メモリのみ）
 // 回答受付フェーズの「本当の残り持ち時間」（ホスト内メモリのみ）。src/store/useLiveDemoStore.tsの
 // answeringRemainingMs/tickAnsweringと同じ考え方：審査サイクル中(busy)はここを減算しない
 // （＝審査時間は持ち時間の予算を消費しない、という元々の仕様どおり）ことで、一時停止・再開を
@@ -215,8 +238,12 @@ let pendingRevealAt: number | null = null; // 次の回答をrevealする予定�
 // 頼ると、審査サイクルが途切れず連続する場合に「本来の締切をとうに過ぎている」ことに
 // 気づけず、逆に終わらなくなる問題があった。この値は両方の問題を避けるため、tickのたびに
 // 実際の経過時間(dt)を使って自前で減算し、busy中は減らさない。
-let answeringRemainingMsTrue: number | null = null;
-let lastAnsweringTickAt: number | null = null; // 上のdt計算用
+// 4回目レビュー対応：ローカルの残り時間カウンタ(answeringRemainingMsTrue)は廃止した。
+// 回答終了の進行RPCは、このローカル値ではなくDBのnow()だけを許可条件にする。
+// ここにあるのは、進行RPCの呼び出し頻度を抑えるためのsingle-flightと最小間隔のみ
+// （間隔はperformance.now()基準＝端末時計を変更しても影響しない）。
+const ANSWERING_ADVANCE_MIN_INTERVAL_MS = 1500;
+const answeringAdvancer = createAnsweringAdvancer();
 
 // 2026-09-11（再レビュー対応）：スライスごとの取得世代ゲート。
 // 同じ対象（live/children/answers/resolved）に対する取得が並行した場合、
@@ -810,58 +837,6 @@ async function updateLive(id: string, patch: Partial<LiveRow>) {
   return { data: data as LiveRow | null, error };
 }
 
-// 2026-09-09（複数管理画面タブ対策）：フェーズ遷移専用のupdateLive。
-// 「今まさにこのタブが見ている状態(expectedPhase・expectedTurnId)」をUPDATEの
-// WHERE条件そのものに含めることで、同じライブ進行を複数の管理画面タブ
-// （例：/live/hostを開いたタブと、RootLayoutの常駐コントローラーが動く別タブ）が
-// 同時に検知した場合でも、実際に行を更新できたタブだけがupdated:trueを受け取り、
-// 後続処理（ターンの状態更新・演出締切の設定等）を行う。既に他のタブが同じ遷移を
-// 済ませていた場合はWHERE条件に一致する行が無く0行更新になるが、これはエラー
-// ではなく「想定内の正常系」としてupdated:falseを返す（呼び出し側は後続処理を
-// スキップするだけで良い）。
-// expectedTurnIdをundefinedにすると、current_turn_idの一致は確認しない
-// （interludeやgroup_resultからfinal_resultへの遷移など、current_turn_idを
-// 問わない遷移向け）。
-async function updateLiveIfPhase(
-  id: string,
-  expectedPhase: LivePhase,
-  expectedTurnId: string | null | undefined,
-  patch: Partial<LiveRow>,
-): Promise<{ ok: boolean; updated: boolean; error: unknown }> {
-  let query = supabase.from("lives").update(patch).eq("id", id).eq("current_phase", expectedPhase);
-  if (expectedTurnId !== undefined) {
-    query = expectedTurnId === null
-      ? query.is("current_turn_id", null)
-      : query.eq("current_turn_id", expectedTurnId);
-  }
-  const { data, error } = await query.select();
-  if (error) {
-    console.error("updateLiveIfPhase failed", { id, expectedPhase, expectedTurnId, patch, error });
-    return { ok: false, updated: false, error };
-  }
-  const rows = (data ?? []) as LiveRow[];
-  if (rows.length === 0) {
-    // 0行更新：別の管理画面タブが既にこの遷移を行った後の可能性が高いが、
-    // Realtimeイベントは切断や通信状況によって取り逃すことがあるため、
-    // 「別タブが更新済みのはず」と決めつけてstateを古いまま放置しない。
-    // スライスゲート越しに対象ライブを再取得し、より新しい取得に追い越されて
-    // いなければ反映する（Realtimeの到着だけに依存しない）。
-    await loadSnapshotSlice<LiveRow | null>({
-      gate: liveGate,
-      fetch: () => fetchLiveRow(id),
-      stillCurrent: () => useLiveHostStore.getState().live?.id === id,
-      markPending: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
-      applyFresh: (row) => {
-        if (row) useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
-      },
-      markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
-    });
-    return { ok: true, updated: false, error: null };
-  }
-  applyAuthoritativeLive(rows[0]);
-  return { ok: true, updated: true, error: null };
-}
-
 // 現在のターンの回答キューを処理する：表示中(revealed)の回答が無く、
 // 未表示の回答があれば、一呼吸(revealDelayMs)置いてから1件だけrevealする。
 async function processRevealQueue(tickGeneration: number, tickLiveId: string | null) {
@@ -875,62 +850,60 @@ async function processRevealQueue(tickGeneration: number, tickLiveId: string | n
   const active = answers.find((a) => a.revealed_at && !a.resolved);
   if (active) return; // 既に表示中の回答があるので何もしない
 
-  // 直前の採点確定演出（フリップが消える→間を置いて玉が消える→得点表示→しばらく
-  // 見せる→間を置く）が終わるまでは、キューに残っていても次を表示しない
-  // （useLiveDemoStoreのprocessQueueがrevealGateUntilを見るのと同じ役割）。
-  if (live?.reveal_sequence_until && Date.now() < new Date(live.reveal_sequence_until).getTime()) {
-    return;
-  }
+  // 3回目レビュー対応（項目3）：以前はここでクライアントのDate.now()と
+  // live.reveal_sequence_untilを比較し、直前の採点確定演出（フリップが消える→
+  // 間を置いて玉が消える→得点表示→しばらく見せる→間を置く）中はRPC自体を
+  // 呼んでいなかった。reveal_next_answer_if_due自身がDBのnow()で同じ条件を
+  // 判定する（このファイル冒頭コメント・0079参照）ため、ここでの事前チェックは
+  // 端末時計のずれの影響を受けるだけの冗長なガードだった。削除し、判断は
+  // 常にRPC（＝DBのnow()）へ委ねる。
 
   // 持ち時間切れ後も、既にキューに積まれている(=時間内に投稿済みの)回答は打ち切らず、
   // 通常どおり一件ずつ表示・審査する（ギリギリで滑り込んできた回答も、ちゃんと表示されて
   // 評価が終わるまでは次のフェーズに進めない）。時間切れ後に新規のボット回答が
   // キューに追加されなくなるのはrunBotBehavior側のガードで担保しており、その結果
   // このキュー自体は時間切れ後は増えず、いずれ必ず空になる。
+  const queued = answers.some((a) => !a.revealed_at);
+  if (!queued) return;
 
-  const queued = answers.filter((a) => !a.revealed_at).sort((a, b) =>
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  if (queued.length === 0) {
-    pendingRevealAt = null;
-    return;
-  }
-
-  if (pendingRevealAt === null) {
-    pendingRevealAt = Date.now() + LIVE_ROOM_TIMING.revealDelayMs;
-    return;
-  }
-  if (Date.now() < pendingRevealAt) return;
-
-  const target = queued[0];
-  const now = Date.now();
-  // reveal 更新の直前でもう一度凍結を確認する（P2：多層防御）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-  // 2026-09-09（複数管理画面タブ対策）：revealed_at is null AND resolved=false
-  // の行だけを対象にする。複数タブが同時に同じ回答をrevealしようとしても、
-  // 実際に更新できた1つのタブだけが0件でない結果(revealedRows)を受け取る
-  // （0行更新＝別タブが既にrevealした後は、想定内としてここで終える）。
-  const { data: revealedRows, error } = await supabase
-    .from("answers")
-    .update({
-      revealed_at: new Date(now).toISOString(),
-      judging_ends_at: new Date(now + LIVE_ROOM_TIMING.judgeMs).toISOString(),
+  // 2026-09-25（司会不在時に未発表回答で停止する問題への対応）：以前はここで
+  // クライアントのDate.now()から計算した約2.2秒のドラマチックポーズを
+  // ローカル変数(pendingRevealAt)で管理し、生のanswers.update({revealed_at,
+  // judging_ends_at})を行っていた（RLSのis_host()のみで保護、締切確認なし）。
+  // このため司会ブラウザが閉じるとこの処理自体が二度と走らず、未発表回答が
+  // 永久に残っていた。reveal_next_answer_if_due RPCへ移し、ドラマチックポーズ
+  // 自体もlives.next_reveal_pending_at（DB時刻）で管理する。観客・回答者側の
+  // 補助tick（useLiveFollowerStore.ts）も同じRPCを呼ぶため、司会ブラウザが
+  // 落ちていても誰かが画面を開いていれば未発表回答の表示から先へ進める。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  const { data: revealData, error: revealError } = await supabase
+    .rpc("reveal_next_answer_if_due", {
+      p_live_id: live.id,
+      p_expected_turn_id: live.current_turn_id,
     })
-    .eq("id", target.id)
-    .is("revealed_at", null)
-    .eq("resolved", false)
-    .select("id");
-  pendingRevealAt = null;
-  if (error) {
-    console.error("processRevealQueue: revealの更新に失敗", error);
+    .single();
+  if (revealError) {
+    console.error("reveal_next_answer_if_due failed", revealError);
     return;
   }
-  if (!revealedRows || revealedRows.length === 0) {
-    // 0行更新：別のタブが既にこの回答をrevealした可能性が高いが、Realtimeイベントは
-    // 切断・通信状況によって取り逃すことがあるため、決めつけずDBの現在ターンの
-    // answers/scoresを取り直してローカルstateを追いつかせる（Realtimeの到着だけに
-    // 依存しない）。
-    await resyncAnswersAndScoresForCurrentLive();
+  const revealResult = revealData as {
+    updated: boolean;
+    live: LiveRow | null;
+    answer: AnswerRow | null;
+  };
+  if (revealResult.live) {
+    applyAuthoritativeLive(revealResult.live);
+  }
+  if (!revealResult.updated || !revealResult.answer) {
+    // next_reveal_pending_atが立っている（ドラマチックポーズ待ち）間は、想定
+    // 内の「まだ時間ではない」だけなので、tickのたびに毎回resyncするような
+    // 重い処理はしない（500msごとに呼ばれるため、次tickで自然に再試行される）。
+    // next_reveal_pending_atがnull（＝DB側は「表示すべき未発表回答が無い」か
+    // 「既に表示中の回答がある」と判断した）にも関わらずローカルではまだ
+    // キューがあると思っている場合だけ、決めつけずにDBから最新状態を取り直す。
+    if (revealResult.live && revealResult.live.next_reveal_pending_at === null) {
+      await resyncAnswersAndScoresForCurrentLive();
+    }
     return;
   }
   const currentTurnId = useLiveHostStore.getState().live?.current_turn_id;
@@ -977,161 +950,61 @@ async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
     return;
   }
 
-  const turn = state.turns.find((t) => t.id === active.turn_id);
-  if (!turn) return;
-
-  // 2026-09-03:「途中退場した参加者を審査対象から除外する」対応。退場済み
-  // (kicked_at)の参加者は、以降このライブで採点したことにされる／採点済み
-  // 扱いの分母に含まれることが無いようにする（DB側のRLSでも別途拒否している）。
-  const eligibleJudges = state.participants.filter(
-    (p) => p.role === "player" && p.group_id !== turn.group_id && !p.kicked_at,
-  );
-  const votedJudgeIds = new Set(state.scores.map((s) => s.judge_participant_id));
-  const allVoted =
-    eligibleJudges.length > 0 &&
-    eligibleJudges.every((p) => votedJudgeIds.has(p.id));
-  const deadlinePassed =
-    Date.now() >= new Date(active.judging_ends_at).getTime() + LIVE_ROOM_TIMING.judgeGraceMs;
-
-  if (!allVoted && !deadlinePassed) return;
+  // 2026-09-25（0079対応・採点確定処理の原子化）：以前はここから、DBの最新scoresを
+  // 取り直して確定条件を再確認し(P2多層防御)、answers.resolved等の確定UPDATEと
+  // lives.reveal_sequence_untilの更新を「別々の」Supabase呼び出しで行っていた。
+  // 前者だけ成功し後者が失敗すると、得点演出を飛ばして時間が再開したり、残り0秒
+  // なら結果画面へ進んだりする部分成功があり得た。resolve_answer_if_dueは
+  // 「未確定確認→scoresのサーバー側集計→確定条件の再確認→answers確定→
+  // lives.reveal_sequence_untilの設定」を全て1つのSECURITY DEFINER RPC・1
+  // トランザクションで行う（scoreの集計もクライアントから受け取らず、常にDBの
+  // scores行から直接再計算するため、「取得に失敗したから0件」という誤判定も
+  // 起こり得ない）。is_host()も要求しないため、観客・回答者側からの補助tickでも
+  // 確定を進められる。
+  // 3回目レビュー対応（項目3）：以前はここで「全員投票済みか、クライアントの
+  // Date.now()がjudging_ends_at+judgeGraceMsを過ぎているか」を判定し、
+  // どちらも満たさなければRPC自体を呼んでいなかった。司会端末の時計が遅れて
+  // いると、実際にはDBの締切を過ぎていてもこの判定がいつまでも真にならず、
+  // 「審査中…」の表示が止まって見えることがあった。締切到達の最終判断は
+  // resolve_answer_if_due自身がDBのnow()で行うため、ここでは毎tick常にRPCを
+  // 呼び、締切前なら安全にupdated=falseが返るだけにする（クライアント時計へ
+  // の依存を無くす）。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
 
   resolvingAnswerIds.add(active.id);
   try {
-    // 2026-08-30:「ボットの回答席が光って音が鳴った直後、実際にはまだ全員の採点が
-    // 揃っていないのに別の人の回答席に切り替わる」不具合対策。scoresはRealtimeイベント
-    // 経由で更新されるため、直前の判定に使ったstate.scoresがまだ最新でないことがある。
-    // 実際に確定する直前でDBから直接最新の採点一覧を取得し直し、本当に確定条件
-    // （全員投票済み、または審査時間切れ）を満たしているか再確認してから確定する。
-    // 2026-09-12（再レビュー対応・P1-2）：この確定直前の再取得もscoresGateを
-    // 通し、取得完了までに、より新しいscores取得（Realtime起点など）が始まって
-    // いたら、この結果では確定処理を進めない（次tickで最新から再判定する）。
-    // 集計そのものはこのfreshScoresで行い、最終集計の正確性は落とさない。
-    const scoresToken = scoresGate.begin();
-    const freshScoresResult = await fetchScoresForAnswer(active.id);
-    if (!freshScoresResult.ok) {
-      // 2026-09-03:「Supabase取得エラーを空配列として上書きしない」対応。
-      // 取得に失敗した回を「まだ誰も採点していない(0点)」として確定してしまうと
-      // 実際には投票済みの点数が消えてしまう。何もせず既存stateを維持し、
-      // 次のtickで再試行する（確定を急がない）。確認状態も未確認へ戻す。
-      if (scoresGate.isCurrent(scoresToken)) useLiveHostStore.setState({ scoresSnapshot: null });
+    const { data: resolveData, error: resolveError } = await supabase
+      .rpc("resolve_answer_if_due", { p_answer_id: active.id })
+      .single();
+    if (resolveError) {
+      console.error("resolve_answer_if_due failed", resolveError);
       return;
     }
-    if (!scoresGate.isCurrent(scoresToken)) {
-      // より新しいscores取得に追い越された。この（古い）結果では進めない。
-      return;
-    }
-    const sNow = useLiveHostStore.getState();
-    if (
-      sNow.live?.id !== state.live.id ||
-      sNow.live?.current_turn_id !== state.live.current_turn_id ||
-      !sNow.answers.some((a) => a.id === active.id && a.revealed_at && !a.resolved)
-    ) {
-      // 取得中にライブ／ターン／表示中の回答が変わった。今の対象には反映しない。
-      return;
-    }
-    // 2026-09-03:「過去ライブのplayer participant IDによる不正採点混入」対策。
-    // DB側のRLS(scores_insert_own_as_player)に同一ライブ確認を追加したが、
-    // アプリ側でも多層防御として、集計前に必ず「現在のeligible judge ID集合」に
-    // 含まれるscoresだけを対象にする（想定外の参加者IDのscoreが混ざっていても
-    // 合計点・top_score_votes・満点判定には一切反映されないようにする）。
-    // fetchScoresForAnswer の await をまたいだ後の再確認（P2）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-    const eligibleJudgeIds = new Set(eligibleJudges.map((p) => p.id));
-    const freshScores = freshScoresResult.data.filter((s) =>
-      eligibleJudgeIds.has(s.judge_participant_id),
-    );
-    const freshVotedJudgeIds = new Set(freshScores.map((s) => s.judge_participant_id));
-    const freshAllVoted =
-      eligibleJudges.length > 0 && eligibleJudges.every((p) => freshVotedJudgeIds.has(p.id));
-    const freshDeadlinePassed =
-      Date.now() >= new Date(active.judging_ends_at).getTime() + LIVE_ROOM_TIMING.judgeGraceMs;
-    if (!freshAllVoted && !freshDeadlinePassed) {
-      // まだ確定できない。取得し直した最新の採点をstateに反映し、次のtickで
-      // 正しい状態から続きを判定できるようにする（scoresGate最新確認済み）。
-      useLiveHostStore.setState({
-        scores: freshScores,
-        scoresSnapshot: {
-          liveId: state.live.id,
-          turnId: state.live.current_turn_id!,
-          answerId: active.id,
-        },
-      });
-      return;
-    }
-
-    const scoreTotal = freshScores.reduce((sum, s) => sum + s.points, 0);
-    const topScoreVotes = freshScores.filter((s) => s.points === 3).length;
-    const laughTriggered = topScoreVotes > Math.floor(eligibleJudges.length / 2);
-
-    // 確定 UPDATE の直前でもう一度凍結を確認する（P2：多層防御）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-    // 2026-09-09（複数管理画面タブ対策）：resolved=falseの行だけを対象にする。
-    // 複数タブが同時に同じ回答を確定しようとしても、実際に更新できた1つの
-    // タブだけが0件でない結果(resolvedRows)を受け取り、演出締切の設定・
-    // resolvedAnswersへの追記まで行う（0行更新＝別タブが既に確定済みは
-    // 想定内の正常系としてここで終える）。
-    const { data: resolvedRows, error } = await supabase
-      .from("answers")
-      .update({
-        resolved: true,
-        score_total: scoreTotal,
-        top_score_votes: topScoreVotes,
-        judge_count: eligibleJudges.length,
-        laugh_triggered: laughTriggered,
-      })
-      .eq("id", active.id)
-      .eq("resolved", false)
-      .select("id");
-
-    if (error) {
-      console.error("resolveIfDue: 採点確定の更新に失敗", error);
-      return;
-    }
-    if (!resolvedRows || resolvedRows.length === 0) {
-      // 0行更新：別のタブが既にこの回答を確定済みの可能性が高いが、Realtime
-      // イベントは切断・通信状況によって取り逃すことがあるため、決めつけず
-      // DBの現在ターンのanswers/scores、およびlives（reveal_sequence_until等）を
-      // 取り直してローカルstateを追いつかせる（Realtimeの到着だけに依存しない）。
+    const resolveResult = resolveData as {
+      updated: boolean;
+      live: LiveRow | null;
+      answer: AnswerRow | null;
+    };
+    if (!resolveResult.updated || !resolveResult.answer || !resolveResult.live) {
+      // 別タブが既に確定済み、または（審査員の投票が届いたばかり等で）まだ
+      // 条件を満たしていなかった。Realtimeの到着だけに依存せず、決めつけずに
+      // 最新状態を取り直す（従来のresync時と同じ考え方）。
       await resyncAnswersAndScoresForCurrentLive();
-      if (state.live) {
-        const liveId = state.live.id;
-        await loadSnapshotSlice<LiveRow | null>({
-          gate: liveGate,
-          fetch: () => fetchLiveRow(liveId),
-          stillCurrent: () => useLiveHostStore.getState().live?.id === liveId,
-          markPending: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
-          applyFresh: (row) => {
-            if (row) useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
-          },
-          markUnconfirmed: () => useLiveHostStore.setState({ liveSnapshotConfirmed: false }),
-        });
-      }
       return;
     }
 
-    // 採点確定と同時に、演出シーケンス（フリップが消える→間を置く→玉が消える→
-    // 得点表示→しばらく見せる→間を置く）が終わるまでの締切を全クライアントに配信する。
-    // これによりlives.answering_paused（isAnsweringBusy経由）が、この一連の間ずっと
-    // trueのままになり、他の参加者の送信もロックされ続ける。
-    if (state.live) {
-      await updateLive(state.live.id, {
-        reveal_sequence_until: new Date(Date.now() + REVEAL_SEQUENCE_MS).toISOString(),
-      });
-    }
+    applyAuthoritativeLive(resolveResult.live);
 
     if (state.live?.current_turn_id) {
       const resolveLiveId = state.live.id;
       const resolveTurnId = state.live.current_turn_id;
       const answersToken = answersGate.begin();
       const answersResult = await fetchAnswersForTurn(resolveTurnId);
-      const resolvedEntry: AnswerRow = {
-        ...active,
-        resolved: true,
-        score_total: scoreTotal,
-        top_score_votes: topScoreVotes,
-        judge_count: eligibleJudges.length,
-        laugh_triggered: laughTriggered,
-      };
+      // 採点内訳の表示(resolvedScoresByAnswer)専用の取得。確定の可否・集計結果
+      // 自体は既にRPC内でDBから直接計算済みのため、ここでの取得失敗が確定処理の
+      // 正確性に影響することはない（表示できる内訳が空になるだけ）。
+      const scoresResult = await fetchScoresForAnswer(active.id);
+      const resolvedEntry = resolveResult.answer;
       // resolvedAnswers（確定ログ）への追記は、この確定処理を実際に行った
       // 証拠なので常に反映する。answers本体の差し替えは、より新しいanswers取得に
       // 追い越されておらず、かつ同じ(liveId,turnId)のままの場合だけ行う。
@@ -1155,7 +1028,10 @@ async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
         resolvedAnswers: s.resolvedAnswers.some((a) => a.id === resolvedEntry.id)
           ? s.resolvedAnswers
           : [...s.resolvedAnswers, resolvedEntry],
-        resolvedScoresByAnswer: { ...s.resolvedScoresByAnswer, [active.id]: freshScores },
+        resolvedScoresByAnswer: {
+          ...s.resolvedScoresByAnswer,
+          [active.id]: scoresResult.ok ? scoresResult.data : [],
+        },
       }));
     }
   } finally {
@@ -1192,30 +1068,29 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
   if (!answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) return;
 
   const busy = isAnsweringBusy(state.answers, live);
+  // ローカルのbusy判定と現在のanswering_pausedが既に一致していれば、RPCを
+  // 呼ぶまでもない（従来どおり、ミスマッチのときだけ書き込みを試みる）。
+  if (busy === live.answering_paused) return;
 
-  if (busy && !live.answering_paused) {
-    const remaining = live.phase_deadline
-      ? new Date(live.phase_deadline).getTime() - Date.now()
-      : 0;
-    // pause UPDATE の直前でもう一度確認する（P2：多層防御）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-    await updateLive(live.id, {
-      answering_paused: true,
-      answering_remaining_ms: Math.max(0, remaining),
-      phase_deadline: null,
-    });
+  // 2026-09-25（0079対応）：以前はここでbusy判定の結果をそのままUPDATEしていた
+  // （クライアントの古いstateに基づく判断を信じていた）。sync_answering_pause_if_due
+  // はbusy判定・現在のanswering_paused・残り時間の計算を全てRPC内で行ロック後に
+  // 再計算するため、複数タブ・順序逆転・同時実行でも矛盾した状態にならない。
+  // is_host()を要求しないため、観客・回答者側からの補助tickでも呼べる。
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  const { data: pauseData, error: pauseError } = await supabase
+    .rpc("sync_answering_pause_if_due", {
+      p_live_id: live.id,
+      p_expected_turn_id: live.current_turn_id,
+    })
+    .single();
+  if (pauseError) {
+    console.error("sync_answering_pause_if_due failed", pauseError);
     return;
   }
-
-  if (!busy && live.answering_paused) {
-    const remaining = live.answering_remaining_ms ?? 0;
-    // resume UPDATE の直前でもう一度確認する（P2：多層防御）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-    await updateLive(live.id, {
-      answering_paused: false,
-      phase_deadline: new Date(Date.now() + remaining).toISOString(),
-      answering_remaining_ms: null,
-    });
+  const pauseResult = pauseData as { updated: boolean; live: LiveRow | null };
+  if (pauseResult.live) {
+    applyAuthoritativeLive(pauseResult.live);
   }
 }
 
@@ -1257,7 +1132,12 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
     });
   // 持ち時間が切れた後は、新しく回答を送信させない（既に表示中の1件への採点は
   // 引き続き受け付ける＝現在進行中の演出を壊さず、時間切れ後の"新規差し込み"だけ止める）。
-  const answeringTimeUp = answeringRemainingMsTrue !== null && answeringRemainingMsTrue <= 0;
+  // 4回目レビュー対応：ローカルカウンタではなく、サーバー同期時計とDBのphase_deadline
+  // から判断する（ボット制御の補助。DB進行の許可条件ではない）。
+  const answeringTimeUp =
+    !live.answering_paused &&
+    !!live.phase_deadline &&
+    (serverClock.nowIfFresh() ?? -Infinity) >= new Date(live.phase_deadline).getTime();
   // 「予約送信」を無くす：誰かの回答がまだキューに残っている・表示中・演出シーケンス中
   // (isAnsweringBusy)の間は、ボットにも新しい回答を送信させない。1人ぶんの
   // 「送信→回答席が光る→回答が出る→評価→玉が落ちる→フリップが消える→玉が消える→
@@ -1475,22 +1355,9 @@ async function hydrateHostForActiveLive(
           markUnconfirmed: () => {}, // 表示は維持。ログ用なので進行は止めない
         }),
       loadScores: () => refreshScoresForActiveAnswer(),
-      restoreAnsweringTimer: () => {
-        const l = get().live;
-        if (l && l.id === targetLiveId && l.current_phase === "answering") {
-          answeringRemainingMsTrue = l.answering_paused
-            ? (l.answering_remaining_ms ?? 0)
-            : l.phase_deadline
-              ? Math.max(0, new Date(l.phase_deadline).getTime() - Date.now())
-              : null;
-          lastAnsweringTickAt = Date.now();
-        } else if (l && l.id === targetLiveId) {
-          answeringRemainingMsTrue = null;
-          lastAnsweringTickAt = null;
-        }
-        // l が targetLiveId でない（別ライブへ切り替わった）ときは触らない
-        // ＝ hydrateAfterLive 側が target-changed で中断する。
-      },
+      // 4回目レビュー対応：ローカルの残り時間カウンタを廃止したため、復元すべき
+      // ローカル状態は無い（回答終了はDBのnow()だけで判断する）。
+      restoreAnsweringTimer: () => {},
       finishLoading: (anyUnconfirmed) =>
         set({
           loading: false,
@@ -1548,14 +1415,12 @@ function mapHydrateToHydration(o: HydrateOutcome): HostHydrationOutcome {
 // - subscribedLiveId === live.id：進行に必要な全 Realtime チャンネルが実際に
 //   SUBSCRIBED になった（onChannelStatus が集約。CHANNEL_ERROR 等でクリアされる）
 // - runtimeReadyLiveId === live.id：hydrate が SUBSCRIBED 待ちまで完了して確立を記録
-// - answering なら ローカル残り時間を復元済み
-// のすべてが揃って初めて true。false の間、advanceIfDue は完全復旧
+// // のすべてが揃って初めて true。false の間、advanceIfDue は完全復旧
 // （ensureHostRecovery、2秒throttle）へ合流し、自動進行を凍結する。
 function isHostRuntimeEstablished(live: LiveRow): boolean {
   if (tickTimer === null) return false;
   if (subscribedLiveId !== live.id) return false;
   if (runtimeReadyLiveId !== live.id) return false;
-  if (live.current_phase === "answering" && lastAnsweringTickAt === null) return false;
   return true;
 }
 
@@ -1732,17 +1597,6 @@ async function advanceIfDue() {
       return;
     }
 
-    // src/store/useLiveDemoStore.tsのtick()と同じ考え方：このtickを始める時点でbusy
-    // (審査中の1件がある、未表示のキューが残っている、または演出シーケンス中)なら、
-    // 持ち時間の予算を消費しない。busyでなければ、前回tickからの実経過時間(dt)ぶんだけ
-    // answeringRemainingMsTrueを減らす。
-    const now = Date.now();
-    const dt = Math.max(0, now - (lastAnsweringTickAt ?? now));
-    lastAnsweringTickAt = now;
-    if (!isAnsweringBusy(state.answers, live) && answeringRemainingMsTrue !== null) {
-      answeringRemainingMsTrue = Math.max(0, answeringRemainingMsTrue - dt);
-    }
-
     // 2026-09-13（再レビュー対応・P2）：各awaitの「前」に凍結を再確認しながら順に
     // 実行する。processRevealQueueのawait中にRealtime取得が始まってスライスが
     // 未確認になった場合、runBotBehavior以降は実行しない。
@@ -1757,121 +1611,52 @@ async function advanceIfDue() {
     );
     if (guarded.blockedAt !== null) return;
 
-    if (answeringRemainingMsTrue === null || answeringRemainingMsTrue > 0) return;
-    const freshState = useLiveHostStore.getState();
-    const latest = freshState.live;
-    if (!latest || latest.current_phase !== "answering") return;
-
-    // 2026-08-30:「時間切れギリギリで投稿された回答が無視されて次のフェーズに進んで
-    // しまう」不具合対策。answersはRealtimeイベント経由で更新されるため、投稿直後は
-    // まだこのクライアントのstate.answersに反映されていないことがある。フェーズを
-    // 進める直前は必ずDBから直接最新の回答一覧を取得して確認し、state.answersの
-    // キャッシュだけに頼らないようにする（ギリギリの回答も必ず表示・評価されてから
-    // 次のフェーズに進むようにする）。
-    const dbAnswersToken = latest.current_turn_id ? answersGate.begin() : null;
-    const dbAnswersResult = latest.current_turn_id
-      ? await fetchAnswersForTurn(latest.current_turn_id)
-      : { ok: true as const, data: freshState.answers };
-    if (!dbAnswersResult.ok) {
-      // 2026-09-03:「回答一覧取得失敗時に『未処理回答なし』と誤認して次フェーズへ
-      // 進まない」対応。取得に失敗した場合は「未確認」であって「無い」わけではない
-      // ため、進行を止めて次のtickで再取得を試みる。確認状態も未確認へ戻す。
-      if (latest.current_turn_id && dbAnswersToken !== null && answersGate.isCurrent(dbAnswersToken)) {
-        useLiveHostStore.setState({ answersSnapshot: null });
-      }
-      return;
-    }
-    const dbAnswers = dbAnswersResult.data;
-    // より新しいanswers取得に追い越されておらず、かつ同じlive/turnのままなら、
-    // 取得し直した最新の回答をstateへ反映し、この(liveId,turnId)についての
-    // answersSnapshotを確認済みに更新する（次tickのガード・processRevealQueue等が
-    // 追いついた状態から続けられるように）。追い越されていれば新しい取得結果に任せる。
-    const dbAnswersFresh =
-      latest.current_turn_id !== null &&
-      dbAnswersToken !== null &&
-      answersGate.isCurrent(dbAnswersToken) &&
-      useLiveHostStore.getState().live?.id === latest.id &&
-      useLiveHostStore.getState().live?.current_turn_id === latest.current_turn_id;
-    if (dbAnswersFresh && latest.current_turn_id) {
-      useLiveHostStore.setState({
-        answers: dbAnswers,
-        answersSnapshot: { liveId: latest.id, turnId: latest.current_turn_id },
-      });
-    } else if (latest.current_turn_id) {
-      // 追い越された／対象が変わった：このtickでは遷移まで進めず、次tickに委ねる。
-      return;
-    }
-    if (isAnsweringBusy(dbAnswers, latest)) {
-      return; // 現在表示中の1件・演出シーケンス・未表示の回答が残っている間は待つ
-    }
-    // fetchAnswersForTurnのawaitをまたいだ後の最終確認（P2-1）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-    // 2026-09-09（再レビュー対応）：以前はここでanswringRemainingMsTrue/
-    // lastAnsweringTickAtを両方nullへ戻してからDB更新を試みていたが、その後の
-    // 更新が通信エラーで失敗すると、次のtickの時点でanswringRemainingMsTrueが
-    // nullのため「if (answeringRemainingMsTrue === null || ... > 0) return;」に
-    // 引っかかり、二度とこの遷移を試みられなくなっていた（0秒のまま永久停止）。
-    // 更新に成功した（＝自分がこの遷移を行った）ことを確認できるまでは0のまま
-    // 維持し、次のtickで再試行できるようにする。
-    answeringRemainingMsTrue = 0;
-
-    // RPC直前の最終確認（P2-1）：ここまでのawaitの間に同期中/stop/対象変更に
-    // なっていたら遷移RPCを撃たない（answeringRemainingMsTrueは0のまま＝次tick再試行）。
-    if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
-
-    // reveal_sequence_untilは意図的にここに含めない：もしDBにこの列がまだ無い環境
-    // （マイグレーション未適用）だと、存在しない列を含むUPDATEはPostgreSQL側で
-    // エラーになりUPDATE全体が失敗する。これをcurrent_phase遷移と同じ呼び出しに
-    // 混ぜていたせいで、マイグレーション未適用の環境ではフェーズ遷移そのものが
-    // 常に失敗し、時間切れになっても画面が進まなくなっていた。
-    // 2026-09-09（再レビュー対応・0065）：以前はupdateLiveIfPhase（lives更新）＋
-    // 別呼び出しのturns status更新という2段階だったため、turns更新のエラーを
-    // 確認しておらず、また途中で失敗した場合に両方をロールバックする手段も
-    // 無かった。現在ターンのdone化とlives更新を1つのSECURITY DEFINER RPC
-    // （1トランザクション、is_host()確認・行ロック・期待するphase/turn_idの
-    // 確認込み）にまとめた。複数タブから同時に呼ばれても実際の遷移は1回だけ、
-    // 既に他タブが遷移済みならupdated:falseが返る（エラーにはならない）。
-    const { data: advanceData, error: advanceError } = await supabase
-      .rpc("host_advance_answering_to_group_result", {
-        p_live_id: latest.id,
-        p_expected_turn_id: latest.current_turn_id,
-        p_group_result_deadline: new Date(Date.now() + LIVE_ROOM_TIMING.groupResultMs).toISOString(),
-      })
-      .single();
-
-    if (advanceError) {
-      console.error("host_advance_answering_to_group_result failed", advanceError);
-      // 通信エラー等：answeringRemainingMsTrueは0のままなので、次のtickで再試行する。
-      return;
-    }
-
-    const advanceResult = advanceData as { updated: boolean; live: LiveRow | null };
-    if (advanceResult.live) {
-      applyAuthoritativeLive(advanceResult.live);
-    }
-
-    if (advanceResult.updated) {
-      // 自分の呼び出しで遷移できた：ローカルタイマーをクリアする。
-      answeringRemainingMsTrue = null;
-      lastAnsweringTickAt = null;
-      return;
-    }
-
-    if (advanceResult.live && advanceResult.live.current_phase !== "answering") {
-      // 0行更新：RPCの戻り値から、別タブが既に本当に遷移済みだったと確認できた。
-      // このタブのローカルタイマーもクリアしてよい。
-      answeringRemainingMsTrue = null;
-      lastAnsweringTickAt = null;
-    }
-    // まだ"answering"のまま（何らかの理由でexpected turn_idが一致しなかった等）
-    // なら、answeringRemainingMsTrueは0のままにしておき、次のtickで再試行する。
+    // 4回目レビュー対応：以前はここで「端末側で自前に減算したローカル残り時間
+    // (answeringRemainingMsTrue)が0になるまで」進行RPCを呼ばなかった。ローカルの
+    // 残り時間は端末時計・tick間隔・復元時の値に左右され、司会端末の時計が遅れて
+    // いる場合などにDBの締切を過ぎても0にならず進行が止まり得た。ローカル残り時間は
+    // 進行の許可条件から完全に外し、締切前か・一時停止中か・未表示/未確定の回答が
+    // 残っているか・演出中か、の判断は全てhost_advance_answering_to_group_result
+    // 自身（DBのnow()と行ロック後のDB状態）に委ねる。締切前などは安全にupdated=false
+    // が返るだけで、no-opの間に全件再取得はしない（DB側で未処理回答の有無も数える
+    // ため、以前ここにあった事前の回答一覧の再取得も不要）。
+    // 通信量は、single-flight＋performance.now()基準の最小間隔で抑える。
+    const outcome = await tryAdvanceAnswering({
+      advancer: answeringAdvancer,
+      perfNow: () => performance.now(),
+      minIntervalMs: ANSWERING_ADVANCE_MIN_INTERVAL_MS,
+      live: useLiveHostStore.getState().live,
+      isFrozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      callRpc: async (l) => {
+        const { data, error } = await supabase
+          .rpc("host_advance_answering_to_group_result", {
+            p_live_id: l.id,
+            p_expected_turn_id: l.current_turn_id,
+            p_group_result_duration_ms: getPhaseDurationsMs(live.timing_profile).group_result,
+          })
+          .single();
+        if (error) console.error("host_advance_answering_to_group_result failed", error);
+        return { data: data as { updated: boolean; live: LiveRow | null } | null, error };
+      },
+      applyLive: (l) => applyAuthoritativeLive(l),
+      afterAdvanced: async (l) => {
+        if (l.current_turn_id) await refreshAnswersForTurn(l.current_turn_id);
+      },
+    });
+    void outcome;
     return;
   }
 
   const latest = useLiveHostStore.getState().live;
   if (!latest) return;
-  if (!latest.phase_deadline) return;
-  if (Date.now() < new Date(latest.phase_deadline).getTime()) return;
+  // 3回目レビュー対応（項目3）：以前はここでクライアントのDate.now()と
+  // latest.phase_deadline（DBが設定した絶対時刻）を比較し、締切前と判断した
+  // 場合はhost_advance_*系RPC自体を呼んでいなかった。司会端末の時計が遅れて
+  // いると、実際にはDBの締切をとうに過ぎていてもこの比較がいつまでも真になり、
+  // フェーズが0秒のまま長時間止まって見える不具合があった（DB側は既に
+  // 「phase_deadlineをnow()で過ぎているか」を必ず再確認して安全にno-opを返す
+  // ため、ここでの事前チェックは端末時計のずれの影響を受けるだけの冗長な
+  // ガードだった）。削除し、締切到達の最終判断は常にRPC（＝DBのnow()）へ委ねる。
 
   if (live.current_phase === "group_result") {
     if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
@@ -1882,11 +1667,14 @@ async function advanceIfDue() {
     // 期待するphase/turn_idの確認込み）にまとめた。次ターンがなければRPC内で
     // final_resultへ進める。複数タブから同時に呼ばれても実際の遷移は1回だけ、
     // 既に他タブが遷移済みならupdated:falseが返る（エラーにはならない）。
+    // 2026-09-25（0079対応）：締切はduration_msから生成させ、is_host()も
+    // 要求しない（詳細は上のhost_advance_answering_to_group_result呼び出しの
+    // コメント参照）。
     const { data: advanceData, error: advanceError } = await supabase
       .rpc("host_advance_group_result_to_next", {
         p_live_id: live.id,
         p_expected_turn_id: live.current_turn_id,
-        p_topic_reveal_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.topic_reveal!).toISOString(),
+        p_topic_reveal_duration_ms: getPhaseDurationsMs(live.timing_profile).topic_reveal,
       })
       .single();
 
@@ -1915,28 +1703,55 @@ async function advanceIfDue() {
 
   if (live.current_phase === "topic_reveal") {
     if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
-    const answerMs = PHASE_DURATIONS_MS.answering!;
+    // 3回目レビュー対応（項目2）：このライブのtiming_profileから取得する
+    // （以前はビルド時のNEXT_PUBLIC_LIVE_TIMING_MODEだけで決まる固定値だった
+    // ため、通し稽古ビルドでDB側の締切と食い違うことがあった）。
+    const answerMs = getPhaseDurationsMs(live.timing_profile).answering!;
     // ローカルの残り時間トラッキングは、このタブがDB更新に勝ったかどうかに
     // 関わらず初期化する（後続のadvanceIfDueの「answering」分岐がこの
-    // ローカル値を見て進行判定するため。DB上の実際の遷移自体は下の
-    // updateLiveIfPhaseがガードするので、二重にはならない）。
-    answeringRemainingMsTrue = answerMs;
-    lastAnsweringTickAt = Date.now();
-    // 2026-09-09（複数管理画面タブ対策）：想定している現在の状態(topic_reveal・
-    // このturn_id)と一致する行だけを更新する。
-    await updateLiveIfPhase(live.id, "topic_reveal", live.current_turn_id, {
-      current_phase: "answering",
-      phase_deadline: new Date(Date.now() + answerMs).toISOString(),
-    });
+    // ローカル値を見て進行判定するため。DB上の実際の遷移自体は下のRPCが
+    // ガードするので、二重にはならない）。
+    // 2026-09-25（0079対応）：以前は生のupdateLiveIfPhase（クライアント直接
+    // UPDATE、締切超過のサーバー確認なし）だった。締切をDBのnow()から生成し、
+    // 締切超過をサーバー側で確認するSECURITY DEFINER RPCに置き換えた。
+    // is_host()を要求しないため、観客・回答者側からの補助tickでも進められる。
+    const { data: revealData, error: revealError } = await supabase
+      .rpc("host_advance_topic_reveal_to_answering", {
+        p_live_id: live.id,
+        p_expected_turn_id: live.current_turn_id,
+        p_answering_duration_ms: answerMs,
+      })
+      .single();
+    if (revealError) {
+      console.error("host_advance_topic_reveal_to_answering failed", revealError);
+      return;
+    }
+    const revealResult = revealData as { updated: boolean; live: LiveRow | null };
+    if (revealResult.live) {
+      applyAuthoritativeLive(revealResult.live);
+    }
     return;
   }
 
   if (live.current_phase === "interlude") {
     if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
-    await updateLive(live.id, {
-      current_phase: "opening",
-      phase_deadline: new Date(Date.now() + PHASE_DURATIONS_MS.opening!).toISOString(),
-    });
+    // 2026-09-25（0079対応）：以前は生のupdateLive（期待フェーズの確認すら無い
+    // 単純UPDATE）だった。締切をDBのnow()から生成し、締切超過をサーバー側で
+    // 確認するSECURITY DEFINER RPCに置き換えた。
+    const { data: openingData, error: openingError } = await supabase
+      .rpc("host_advance_interlude_to_opening", {
+        p_live_id: live.id,
+        p_opening_duration_ms: getPhaseDurationsMs(live.timing_profile).opening,
+      })
+      .single();
+    if (openingError) {
+      console.error("host_advance_interlude_to_opening failed", openingError);
+      return;
+    }
+    const openingResult = openingData as { updated: boolean; live: LiveRow | null };
+    if (openingResult.live) {
+      applyAuthoritativeLive(openingResult.live);
+    }
     return;
   }
   // opening は「ゲームを開始する」ボタン(beginGame)が押されるまで自動では進めない。
@@ -2059,9 +1874,8 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     }
     cleanupChannels();
     initInFlight = null;
-    pendingRevealAt = null;
-    answeringRemainingMsTrue = null;
-    lastAnsweringTickAt = null;
+    answeringAdvancer.inFlight = false;
+    answeringAdvancer.lastAttemptPerf = -Infinity;
     // progressGeneration を +1 済み。進行中の retry の finally は
     // shouldReleaseRetryFlag(progressGeneration, myGeneration) が false になり、
     // ここで false へ戻したフラグを後から触らない（stop後の新しいretryの所有権を守る）。
@@ -2291,6 +2105,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         p_topic_bank_ids: entries.slice(0, neededTopics).map((entry) => entry.id),
         p_live_mode: input.liveMode,
         p_manual_official_sequence_number: input.manualOfficialSequenceNumber,
+        p_timing_profile: input.timingProfile,
       })
       .single();
     if (error) {
@@ -2378,11 +2193,18 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     return data;
   },
 
-  // 「参加受付を開始する」：旧startLive()のinsert部分をupdateに置き換えただけで、
-  // 以降のフェーズ自動進行(interlude→opening、advanceIfDue)は無改造で流用する。
-  // 事故防止：別タブ等から既に受付開始済みの場合に二重実行しないよう、
-  // current_phase='scheduled'であることをwhere条件に含めたガード付きupdateにする
-  // （closeLiveと同じ考え方）。対象0件なら状態が変わっている旨のエラーを返す。
+  // 「参加受付を開始する」(scheduled→interlude)。
+  // 3回目レビュー対応（項目1）：以前はクライアントのDate.now()から締切
+  // (phase_deadline)を作り、生のUPDATE（RLSのlives_write_host＝is_host()のみで
+  // 保護、current_phase='scheduled'をwhere条件に含めるだけ）で行っていた。
+  // 締切をクライアント時刻から作っていたため、司会端末の時計が進んでいる・
+  // 遅れていると最初の受付だけ早く進んだり0秒のまま止まったりし得た。
+  // open_reception RPC（0079）は、is_host()確認・対象行のfor updateロック・
+  // current_phase='scheduled'の確認をサーバー側で行った上で、締切をDBのnow()と
+  // このライブのtiming_profileから生成する。二重クリック・複数タブからの
+  // 同時実行は行ロックにより1回しか成功しない（2回目はupdated:falseで
+  // 「ライブの状態が別の操作によって変更されています」を返すだけでエラーには
+  // ならない）。
   openReception: async () => {
     const { live } = get();
     if (!live || live.current_phase !== "scheduled") {
@@ -2391,24 +2213,26 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         reason: "ライブの状態が別の操作によって変更されています。最新状態を取得してください。",
       };
     }
-    const phaseDeadline = new Date(Date.now() + LIVE_ROOM_TIMING.interludeMs).toISOString();
     const { data, error } = await supabase
-      .from("lives")
-      .update({ current_phase: "interlude", phase_deadline: phaseDeadline })
-      .eq("id", live.id)
-      .eq("current_phase", "scheduled")
-      .select()
-      .maybeSingle();
+      .rpc("open_reception", { p_live_id: live.id })
+      .single();
     if (error) {
-      set({ error: error.message });
-      return { ok: false, reason: error.message };
+      const message =
+        error.message.includes("not authorized")
+          ? "この操作を行う権限がありません"
+          : "受付開始の処理に失敗しました。時間をおいて再度お試しください。";
+      set({ error: message });
+      return { ok: false, reason: message };
     }
-    if (!data) {
+    const result = data as { updated: boolean; live: LiveRow | null; reason: string | null };
+    if (result.live) {
+      applyAuthoritativeLive(result.live);
+    }
+    if (!result.updated) {
       const message = "ライブの状態が別の操作によって変更されています。最新状態を取得してください。";
       set({ error: message });
       return { ok: false, reason: message };
     }
-    applyAuthoritativeLive(data as LiveRow);
     await logAdminAction({ action: "reception_opened", targetType: "lives", targetId: live.id });
     return { ok: true };
   },
@@ -2821,9 +2645,27 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       set({ error: error.message });
       return { ok: false, reason: error.message };
     }
-    const result = data as { closed: boolean; rewards_applied: boolean; rewards_error: string | null };
+    const result = data as {
+      closed: boolean;
+      rewards_applied: boolean;
+      rewards_error: string | null;
+      error_code: string | null;
+    };
     if (!result.closed) {
-      // 既に終了済み（二重クリック等）。UIだけ「開始前」に戻す。
+      // 2026-09-25（0079対応）：通常終了はfinal_resultからしか実行できない。
+      // これは「ライブが既に終了済み」とは別のケースなので、画面からライブを
+      // 消して「開始前」に戻してしまわないよう、区別してエラーを返す
+      // （途中で終了したい場合はemergencyCloseLiveを使う）。
+      if (result.error_code === "NOT_FINAL_RESULT") {
+        return {
+          ok: false,
+          reason: "まだ最終結果画面に到達していないため終了できません。途中で終了する場合は「緊急中止」を使用してください。",
+        };
+      }
+      if (result.error_code === "LIVE_NOT_FOUND") {
+        return { ok: false, reason: "ライブが見つかりませんでした。" };
+      }
+      // error_codeが無い＝既に終了済み（二重クリック等）。UIだけ「開始前」に戻す。
       cleanupChannels();
       liveGate.begin();
       childrenGate.begin();
@@ -2884,6 +2726,90 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       liveSnapshotConfirmed: true,
       error: result.rewards_applied ? null : s.error,
     }));
+    return { ok: true };
+  },
+
+  emergencyCloseLive: async (reason) => {
+    const { live } = get();
+    if (!live) return { ok: true };
+    // 2026-09-25追加：進行中の任意フェーズから終了できる（final_resultへ
+    // 到達していなくてもよい）が、報酬（ポイント・段位・実績・参加回数）は
+    // 一切付与しない（apply_live_rank_rewardsを一切呼ばず、DB側でも
+    // emergency_closed=trueのライブへの付与自体をLIVE_EMERGENCY_CLOSEDで
+    // 拒否する二重の防止線がある）。
+    const { data, error } = await supabase
+      .rpc("emergency_close_live", { p_live_id: live.id, p_reason: reason ?? null })
+      .single();
+    if (error) {
+      set({ error: error.message });
+      return { ok: false, reason: error.message };
+    }
+    const result = data as { updated: boolean; live: LiveRow | null; error_code: string | null };
+    if (!result.updated) {
+      // 2026-09-25（2回目レビュー対応）：final_resultからの緊急中止はDB側でも
+      // 拒否される。これは「既に終了済み」とは違うケースなので、画面から
+      // ライブを消して「開始前」に戻してしまわないよう区別する（最終結果では
+      // 通常のcloseLiveを使う）。
+      if (result.error_code === "FINAL_RESULT_USE_NORMAL_CLOSE") {
+        return {
+          ok: false,
+          reason: "最終結果画面に到達しているため緊急中止はできません。通常の「ライブを終了する」をご利用ください。",
+        };
+      }
+      if (result.error_code === "LIVE_NOT_FOUND") {
+        return { ok: false, reason: "ライブが見つかりませんでした。" };
+      }
+      // error_codeが無い＝既に終了済み（二重操作等）。UIだけ「開始前」に戻す。
+      cleanupChannels();
+      liveGate.begin();
+      childrenGate.begin();
+      answersGate.begin();
+      scoresGate.begin();
+      runtimeReadyLiveId = null;
+      set({
+        live: null,
+        participants: [],
+        profiles: [],
+        groups: [],
+        topics: [],
+        turns: [],
+        answers: [],
+        scores: [],
+        resolvedAnswers: [],
+        resolvedScoresByAnswer: {},
+        childrenSnapshotLiveId: null,
+        answersSnapshot: null,
+        scoresSnapshot: null,
+        liveSnapshotConfirmed: true,
+        error: null,
+      });
+      return { ok: true };
+    }
+    await logAdminAction({ action: "live_emergency_closed", targetType: "lives", targetId: live.id });
+    cleanupChannels();
+    useLiveBotStore.getState().removeAllBots();
+    liveGate.begin();
+    childrenGate.begin();
+    answersGate.begin();
+    scoresGate.begin();
+    runtimeReadyLiveId = null;
+    set({
+      live: null,
+      participants: [],
+      profiles: [],
+      groups: [],
+      topics: [],
+      turns: [],
+      answers: [],
+      scores: [],
+      resolvedAnswers: [],
+      resolvedScoresByAnswer: {},
+      childrenSnapshotLiveId: null,
+      answersSnapshot: null,
+      scoresSnapshot: null,
+      liveSnapshotConfirmed: true,
+      error: null,
+    });
     return { ok: true };
   },
 

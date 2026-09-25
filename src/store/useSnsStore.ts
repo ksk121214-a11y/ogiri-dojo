@@ -224,13 +224,18 @@ interface SnsState {
 type DbTopicRow = {
   id: string;
   body: string;
-  author_id: string;
+  // 2026-09-25（0078：アカウント削除で他人の投稿を物理削除しない対応）：
+  // アカウント削除時、本人の投稿のauthor_idはon delete set nullでNULLになる
+  // （行自体は物理削除されない）。ただし同時に本人の投稿はis_hidden化される
+  // ため、通常の一般利用者向けクエリでnullのauthor_idが現れることは無く、
+  // 管理者が非表示解除した場合の防御としてのみnullを許容する。
+  author_id: string | null;
   created_at: string;
 };
 type DbAnswerRow = {
   id: string;
   topic_id: string;
-  author_id: string;
+  author_id: string | null;
   body: string;
   likes: number;
   created_at: string;
@@ -238,16 +243,22 @@ type DbAnswerRow = {
 type DbCommentRow = {
   id: string;
   answer_id: string;
-  author_id: string;
+  author_id: string | null;
   body: string;
   created_at: string;
 };
 
+// author_idがnull（削除済みユーザー）の場合は専用のプレースホルダーIDに変換する。
+// "author-"始まりではないためダミー投稿者とは判定されず、実ユーザーの
+// sns_author_namesにも一致しないため、SnsAuthorBadge等は既存のフォールバック
+// 表示（「名無しの演者」）にそのまま倒れる。
+const DELETED_AUTHOR_ID = "deleted-user";
+
 function toAuthorIdWith(myUserId: string | null) {
-  return (id: string) => (id === myUserId ? "me" : id);
+  return (id: string | null) => (id === null ? DELETED_AUTHOR_ID : id === myUserId ? "me" : id);
 }
 
-function mapTopicRow(t: DbTopicRow, toAuthorId: (id: string) => string): SnsTopic {
+function mapTopicRow(t: DbTopicRow, toAuthorId: (id: string | null) => string): SnsTopic {
   return {
     id: t.id,
     body: t.body,
@@ -255,7 +266,7 @@ function mapTopicRow(t: DbTopicRow, toAuthorId: (id: string) => string): SnsTopi
     createdAtLabel: formatRelativeLabel(t.created_at),
   };
 }
-function mapAnswerRow(a: DbAnswerRow, toAuthorId: (id: string) => string): SnsAnswer {
+function mapAnswerRow(a: DbAnswerRow, toAuthorId: (id: string | null) => string): SnsAnswer {
   return {
     id: a.id,
     topicId: a.topic_id,
@@ -265,7 +276,7 @@ function mapAnswerRow(a: DbAnswerRow, toAuthorId: (id: string) => string): SnsAn
     createdAtLabel: formatRelativeLabel(a.created_at),
   };
 }
-function mapCommentRow(c: DbCommentRow, toAuthorId: (id: string) => string): SnsComment {
+function mapCommentRow(c: DbCommentRow, toAuthorId: (id: string | null) => string): SnsComment {
   return {
     id: c.id,
     answerId: c.answer_id,

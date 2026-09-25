@@ -2,7 +2,7 @@
 
 import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import DisplayNameSetupModal from "@/components/app/DisplayNameSetupModal";
 import InterludeScreen from "@/components/live-demo/InterludeScreen";
@@ -19,13 +19,18 @@ import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
 import OpeningView from "@/components/live-room/OpeningView";
 import StageAnsweringView from "@/components/live-room/StageAnsweringView";
 import TopicRevealView from "@/components/live-room/TopicRevealView";
-import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
-import { playBgm, retryCurrentBgm, stopBgm } from "@/lib/bgm";
+import { LegalConsentNote } from "@/components/legal/LegalLinks";
+import { getLiveRoomTiming } from "@/data/liveRoomTiming";
+import { playBgm, retryCurrentBgm, correctBgmPosition, stopBgm } from "@/lib/bgm";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { resolveLiveScreenGate } from "@/lib/liveGuestAccess";
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
-import { useTickingNow } from "@/lib/useTickingNow";
+import { createBgmSyncPlanner } from "@/lib/bgmSync";
+import { phaseRemainingSeconds } from "@/lib/liveRemaining";
+import { serverClock } from "@/lib/serverClockInstance";
+import { useServerClockState } from "@/lib/useServerNow";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -46,8 +51,9 @@ const PHASE_LABEL: Record<string, string> = {
 export default function LivePage() {
   const authUser = useAuthStore((s) => s.user);
   const authLoading = useAuthStore((s) => s.loading);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
-  const signInAsGuest = useAuthStore((s) => s.signInAsGuest);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
+  const signInAsGuest = useConsentGateStore((s) => s.requestGuestStart);
   const guestSigningIn = useAuthStore((s) => s.guestSigningIn);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
@@ -68,7 +74,6 @@ export default function LivePage() {
   const subscribe = useLiveFollowerStore((s) => s.subscribe);
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
 
-  const now = useTickingNow();
   const [joining, setJoining] = useState(false);
 
   // 2026-08-29:「お題発表・回答・審査で使う必須素材が、表示される瞬間に読み込み待ち
@@ -95,19 +100,66 @@ export default function LivePage() {
   // 同じ曲が既に鳴っている間はaudioManager側でシークしない＝再生位置は巻き戻らない）。
   const currentPhase = live?.current_phase ?? null;
   const phaseDeadline = live?.phase_deadline ?? null;
+  // 3回目レビュー対応（項目2）：このライブが実際に使うtiming_profileから解決する
+  // （DB側の進行RPCが参照するのと同じlives.timing_profile）。BGMの逆算開始位置
+  // だけの用途とはいえ、画面表示とDB判定の時間設定を必ず揃える。
+  const timingProfile = live?.timing_profile ?? null;
+  // 5回目レビュー対応：BGMの逆算開始位置はサーバー同期時計だけで決める。同期前は
+  // 位置を決めず待ち、3秒待っても同期できない場合だけ、誤った端末時刻から位置を作らず
+  // 先頭からの暫定再生にする。その後の同期成功（revisionの変化）で、必要なら一度だけ
+  // 正しい位置へ補正する（小さいずれは再スタートしない。bgmSync.ts参照）。
+  const clock = useServerClockState();
+  const currentTurnId = live?.current_turn_id ?? null;
+  const [clockWaitGaveUp, setClockWaitGaveUp] = useState(false);
   useEffect(() => {
-    const elapsedMsOf = (durationMs: number): number => {
-      if (!phaseDeadline) return 0;
-      const remainingMs = new Date(phaseDeadline).getTime() - Date.now();
-      return Math.max(0, durationMs - remainingMs);
+    const id = setTimeout(() => setClockWaitGaveUp(true), 3000);
+    return () => clearTimeout(id);
+  }, []);
+  const bgmPlannerRef = useRef(createBgmSyncPlanner());
+  const clockFresh = clock.fresh;
+  const clockRevision = clock.revision;
+  // 補正がnot_readyだった時の、上限付きの再試行（無限ループ・高頻度ポーリングを避ける）。
+  const [bgmRetryTick, setBgmRetryTick] = useState(0);
+  const bgmRetryCountRef = useRef(0);
+  useEffect(() => {
+    const timing = getLiveRoomTiming(timingProfile);
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const timed = (bgm: "entrance" | "live" | "waiting", durationMs: number) => {
+      if (!phaseDeadline) {
+        playBgm(bgm);
+        return;
+      }
+      const nowMs = serverClock.nowIfFresh();
+      const action = bgmPlannerRef.current.plan({
+        key: `${currentPhase}|${currentTurnId}`,
+        deadline: phaseDeadline,
+        fresh: nowMs !== null,
+        revision: clockRevision,
+        gaveUp: clockWaitGaveUp,
+        elapsedMs:
+          nowMs === null ? null : Math.max(0, durationMs - (new Date(phaseDeadline).getTime() - nowMs)),
+      });
+      if (action.kind === "play") {
+        playBgm(bgm, { startAtMs: action.startAtMs });
+        bgmPlannerRef.current.ack(action);
+      } else if (action.kind === "seek") {
+        const result = correctBgmPosition(bgm, action.startAtMs);
+        bgmPlannerRef.current.ack(action, result);
+        if (result === "not_ready" && bgmRetryCountRef.current < 5) {
+          bgmRetryCountRef.current += 1;
+          retryTimer = setTimeout(() => setBgmRetryTick((n) => n + 1), 500);
+        } else if (result !== "not_ready") {
+          bgmRetryCountRef.current = 0;
+        }
+      }
     };
 
     if (currentPhase === "topic_reveal") {
-      playBgm("entrance", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.topicRevealMs) });
+      timed("entrance", timing.topicRevealMs);
     } else if (currentPhase === "answering") {
-      playBgm("live", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.answerMs) });
+      timed("live", timing.answerMs);
     } else if (currentPhase === "group_result") {
-      playBgm("waiting", { startAtMs: elapsedMsOf(LIVE_ROOM_TIMING.groupResultMs) });
+      timed("waiting", timing.groupResultMs);
     } else if (currentPhase === "final_result") {
       playBgm("waiting");
     } else if (currentPhase === "interlude" || currentPhase === "opening") {
@@ -126,7 +178,10 @@ export default function LivePage() {
       // 「絶対に音が止まる」ことを優先し、念のため止めておく。
       stopBgm();
     }
-  }, [currentPhase, phaseDeadline]);
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [currentPhase, phaseDeadline, currentTurnId, timingProfile, clockFresh, clockRevision, clockWaitGaveUp, bgmRetryTick]);
 
   // ページ離脱時（ホームに戻る・他ページへ遷移等）は必ずBGMを止める。
   // closedフェーズに到達しないままアンマウントされるケースの保険（「終了しても音が鳴り続ける」対策）。
@@ -144,12 +199,8 @@ export default function LivePage() {
     return () => document.removeEventListener("pointerdown", retry);
   }, []);
 
-  const remainingSec =
-    live?.answering_paused && live.answering_remaining_ms != null
-      ? Math.ceil(live.answering_remaining_ms / 1000)
-      : live?.phase_deadline
-        ? Math.max(0, Math.ceil((new Date(live.phase_deadline).getTime() - now) / 1000))
-        : null;
+  const remaining = live ? phaseRemainingSeconds(live, clock) : { sec: null, syncing: false };
+  const remainingSec = remaining.sec;
 
   // 2026-09-13（0070ゲスト参加レビュー対応、再々レビュー2回目で本番ライブ限定の
   // ブロック分岐は廃止）：authLoading/未ログイン/profile取得中/ライブ取得中の
@@ -200,7 +251,7 @@ export default function LivePage() {
           onClick={async () => {
             setGuestSignInError(null);
             const result = await signInAsGuest();
-            if (!result.ok) setGuestSignInError(result.reason);
+            if (!result.ok) setGuestSignInError(result.reason ?? null);
           }}
           className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown disabled:opacity-50"
         >
@@ -209,6 +260,9 @@ export default function LivePage() {
         {guestSignInError && (
           <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{guestSignInError}</p>
         )}
+        {/* Xログイン・ゲスト観戦、両方のボタンの近くに表示する同意文言。既存の
+            ログイン/ゲスト参加処理（signInWithX/signInAsGuest）自体は変更しない。 */}
+        <LegalConsentNote className="mt-4 font-sans text-[11px] text-dojo-dark-brown/60" />
       </CenterMessage>
     );
   }
@@ -223,7 +277,7 @@ export default function LivePage() {
   if (screenGate === "live-loading") {
     return (
       <CenterMessage>
-        <p>{syncError ? "ライブ状態の取得に失敗しました" : "ライブ状態を復元中…"}</p>
+        <p>{syncError ? "ライブ状態の取得に失敗しました" : "ライブ入場中…"}</p>
         {syncError && (
           <>
             <p className="mt-2 max-w-xs font-sans text-xs text-dojo-dark-brown/70">
@@ -408,9 +462,9 @@ export default function LivePage() {
             <p className="font-brush text-xl text-dojo-curtain-red">
               {PHASE_LABEL[live.current_phase] ?? live.current_phase}
             </p>
-            {remainingSec !== null && (
+            {(remainingSec !== null || remaining.syncing) && (
               <p className="font-sans text-sm tabular-nums text-dojo-dark-brown">
-                残り{remainingSec}秒
+                {remaining.syncing ? "時刻を同期中…" : `残り${remainingSec}秒`}
                 {live.answering_paused && "（審査中は一時停止）"}
               </p>
             )}

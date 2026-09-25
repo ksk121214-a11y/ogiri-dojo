@@ -8,6 +8,7 @@ import JoinLiveButton from "@/components/home/JoinLiveButton";
 import NextLiveTicket from "@/components/home/NextLiveTicket";
 import StadiumAppShell from "@/components/home/StadiumAppShell";
 import { useLiveJoinFlow } from "@/components/home/useLiveJoinFlow";
+import { LegalLinksRow } from "@/components/legal/LegalLinks";
 import { formatScheduleReception, toScheduleEntryDate } from "@/lib/liveDateFormat";
 import { useLiveSchedulePlan } from "@/lib/useLiveSchedulePlan";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -72,11 +73,18 @@ export default function Home() {
           （明るい背景色向けのトーンダウン済みの色）を使う。 */}
       {!authLoading && !authUser && (
         <p className="text-center font-sans text-[11px] leading-relaxed text-[var(--muted-on-dark)]">
-          X連携はログイン確認にのみ使用します。
+          X連携は、ログイン認証、アカウントの識別及び初期プロフィールの作成に使用します。
           <br />
-          Xへの投稿・DM、タイムラインの取得・保存は行いません。
+          利用者本人のXアカウントからの自動投稿・DM送信、タイムラインの取得・保存は行いません。
+          <br />
+          なお、投稿内容・高座名・得点・順位等を運営が公式Xで紹介する場合があります（利用規約第8条）。
         </p>
       )}
+
+      {/* 画面下部の利用規約・プライバシーポリシー導線。ログイン状態によらず常に表示する
+          （既存のAccountSummary・ログイン導線とは独立しており、ログイン/ゲスト参加の
+          処理には一切影響しない）。 */}
+      <LegalLinksRow className="text-center font-sans text-[11px] text-[var(--muted-on-dark)]" />
     </StadiumAppShell>
   );
 }

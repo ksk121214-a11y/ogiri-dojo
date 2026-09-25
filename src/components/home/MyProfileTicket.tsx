@@ -10,6 +10,7 @@ import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { MAX_TICKETS, computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -41,7 +42,8 @@ export default function MyProfileTicket({
   onOpenEdit: () => void;
 }) {
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const profile = useProfileStore((s) => s.profile);
   const profileLoading = useProfileStore((s) => s.loading);
   const [xLoginError, setXLoginError] = useState<string | null>(null);

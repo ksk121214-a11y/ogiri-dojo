@@ -3,8 +3,10 @@ import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
 
 import AmbientBgmController from "@/components/app/AmbientBgmController";
 import AudioProvider from "@/components/app/AudioProvider";
+import ConsentRequiredGate from "@/components/app/ConsentRequiredGate";
 import HostProgressController from "@/components/app/HostProgressController";
 import StadiumSfxController from "@/components/app/StadiumSfxController";
+import ConsentGateModal from "@/components/legal/ConsentGateModal";
 
 import "./globals.css";
 
@@ -56,7 +58,8 @@ export default function RootLayout({
           <AmbientBgmController />
           <StadiumSfxController />
           <HostProgressController />
-          {children}
+          <ConsentRequiredGate>{children}</ConsentRequiredGate>
+          <ConsentGateModal />
         </AudioProvider>
       </body>
     </html>

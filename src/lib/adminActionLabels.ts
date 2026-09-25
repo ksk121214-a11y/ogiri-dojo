@@ -17,6 +17,7 @@ export const ACTION_LABEL: Record<string, string> = {
   capacity_updated: "最大人数・組数を変更した",
   game_started: "ゲームを開始した",
   live_closed: "ライブを終了した",
+  live_emergency_closed: "ライブを緊急中止した（報酬は付与されない）",
   participant_private_message_sent: "参加者に個別メッセージを送った",
   participant_kicked: "参加者を退場させた",
   participant_unkicked: "参加者の退場を解除した",
@@ -48,6 +49,7 @@ export const ACTION_LABEL: Record<string, string> = {
   user_suspend_permanent: "永久停止にした",
   user_lift: "利用停止を解除した",
   user_deleted: "アカウントを完全削除した",
+  account_deletion_request_status_changed: "アカウント削除申請の状態を変更した",
   warning_notification_hidden: "警告の通知を非公開にした",
   warning_notification_unhidden: "警告の通知を再表示した",
   manager_best_notification_hidden: "運営ベスト選出通知を非公開にした",
@@ -74,6 +76,7 @@ export const TARGET_TYPE_LABEL: Record<string, string> = {
   sns_live_results: "ライブ結果(SNS)",
   sns_live_result_comment: "ライブ結果コメント",
   notifications: "お知らせ",
+  account_deletion_requests: "アカウント削除申請",
 };
 
 export function formatActionLabel(action: string): string {

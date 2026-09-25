@@ -5,6 +5,7 @@ import { useState } from "react";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import { isGuestUser } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
+import { useConsentGateStore } from "@/store/useConsentGateStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 // 会員専用ページ・機能（フォロー中/フォロワー一覧、投稿・操作系UI等）のうち、
@@ -22,7 +23,8 @@ export default function GuestMemberGate({
 }) {
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
-  const signInWithX = useAuthStore((s) => s.signInWithX);
+  // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
+  const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const [xLoginError, setXLoginError] = useState<string | null>(null);
 
   if (!isGuestUser(authUser, profile)) return <>{children}</>;

@@ -100,7 +100,7 @@ begin
     select * into v_result_a from public.host_advance_answering_to_group_result(
       v_live_id,
       (select current_turn_id from public.lives where id = v_live_id),
-      now() + interval '15 seconds'
+      15000
     );
     if v_result_a.updated is not true then
       raise exception 'FAIL: %組目でanswering→group_resultの遷移が行われなかった(updated=%)', v_processed + 1, v_result_a.updated;
@@ -109,10 +109,14 @@ begin
       raise exception 'FAIL: %組目でcurrent_phaseがgroup_resultになっていない', v_processed + 1;
     end if;
 
+    -- group_result→次への遷移も、組結果15秒が経過したDB時刻でなければ拒否される
+    -- ため、締切を過ぎた状態にしてから呼ぶ（0079対応）。
+    update public.lives set phase_deadline = now() - interval '1 second' where id = v_live_id;
+
     select * into v_result_b from public.host_advance_group_result_to_next(
       v_live_id,
       (select current_turn_id from public.lives where id = v_live_id),
-      now() + interval '13 seconds'
+      13000
     );
     if v_result_b.updated is not true then
       raise exception 'FAIL: %組目でgroup_result→次への遷移が行われなかった', v_processed + 1;
@@ -186,12 +190,16 @@ begin
   reset role;
 
   select current_turn_id into v_turn_a from public.lives where id = v_live_id;
-  update public.lives set current_phase = 'answering' where id = v_live_id;
+  -- 0079対応：締切超過をサーバー側で確認するようになったため、既に締切を
+  -- 過ぎた状態にしてから同時呼び出しのテストを行う。
+  update public.lives
+    set current_phase = 'answering', phase_deadline = now() - interval '1 second'
+    where id = v_live_id;
 
   create temporary table _t0068b_race_ctx as select v_live_id as live_id, v_turn_a as turn_id;
 
   create or replace function public._t0068b_call_advance(
-    p_live_id uuid, p_turn_id uuid, p_deadline timestamptz, p_hold_seconds numeric
+    p_live_id uuid, p_turn_id uuid, p_duration_ms integer, p_hold_seconds numeric
   ) returns boolean
   language plpgsql
   as $f$
@@ -206,7 +214,7 @@ begin
       perform pg_sleep(p_hold_seconds);
     end if;
     perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
-    select updated into v_updated from public.host_advance_answering_to_group_result(p_live_id, p_turn_id, p_deadline);
+    select updated into v_updated from public.host_advance_answering_to_group_result(p_live_id, p_turn_id, p_duration_ms);
     return v_updated;
   end;
   $f$;
@@ -224,7 +232,7 @@ declare
   v_turn_status text;
   v_final_phase text;
 begin
-  if to_regprocedure('public._t0068b_call_advance(uuid,uuid,timestamptz,numeric)') is null then
+  if to_regprocedure('public._t0068b_call_advance(uuid,uuid,integer,numeric)') is null then
     return; -- dblinkが使えずスキップ済み
   end if;
 
@@ -241,14 +249,14 @@ begin
     -- 別セッション（タブA相当）：1.5秒だけ行ロックを保持してからRPCを呼ぶ。
     perform dblink_send_query(
       't0068brace',
-      format('select public._t0068b_call_advance(%L::uuid, %L::uuid, %L::timestamptz, %s)',
-        ctx.live_id, ctx.turn_id, now() + interval '15 seconds', 1.5)
+      format('select public._t0068b_call_advance(%L::uuid, %L::uuid, %L::integer, %s)',
+        ctx.live_id, ctx.turn_id, 15000, 1.5)
     );
     perform pg_sleep(0.3); -- 別セッションが実際にFOR UPDATEを取るまで少し待つ
 
     -- 本セッション（タブB相当）：同時にRPCを呼ぶ。タブAのロック解放を待たされるはず。
     v_started_at := clock_timestamp();
-    v_main_updated := public._t0068b_call_advance(ctx.live_id, ctx.turn_id, now() + interval '15 seconds', 0);
+    v_main_updated := public._t0068b_call_advance(ctx.live_id, ctx.turn_id, 15000, 0);
     v_elapsed_ms := extract(epoch from (clock_timestamp() - v_started_at)) * 1000;
 
     select ok into v_bg_updated from dblink_get_result('t0068brace') as t(ok boolean);
@@ -284,8 +292,8 @@ end $$;
 
 do $$
 begin
-  if to_regprocedure('public._t0068b_call_advance(uuid,uuid,timestamptz,numeric)') is not null then
-    drop function public._t0068b_call_advance(uuid, uuid, timestamptz, numeric);
+  if to_regprocedure('public._t0068b_call_advance(uuid,uuid,integer,numeric)') is not null then
+    drop function public._t0068b_call_advance(uuid, uuid, integer, numeric);
   end if;
 end $$;
 

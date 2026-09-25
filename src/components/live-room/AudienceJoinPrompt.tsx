@@ -2,8 +2,9 @@
 
 import ScreenShell from "@/components/live-demo/ScreenShell";
 import TimerRing from "@/components/live-demo/TimerRing";
-import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
-import { useTickingNow } from "@/lib/useTickingNow";
+import { getLiveRoomTiming } from "@/data/liveRoomTiming";
+import { answeringRemaining } from "@/lib/liveRemaining";
+import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
 // 回答受付中(answering)に、まだ参加登録していない人（観客として途中参加しようと
@@ -16,14 +17,9 @@ import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 export default function AudienceJoinPrompt() {
   const live = useLiveFollowerStore((s) => s.live);
   const currentTopic = useLiveFollowerStore((s) => s.currentTopic);
-  const now = useTickingNow(150);
+  const clock = useServerClockState(150);
 
-  const remainingMs =
-    live?.answering_paused && live.answering_remaining_ms != null
-      ? live.answering_remaining_ms
-      : live?.phase_deadline
-        ? Math.max(0, new Date(live.phase_deadline).getTime() - now)
-        : 0;
+  const remaining = live ? answeringRemaining(live, clock) : { ms: 0, syncing: false };
 
   return (
     <ScreenShell>
@@ -35,8 +31,9 @@ export default function AudienceJoinPrompt() {
       )}
       <div className="mt-8">
         <TimerRing
-          remainingMs={remainingMs}
-          totalMs={LIVE_ROOM_TIMING.answerMs}
+          remainingMs={remaining.ms}
+          syncing={remaining.syncing}
+          totalMs={getLiveRoomTiming(live?.timing_profile).answerMs}
           paused={!!live?.answering_paused}
           size={56}
           palette="neon2"

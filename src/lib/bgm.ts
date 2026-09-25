@@ -33,3 +33,4 @@ export function useBgmMuted(): boolean {
 export const playBgm = audioManager.playBgm;
 export const stopBgm = audioManager.stopBgm;
 export const retryCurrentBgm = audioManager.retryCurrentBgm;
+export const correctBgmPosition = audioManager.correctBgmPosition;

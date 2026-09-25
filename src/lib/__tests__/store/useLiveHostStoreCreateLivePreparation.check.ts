@@ -61,6 +61,7 @@ function makeInput(): LivePreparationInput {
     topicSelection: { mode: "manual", topicBankIds: ["topic-1"] },
     liveMode: "official",
     manualOfficialSequenceNumber: null,
+  timingProfile: "standard",
   };
 }
 

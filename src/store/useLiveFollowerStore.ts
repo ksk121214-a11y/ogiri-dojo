@@ -18,6 +18,7 @@ import {
   type RoomRankingEntry,
 } from "@/lib/liveRoomSelectors";
 import { isGuestUser } from "@/lib/guestStatus";
+import { runSingleFlight, type SingleFlightLock } from "@/lib/singleFlight";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { supabase } from "@/lib/supabase";
@@ -31,6 +32,15 @@ import type {
   TopicRow,
   TurnRow,
 } from "@/lib/liveRoomTypes";
+
+// advance_live_progress_if_due（0079）の戻り値の型。観客・回答者側の補助tick
+// （下のsubscribe内、tickIfNeeded）専用。
+interface AdvanceLiveProgressResult {
+  updated: boolean;
+  live: LiveRow | null;
+  answer: AnswerRow | null;
+  action: string | null;
+}
 
 export interface GroupResultData {
   round: number;
@@ -864,9 +874,21 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // 再生しないため。新しい世代は必ず空のキューから始まる）。
       resetTsukkomiReactionQueue();
       // チャンネルが(再)接続できた瞬間に必ず最新スナップショットを取り直す。
+      // 2026-09-25追加（司会ブラウザ依存解消・観客/回答者側の再同期）：
+      // CHANNEL_ERROR/TIMED_OUT/CLOSEDは明示的に検知してログへ残す。supabase-jsの
+      // Realtimeクライアント自体が切断検知後に自動再接続・再購読を試みるため、
+      // 回復すれば通常はSUBSCRIBEDへ戻り上のrefetchAllが働くが、それが遅れる・
+      // 失敗する場合に備えて、下の軽量ポーリング(pollLivePhaseIfDue)が
+      // Realtimeの状態に関わらず独立に復旧を保証する。
       const onSubscribeStatus = (status: string) => {
         if (!isCurrentGen()) return;
-        if (status === "SUBSCRIBED") refetchAll();
+        if (status === "SUBSCRIBED") {
+          refetchAll();
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          console.warn("[live] Realtimeチャンネルの接続状態:", status);
+        }
       };
       const guardedRefetchAll = () => {
         if (isCurrentGen()) refetchAll();
@@ -987,6 +1009,68 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     myGen = channelSwapResult.gen;
     refetchAll();
 
+    // 2026-09-25改訂（観客人数に比例する過剰な通信への対応）：以前はここで
+    // 最大3つのRPCを無条件に呼び、その後さらに無条件でrefetchAll()（重い
+    // 全件再取得）していた。15人が同時に見ていると、5秒ごとに最大45回の
+    // RPC呼び出し＋15回のrefetchAllが発生し得た。
+    // advance_live_progress_if_due（0079）は、現在のフェーズで意味のある
+    // 1段階だけを1回のRPC呼び出しで試み、実際に何か変わったか
+    // （updated、または返却されたlive行のphase/turn_idがローカルと違う＝
+    // Realtimeを取りこぼして他経路で既に変わっていた）を確認してから、
+    // 変わっていた場合だけrefreshTurnDerived（turn/topic/answers/scoresの
+    // 再取得。refetchAllより軽い）を呼ぶ。何も変わっていなければ、RPCの
+    // 戻り値に含まれるlives行をそのまま反映するだけで、追加の問い合わせは
+    // 一切発生しない。Realtimeが正常に届いている間は、この呼び出し自体が
+    // 「既に最新なので何もしない」を返すだけになる。
+    const TICK_INTERVAL_MS = 5_000;
+    const tickLock: SingleFlightLock = { current: false };
+    const tickIfNeeded = async () => {
+      if (!isMyGenCurrent()) return;
+      const live = useLiveFollowerStore.getState().live;
+      if (!live) return;
+      let result: AdvanceLiveProgressResult | null = null;
+      try {
+        const { data, error } = await supabase
+          .rpc("advance_live_progress_if_due", {
+            p_live_id: live.id,
+            p_expected_turn_id: live.current_turn_id,
+          })
+          .single();
+        if (error) throw error;
+        result = data as AdvanceLiveProgressResult;
+      } catch (e) {
+        // 補助tickは失敗しても利用者向けには一切表示しない（次回の呼び出し・
+        // 司会側のtick・Realtimeのいずれかで最終的に追いつく）。
+        console.warn("[live] 補助tickでエラーが発生しました", e);
+        return;
+      }
+      if (!isMyGenCurrent() || !result) return;
+      const latest = useLiveFollowerStore.getState().live;
+      if (!latest || latest.id !== live.id) return; // ライブが切り替わっていたら何もしない
+
+      const phaseOrTurnChanged =
+        !!result.live &&
+        (result.live.current_phase !== latest.current_phase ||
+          result.live.current_turn_id !== latest.current_turn_id);
+
+      if (result.updated || phaseOrTurnChanged) {
+        // このtickで実際に進めた、または他経路（司会・別の観客）で既に
+        // 進んでいたことが分かった：turn/topic/answers/scoresを取り直す。
+        if (result.live) useLiveFollowerStore.setState({ live: result.live });
+        await refreshTurnDerived(isMyGenCurrent);
+      } else if (result.live) {
+        // フェーズ・ターンは変わっていないが、lives行の他の列
+        // （answering_paused/phase_deadline/reveal_sequence_until等）は
+        // 変わっているかもしれない。追加の問い合わせ無しで、この呼び出しが
+        // 既に返してきたlive行をそのまま軽量に反映するだけにする。
+        useLiveFollowerStore.setState({ live: result.live });
+      }
+    };
+    const tickTimer = setInterval(() => {
+      if (cancelled) return;
+      void runSingleFlight(tickLock, tickIfNeeded);
+    }, TICK_INTERVAL_MS);
+
     const handleVisibility = () => {
       if (document.visibilityState === "visible" && isMyGenCurrent()) refetchAll();
     };
@@ -1013,6 +1097,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     return () => {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(tickTimer);
       if (currentRefetchAllRef === refetchAll) currentRefetchAllRef = null;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
