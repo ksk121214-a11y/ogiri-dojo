@@ -13,7 +13,7 @@ import { createBgmStartIntent } from "../bgmStartIntent";
 import { decideBgmRetry, decideBgmStart, resolveBgmOffsetSec, registerMetadataListenerOnce, resolveFallbackSeekSec } from "../bgmStartPlan";
 import { createTopicRevealSfxScheduler } from "../topicRevealSfxScheduler";
 import { createServerClock } from "../serverClock";
-import { startServerClockAutoSync, type AutoSyncEnv } from "../serverClockAutoSync";
+import { createServerClockSyncManager, startServerClockAutoSync, type AutoSyncEnv } from "../serverClockAutoSync";
 import { planTopicRevealSfx } from "../topicRevealSfx";
 
 // ---- 仮想世界：真の時刻(trueMs)と、端末のperformance.now()・端末時計(Date.now)を別々に持つ ----
@@ -1499,6 +1499,104 @@ const near = (a: number, b: number, tol: number, msg: string) =>
       assert.equal(h.els.get("live")!.plays, 0);
     }
     console.log("PASS: 自動再開はresume前の状態でstalled判定→最新位置からsource作り直し→resume（本番と同順）、HTMLAudioはユーザー操作内で同期play・metadata後に最新位置へseek・待機中の再タップも有効・二重play/リスナー/sourceなし");
+  }
+
+  // ===== 認証連動の同期マネージャ（未認証では時計RPCを呼ばない）=====
+  {
+    const w = new World();
+    let fetches = 0;
+    const clock = createServerClock({
+      perfNow: w.perfNow,
+      fallbackNow: w.deviceNow,
+      fetchServerEpochMs: async () => {
+        fetches++;
+        return w.trueMs;
+      },
+    });
+    const timers: Array<{ ms: number; fn: () => void; live: boolean }> = [];
+    let onlineFn: (() => void) | null = null;
+    let visibleFn: (() => void) | null = null;
+    let listenersOn = 0;
+    const env: AutoSyncEnv = {
+      setTimeout: (fn, ms) => {
+        timers.push({ ms, fn, live: true });
+        return timers.length - 1;
+      },
+      clearTimeout: (id) => {
+        timers[id as number].live = false;
+      },
+      onOnline: (fn) => {
+        onlineFn = fn;
+        listenersOn++;
+        return () => {
+          onlineFn = null;
+          listenersOn--;
+        };
+      },
+      onVisible: (fn) => {
+        visibleFn = fn;
+        return () => {
+          visibleFn = null;
+        };
+      },
+    };
+    const mgr = createServerClockSyncManager(clock, env);
+    const flush = () => new Promise((r) => setImmediate(r));
+    const liveTimers = () => timers.filter((t) => t.live).length;
+
+    // 未認証：複数の画面がマウントされても時計RPC・タイマー・イベント購読は0。
+    const r1 = mgr.acquire();
+    const r2 = mgr.acquire();
+    mgr.setAuthenticated(false);
+    await flush();
+    assert.equal(fetches, 0, "未認証では時計RPCを呼ばない");
+    assert.equal(liveTimers(), 0, "未認証では再試行タイマーも作らない");
+    assert.equal(listenersOn, 0);
+    assert.equal(onlineFn, null);
+    assert.equal(visibleFn, null);
+    w.advance(120_000); // 時間が経過しても
+    timers.forEach((t) => t.live && t.fn());
+    await flush();
+    assert.equal(fetches, 0, "未認証中に時間が経過しても再試行0回");
+    assert.equal(mgr.isRunning(), false);
+
+    // 認証後（ゲストのsignInAnonymouslyも認証済みユーザーとして同じ）：同期が始まり、通信は1本。
+    mgr.setAuthenticated(true);
+    await flush();
+    assert.equal(fetches, 1, "認証後は同期が始まる（複数利用箇所でも1本）");
+    assert.equal(clock.isFresh(), true);
+    const r3 = mgr.acquire();
+    await flush();
+    assert.equal(fetches, 1, "利用箇所が増えても通信は増えない");
+    assert.equal(listenersOn, 1, "イベント購読も1本");
+
+    // ログアウト：同期・再試行を停止し、時計はstaleになる。
+    mgr.setAuthenticated(false);
+    assert.equal(mgr.isRunning(), false);
+    assert.equal(clock.isFresh(), false, "ログアウトで時計はstale");
+    assert.equal(clock.nowIfFresh(), null);
+    assert.equal(liveTimers(), 0);
+    assert.equal(listenersOn, 0);
+    w.advance(600_000);
+    timers.forEach((t) => t.live && t.fn());
+    await flush();
+    assert.equal(fetches, 1, "ログアウト後は同期しない");
+
+    // 再ログイン：古い時計をそのまま使わず、staleから再同期する。
+    mgr.setAuthenticated(true);
+    assert.equal(clock.nowIfFresh(), null, "再ログイン直後は古い時計をfreshとして使わない");
+    await flush();
+    assert.equal(fetches, 2, "再ログインで再同期");
+    assert.equal(clock.isFresh(), true);
+    near(clock.now(), w.trueMs, 1, "再同期後は正しい時刻");
+
+    // 利用画面がすべて無くなれば停止。
+    r1();
+    r2();
+    r3();
+    r3(); // 二重解除は無害
+    assert.equal(mgr.isRunning(), false);
+    console.log("PASS: 未認証では時計RPC・タイマー・イベント購読が0、認証後（ゲスト含む）は1本で同期、ログアウトで停止、再ログインでstaleから再同期");
   }
 
   // 20: 進行RPCはサーバー時計の同期に依存しない（時計RPCが失敗し続けても進行RPCは動く）。

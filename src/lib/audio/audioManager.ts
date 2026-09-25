@@ -64,29 +64,36 @@ const FADE_MS = 700;
 // SE
 // ============================================================
 
-export const SFX_PATHS = {
+// 値がnullのSEは「音源が未配置（意図的に未実装）」で、事前読み込み・再生・HTMLAudio
+// フォールバックのいずれでもネットワーク要求・Audio生成・警告を出さず、安全なno-opにする
+// （呼び出し箇所ごとの分岐は不要。ここ1箇所で管理する）。音源を追加する時は、該当SEの
+// 値をパス文字列へ戻すだけで、事前読み込み・再生が有効になる。
+export type SfxName =
+  | "buttonPress" | "countdownTick" | "scoreReveal" | "perfect" | "curtainOpen" | "answerSubmit"
+  | "spotlightIn" | "bigLaugh" | "topicReveal" | "groupResult" | "rankReveal" | "masteryLevelup"
+  | "startLive" | "joinAsPlayer" | "participantJoined" | "pageTurn" | "homeClick" | "ticketTear";
+
+export const SFX_PATHS: Record<SfxName, string | null> = {
   buttonPress: "/sounds/button-press.mp3",
-  countdownTick: "/sounds/countdown-tick.mp3",
+  countdownTick: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/countdown-tick.mp3" を設定するだけで有効になる
   scoreReveal: "/sounds/score-reveal.mp3",
   perfect: "/sounds/perfect.mp3",
   curtainOpen: "/sounds/curtain-open.mp3",
   answerSubmit: "/sounds/answer-submit.mp3",
-  spotlightIn: "/sounds/spotlight-in.mp3",
-  bigLaugh: "/sounds/big-laugh.mp3",
+  spotlightIn: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/spotlight-in.mp3" を設定するだけで有効になる
+  bigLaugh: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/big-laugh.mp3" を設定するだけで有効になる
   topicReveal: "/sounds/topic-reveal.mp3",
   groupResult: "/sounds/group-result.mp3",
-  rankReveal: "/sounds/rank-reveal.mp3",
-  masteryLevelup: "/sounds/mastery-levelup.mp3",
-  startLive: "/sounds/start-live.mp3",
+  rankReveal: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/rank-reveal.mp3" を設定するだけで有効になる
+  masteryLevelup: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/mastery-levelup.mp3" を設定するだけで有効になる
+  startLive: null, // 音源未配置（意図的に未実装）。追加時は "/sounds/start-live.mp3" を設定するだけで有効になる
   joinAsPlayer: "/sounds/join-as-player.mp3",
   participantJoined: "/sounds/participant-joined.mp3",
   pageTurn: "/sounds/page-turn.wav",
   homeClick: "/sounds/home-click.mp3",
   // ホームの「次回ライブ」チケット、参加成功時に半券が切り離される演出用。
   ticketTear: "/sounds/ticket-tear.mp3",
-} as const;
-
-export type SfxName = keyof typeof SFX_PATHS;
+};
 
 // 2026-08-30: 「効果音をほんの少しだけ下げて」の要望でごくわずかに引き下げた。
 // 2026-08-30（2回目）: 続けて「ほんの少しだけ」の追加要望があったため、もう一段階下げた。
@@ -426,6 +433,8 @@ const sfxLoadPromises = new Map<SfxName, Promise<void>>();
 const sfxFallbackCache = new Map<SfxName, HTMLAudioElement>();
 
 async function loadSfx(name: SfxName): Promise<void> {
+  const path = SFX_PATHS[name];
+  if (!path) return; // 未実装SE：ネットワーク要求もログも出さない
   if (sfxBuffers.has(name)) return;
   const existing = sfxLoadPromises.get(name);
   if (existing) return existing;
@@ -434,7 +443,7 @@ async function loadSfx(name: SfxName): Promise<void> {
     const ctx = getAudioContext();
     if (!ctx) return; // フォールバック方式のみで運用
     try {
-      const res = await fetch(`${BASE_PATH}${SFX_PATHS[name]}`);
+      const res = await fetch(`${BASE_PATH}${path}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const arrayBuffer = await res.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
@@ -453,7 +462,7 @@ async function loadSfx(name: SfxName): Promise<void> {
 // 呼び出しは何度でも安全（loadSfx自体が二重ロードを防ぐ）。
 export function preloadAllSfx(): void {
   if (typeof window === "undefined") return;
-  const names = Object.keys(SFX_PATHS) as SfxName[];
+  const names = (Object.keys(SFX_PATHS) as SfxName[]).filter((n) => SFX_PATHS[n] !== null);
   Promise.allSettled(names.map((name) => loadSfx(name))).then(() => {
     setState({ audioReady: true });
   });
@@ -465,6 +474,7 @@ export function preloadAllSfx(): void {
 // ここでは進捗表示・自動リトライのために成否を判定できるようにする。
 // 既にsfxBuffersにキャッシュ済みなら（loadSfx内部の判定で）再ダウンロードしない。
 export async function preloadSfxOne(name: SfxName): Promise<{ ok: boolean }> {
+  if (!SFX_PATHS[name]) return { ok: true }; // 未実装SEは読み込むものが無い（失敗扱いにしない）
   await loadSfx(name);
   return { ok: sfxBuffers.has(name) };
 }
@@ -503,10 +513,11 @@ export async function preloadBgmOne(name: BgmName): Promise<{ ok: boolean }> {
 // 呼び出し側(TopicRevealView.tsx)がphase_deadline基準で「本来ならもう何秒経過しているべきか」
 // を計算し、その分をoffsetSecとして渡すことで、再生開始が遅れても本来の終了時刻に揃う。
 function playSfxFallback(name: SfxName, offsetSec = 0) {
-  if (typeof window === "undefined") return;
+  const path = SFX_PATHS[name];
+  if (typeof window === "undefined" || !path) return;
   let base = sfxFallbackCache.get(name);
   if (!base) {
-    base = new Audio(`${BASE_PATH}${SFX_PATHS[name]}`);
+    base = new Audio(`${BASE_PATH}${path}`);
     base.preload = "auto";
     sfxFallbackCache.set(name, base);
   }
@@ -530,6 +541,7 @@ function playSfxFallback(name: SfxName, offsetSec = 0) {
 // 20箇所以上には一切影響しない）。
 export function playSfx(name: SfxName, opts?: { offsetSec?: number }): void {
   if (typeof window === "undefined" || !state.seEnabled) return;
+  if (!SFX_PATHS[name]) return; // 未実装SE：AudioContextのresume等も含め何もしない
   const offsetSec = Math.max(0, opts?.offsetSec ?? 0);
 
   // SEはユーザー操作（クリック）の文脈で呼ばれるため、この呼び出し自体をアンロックの

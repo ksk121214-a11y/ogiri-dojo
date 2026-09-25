@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "../../../..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../../../..",
+    "types": ["node"]
+  },
+  "include": [
+    "../../../lib/basePath.ts",
+    "../../../lib/bgmCorrection.ts",
+    "../../../lib/bgmStartPlan.ts",
+    "../../../lib/bgmStartIntent.ts",
+    
+    "../../../lib/audio/audioManager.ts",
+    "audioManagerSfx.check.ts"
+  ]
+}

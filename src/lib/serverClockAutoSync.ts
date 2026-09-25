@@ -61,3 +61,47 @@ export function startServerClockAutoSync(
     offVisible();
   };
 }
+
+// 未認証・ログアウトの扱い付きの同期マネージャ（get_live_server_timeはauthenticatedのみ実行可能）。
+// - 画面が使っている(refCount>0)かつ認証済みの間だけ自動同期(startServerClockAutoSync)を動かす。
+//   未認証中は時計RPC・再試行タイマー・online/pageshow/visibilityの同期処理を一切始めない。
+// - ゲスト(signInAnonymously)も認証済みユーザーなので、認証後は通常どおり同期する。
+// - ログアウト（認証済み→未認証）や利用画面が0になった時は自動同期を止め、時計をstaleにする
+//   （再ログイン後は古いアンカーをそのまま使わず、stale状態から再同期する）。
+// - 利用箇所が複数あっても自動同期は1本だけ。
+export function createServerClockSyncManager(clock: ServerClock, env: AutoSyncEnv) {
+  let refCount = 0;
+  let authenticated = false;
+  let stopAuto: (() => void) | null = null;
+
+  const reconcile = () => {
+    const shouldRun = refCount > 0 && authenticated;
+    if (shouldRun && !stopAuto) {
+      stopAuto = startServerClockAutoSync(clock, env);
+    } else if (!shouldRun && stopAuto) {
+      stopAuto();
+      stopAuto = null;
+      clock.markStale();
+    }
+  };
+
+  return {
+    acquire(): () => void {
+      refCount += 1;
+      reconcile();
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        refCount -= 1;
+        reconcile();
+      };
+    },
+    setAuthenticated(v: boolean) {
+      if (authenticated === v) return;
+      authenticated = v;
+      reconcile();
+    },
+    isRunning: () => stopAuto !== null,
+  };
+}

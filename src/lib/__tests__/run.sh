@@ -145,6 +145,25 @@ else
 fi
 rm -rf "$HOST_CREATE_LIVE_PREP_DIR"
 
+# audioManagerSfx.check.ts：audioManager.ts（"@/..."エイリアスを含む）を本番と同じ実装のまま
+# 動かし、未実装SEがネットワーク要求・Audio生成・警告を出さないことを検証する（専用tsconfig経由）。
+AUDIO_SFX_DIR="$(mktemp -d)"
+AUDIO_SFX_TSCONFIG="$SCRIPT_DIR/store/tsconfig.audioSfx.json"
+AUDIO_SFX_ENTRY="$AUDIO_SFX_DIR/src/lib/__tests__/store/audioManagerSfx.check.js"
+
+echo "--- audioManagerSfx.check.ts ---"
+if npx tsc -p "$AUDIO_SFX_TSCONFIG" --outDir "$AUDIO_SFX_DIR" && [ -f "$AUDIO_SFX_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUDIO_SFX_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUDIO_SFX_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: audioManagerSfx.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$AUDIO_SFX_DIR"
+
 # src/lib/__tests__/store/useLiveFollowerStoreRace.check.ts は、useLiveFollowerStore.ts
 # （"@/..."エイリアス・実際のSupabaseクライアント生成を含む）を本番と同じ実装のまま
 # importして検証するため、上のCHECK_FILESループ（-maxdepth 1、素のtsc起動）とは別に、
