@@ -25,11 +25,11 @@ export default function SnsPage() {
   return (
     <StadiumPageShell contentTheme="kraft">
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">SNS</p>
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--ink)]/80">SNS</p>
         <h1 className="mt-1 font-sans text-3xl font-black text-[var(--ink)] sm:text-4xl">
           寄合帳
         </h1>
-        <p className="mt-2 font-sans text-xs text-[var(--ink)]/70">
+        <p className="mt-2 font-sans text-xs text-[var(--ink)]/90">
           みんなが出したお題に回答して、いいねやツッコミを送り合う寄合帳
         </p>
       </div>

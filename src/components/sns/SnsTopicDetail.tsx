@@ -157,7 +157,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             <span className={`${stadiumStyles.surfaceAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               お題
             </span>
-            <span className="font-sans text-[10px] text-[var(--ink)]/60">
+            <span className="font-sans text-[10px] text-[var(--ink)]/75">
               {topic.createdAtLabel}
             </span>
           </div>
@@ -185,7 +185,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
 
       {isGuest ? (
         <p
-          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
+          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent-on-light)]`}
         >
           ゲストは回答できません。Xでログインしてください。
         </p>
@@ -206,17 +206,17 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             }`}
           />
           {noTicket && (
-            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+            <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">
               寄合券が0枚のため回答できません。
               {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
             </p>
           )}
           {submitError && (
-            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
+            <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{submitError}</p>
           )}
           <div className="flex items-center justify-between gap-2">
             <span
-              className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
+              className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent-on-light)]" : "text-[var(--ink)]/75"}`}
             >
               {body.length} / {MAX_LENGTH}
             </span>
@@ -238,7 +238,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           回答 {topicAnswers.length}件
         </h2>
         {likeError && (
-          <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</p>
+          <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{likeError}</p>
         )}
         {topicAnswers.length === 0 && (
           <p className={`${stadiumStyles.surfaceLight} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
@@ -256,7 +256,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
-                  <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
+                  <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/75">
                     {answer.createdAtLabel}
                   </span>
                 </div>
@@ -284,7 +284,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
                 // 2026-09-13（再々レビュー対応）：ゲストはいいねできない仕様のため、
                 // 操作可能な見た目のボタンではなく件数だけの静的表示にする
                 // （閲覧は引き続き許可する）。
-                <span className="mt-1 flex shrink-0 items-center gap-1 self-start rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/50">
+                <span className="mt-1 flex shrink-0 items-center gap-1 self-start rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/75">
                   <HeartGlyph filled={liked} />
                   <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
                 </span>

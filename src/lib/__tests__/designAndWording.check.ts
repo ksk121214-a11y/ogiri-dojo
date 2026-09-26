@@ -43,28 +43,42 @@ const sources = srcFiles.map((f) => ({ f: f.slice(ROOT.length + 1), text: readFi
   console.log("PASS: 初回設定画面は指定の見出し・本文・一般的なplaceholder、白背景の現代的な見た目");
 }
 
-// 3) 和風デザインの撤廃：筆文字・畳/和紙トークン・紙の粒子（grain）・質感画像が利用者向けコードに無い。
+// 3) 和風デザインの撤廃（筆文字・畳/和紙/焦げ茶の和風トークン）。ただし「地下ライブ会場風の
+//    暗い背景」「ノイズ・グレイン」「紙・印刷物・チケットの質感」は爆笑スタジアムの世界観として
+//    必須であり、和風とは別物なので撤廃してはならない（下で存在を確認する）。
 {
   const bannedPatterns: Array<[RegExp, string]> = [
     [/font-brush/, "font-brush（筆文字）"],
     [/Yuji_Syuku|yuji-syuku/i, "Yuji Syuku（毛筆風フォント）"],
     [/dojo-(?:tatami|washi)/, "dojo-tatami/washi（畳・和紙トークン）"],
     [/dojo-(?:light-brown|dark-brown)/, "焦げ茶・薄茶トークン"],
-    [/grain(?:Paper|Dark|DarkGray|Raised|Accent|Kraft|Concrete)/, "紙の粒子（grain*）クラス"],
-    [/images\/textures\//, "質感テクスチャ画像"],
   ];
   for (const [re, label] of bannedPatterns) {
     const hits = sources.filter((s) => re.test(s.text)).map((s) => s.f);
     assert.deepEqual(hits, [], `${label}が残っている: ${hits.join(", ")}`);
   }
-  assert.ok(!existsSync(join(ROOT, "public/images/textures")), "質感テクスチャ画像のディレクトリが残っている");
   const layout = read("src/app/layout.tsx");
   assert.ok(!/Yuji/.test(layout), "layout.tsxが和風フォント(Yuji Syuku)を読み込んでいる");
   const css = read("src/app/globals.css");
-  assert.ok(!/--font-brush|#e8dcc4|#5b4530|#d8c6a3|#f5f1e6/i.test(css), "globals.cssに和風のトークン・配色が残っている");
+  assert.ok(!/--font-brush|#e8dcc4|#5b4530|#d8c6a3/i.test(css), "globals.cssに和風のトークン・配色が残っている");
+
+  // 地下ライブ会場・チケットの世界観（質感画像・ノイズ・グレイン・紙）が保たれている。
+  for (const f of ["dark-grain-512.webp", "ivory-paper-512.webp", "ogiri-light-concrete-512.webp", "warm-kraft-paper-512.webp", "title-ivory-ink-texture-512.webp"]) {
+    assert.ok(existsSync(join(ROOT, "public/images/textures", f)), `世界観の質感素材が失われている: ${f}`);
+  }
   const home = read("src/components/home/StadiumHome.module.css");
-  assert.ok(!/url\("\/images\/textures|background-blend-mode|#f1e9d9|#b58f5c/.test(home), "StadiumHome.module.cssに質感画像・和風の生成り/クラフト色が残っている");
-  console.log("PASS: 筆文字・畳/和紙/焦げ茶トークン・grain(紙の粒子)・質感画像は利用者向けコードから撤廃済み");
+  for (const re of [
+    /\.surfaceDark \{[^}]*dark-grain-512\.webp[^}]*background-blend-mode: overlay/,
+    /\.surfaceLight \{[^}]*ivory-paper-512\.webp[^}]*background-blend-mode: soft-light/,
+    /\.surfaceAccent \{[^}]*dark-grain-512\.webp/,
+    /\.titleTexture \{[^}]*title-ivory-ink-texture-512\.webp/,
+    /\.pageBgDeep \{[^}]*warm-kraft-paper-512\.webp/,
+    /\.pageBgLight \{[^}]*ogiri-light-concrete-512\.webp/,
+    /\.shell::before \{[^}]*feTurbulence/,
+  ]) {
+    assert.ok(re.test(home), `地下ライブ・チケットの質感（${re}）が失われている`);
+  }
+  console.log("PASS: 筆文字・畳/和紙/焦げ茶の和風要素は無く、地下ライブ会場風の質感（グレイン・ノイズ・紙・チケット・クラフト・コンクリート）は保たれている");
 }
 
 // 4) 恒久ルール（AGENTS.md）と方針文書。CLAUDE.mdは従来どおりAGENTS.mdを参照する。

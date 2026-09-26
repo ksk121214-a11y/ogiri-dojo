@@ -167,13 +167,13 @@ export default function AccountSummary() {
       >
         {/* 見出しは「累計ポイント」（消費されず積み上がる値）を主表示にし、
             その下に小さく「ポイント残高」（将来ガチャ等で消費されうる値）を添える。 */}
-        <p className="text-xs text-[var(--ink)]/60">累計ポイント</p>
-        <p className="text-2xl font-black tabular-nums text-[var(--accent)]">
+        <p className="text-xs text-[var(--ink)]/75">累計ポイント</p>
+        <p className="text-2xl font-black tabular-nums text-[var(--accent-on-light)]">
           {totalPoints.toLocaleString()}
-          <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/60">pt</span>
+          <span className="ml-0.5 text-sm font-normal text-[var(--ink)]/75">pt</span>
         </p>
         {SHOW_POINTS_BALANCE && (
-          <p className="text-[10px] text-[var(--ink)]/50">残高 {pointsBalance.toLocaleString()}pt</p>
+          <p className="text-[10px] text-[var(--ink)]/75">残高 {pointsBalance.toLocaleString()}pt</p>
         )}
       </button>
 

@@ -55,7 +55,7 @@ export default function SnsFollowButton({
           size === "compact" ? "px-3 py-1 text-[11px]" : "px-5 py-2 text-xs"
         } ${
           following
-            ? "border border-[var(--ink)]/30 text-[var(--ink)]/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            ? "border border-[var(--ink)]/30 text-[var(--ink)]/70 hover:border-[var(--accent)] hover:text-[var(--accent-on-light)]"
             : "bg-[var(--accent)] text-[var(--paper)] shadow-[0_0_14px_rgba(192,38,63,0.35)] hover:opacity-90"
         }`}
       >

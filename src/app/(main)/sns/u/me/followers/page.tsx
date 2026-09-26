@@ -38,7 +38,7 @@ export default function MyFollowersPage() {
       <SnsBackButton fallbackHref="/sns" />
 
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">FOLLOWERS</p>
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">FOLLOWERS</p>
         <h1 className="mt-1 font-sans text-2xl font-black text-[var(--ink)]">
           あなたのフォロワー
         </h1>

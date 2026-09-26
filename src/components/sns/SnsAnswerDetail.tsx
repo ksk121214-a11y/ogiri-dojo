@@ -165,7 +165,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
             <SnsFollowButton authorId={answer.authorId} size="compact" />
           </div>
-          <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/60">
+          <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/75">
             {answer.createdAtLabel}
           </span>
         </div>
@@ -177,7 +177,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             // 2026-09-13（再々レビュー対応）：ゲストはいいねできない仕様のため、
             // 操作可能な見た目のボタンではなく件数だけの静的表示にする
             // （閲覧は引き続き許可する）。
-            <span className="flex w-fit items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/50">
+            <span className="flex w-fit items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/75">
               <HeartGlyph filled={liked} />
               <span className="tabular-nums">{answer.likes.toLocaleString()}</span>
             </span>
@@ -197,7 +197,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             </button>
           )}
           {likeError && (
-            <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>
+            <span className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{likeError}</span>
           )}
         </div>
         {answer.authorId === "me" ? (
@@ -220,7 +220,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
 
       {isGuest ? (
         <p
-          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
+          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent-on-light)]`}
         >
           ゲストはツッコめません。Xでログインしてください。
         </p>
@@ -241,17 +241,17 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             }`}
           />
           {noTicket && (
-            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+            <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">
               寄合券が0枚のためツッコめません。
               {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
             </p>
           )}
           {submitError && (
-            <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{submitError}</p>
+            <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{submitError}</p>
           )}
           <div className="flex items-center justify-between gap-2">
             <span
-              className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
+              className={`font-sans text-[11px] ${overLimit ? "font-bold text-[var(--accent-on-light)]" : "text-[var(--ink)]/75"}`}
             >
               {body.length} / {MAX_LENGTH}
             </span>
@@ -282,7 +282,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={comment.authorId} size={24} hideReportButton />
-              <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
+              <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/75">
                 {comment.createdAtLabel}
               </span>
             </div>

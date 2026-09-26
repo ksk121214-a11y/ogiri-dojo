@@ -50,7 +50,7 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
       <SnsBackButton fallbackHref={`/sns/u/${authorId}`} />
 
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">
           楽屋に挨拶
         </p>
         <h1 className="mt-1 font-sans text-2xl font-black text-[var(--ink)] sm:text-3xl">
@@ -108,7 +108,7 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
             🛋️
           </div>
         </div>
-        <p className="font-sans text-[10px] text-[var(--ink)]/60">
+        <p className="font-sans text-[10px] text-[var(--ink)]/75">
           簡易な部屋イメージ（ダミー表示）
         </p>
       </motion.div>
@@ -131,7 +131,7 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
             key={sentPhrase}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
-            className="font-sans text-xs font-bold text-[var(--accent)]"
+            className="font-sans text-xs font-bold text-[var(--accent-on-light)]"
           >
             「{sentPhrase}」と挨拶しました！
           </motion.p>

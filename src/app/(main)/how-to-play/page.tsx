@@ -59,7 +59,7 @@ export default function HowToPlayPage() {
       </StepCard>
 
       <StepCard number="4" icon={null} title="参加人数に合わせて組分け">
-        <p className="text-[10px] font-bold text-[var(--ink)]/60">組分け例（3組の場合）</p>
+        <p className="text-[10px] font-bold text-[var(--ink)]/80">組分け例（3組の場合）</p>
         <div className="mt-1 flex items-center gap-3">
           <PeopleTag label="1組" tone="accent" count={2} />
           <PeopleTag label="2組" tone="accent" count={2} />
@@ -95,7 +95,7 @@ export default function HowToPlayPage() {
           href="https://x.com/kusenotuyoiodai"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1.5 inline-block font-sans text-xs font-bold text-[var(--accent)] underline underline-offset-2 hover:opacity-80"
+          className="mt-1.5 inline-block font-sans text-xs font-bold text-[var(--accent-on-light)] underline underline-offset-2 hover:opacity-80"
           aria-label="「癖の強いお題を出す大喜利」さんのX（@kusenotuyoiodai）を新しいタブで開く"
         >
           X：@kusenotuyoiodai
@@ -130,7 +130,7 @@ function StepCard({
   return (
     <div className={`${stadiumStyles.stepTicket} ${stadiumStyles.surfaceLight} flex items-start gap-3 px-5 py-4 text-[var(--ink)]`}>
       {number && (
-        <span className="w-9 shrink-0 font-sans text-4xl font-black leading-none text-[var(--accent)]">
+        <span className="w-9 shrink-0 font-sans text-4xl font-black leading-none text-[var(--accent-on-light)]">
           {number}
         </span>
       )}

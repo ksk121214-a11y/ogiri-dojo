@@ -50,7 +50,7 @@ function DateLine({
 }) {
   return (
     <>
-      <p className="text-sm font-bold text-[var(--ink)]/60">{date.year}年</p>
+      <p className="text-sm font-bold text-[var(--ink)]/75">{date.year}年</p>
       <p className="whitespace-nowrap text-3xl font-black leading-none tracking-tight text-[var(--ink)]">
         {date.month}
         <span className="text-base font-bold">月</span>
@@ -63,7 +63,7 @@ function DateLine({
       <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <p
           className={`text-2xl font-black ${
-            timeTone === "accent" ? "text-[var(--accent)]" : "text-[var(--ink)]"
+            timeTone === "accent" ? "text-[var(--accent-on-light)]" : "text-[var(--ink)]"
           }`}
         >
           {date.time}
@@ -144,7 +144,7 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
           <HistoryClockGlyph />
         </span>
         <div className="min-w-0 flex-1">
-          <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/60">
+          <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-2 py-0.5 font-sans text-xs font-bold text-[var(--ink)]/75">
             前回のライブ
           </span>
           {date ? (
@@ -166,14 +166,14 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
 
       {/* 半券があった場所。何も貼らず、ページの背景（コンクリート）をそのまま見せる。 */}
       <div className="flex flex-col items-center justify-center gap-1.5 px-1">
-        <span className="rounded-sm bg-[var(--ink)]/12 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+        <span className="rounded-sm bg-[var(--ink)]/12 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/75">
           終了
         </span>
         {date ? (
           <button
             type="button"
             onClick={handleShowResults}
-            className="whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/70 transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            className="whitespace-nowrap rounded-md border border-[var(--ink)]/25 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/70 transition hover:border-[var(--accent)] hover:text-[var(--accent-on-light)]"
           >
             結果を見る ›
           </button>
@@ -225,7 +225,7 @@ export function CurrentLiveCard({
 
         {live && reception ? (
           <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
-            <p className="font-sans text-sm font-black text-[var(--accent)]">大喜利ライブ</p>
+            <p className="font-sans text-sm font-black text-[var(--accent-on-light)]">大喜利ライブ</p>
             <DateLine
               date={live}
               timeTone="accent"
@@ -289,7 +289,7 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
             {/* 2026-09-03:「次回のライブの詳細を見るボタンは消して」の要望で撤去
                 （まだ詳細画面自体が無く、押せない体裁のダミー表示だったため）。 */}
             <div className="mt-2 flex items-center gap-2">
-              <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+              <span className="rounded-sm bg-[var(--ink)]/10 px-2 py-1 font-sans text-[11px] font-bold text-[var(--ink)]/75">
                 開催予定
               </span>
             </div>

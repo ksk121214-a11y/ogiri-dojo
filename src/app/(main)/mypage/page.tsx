@@ -31,7 +31,7 @@ export default function MyPage() {
           <h2 className="shrink-0 font-sans text-2xl font-black text-[var(--ink)]">寄合帳</h2>
           <div className="h-px flex-1 bg-[var(--ink)]/20" aria-hidden />
         </div>
-        <p className="mt-1.5 font-sans text-xs text-[var(--ink)]/70">
+        <p className="mt-1.5 font-sans text-xs text-[var(--ink)]/90">
           みんなが出したお題に回答して、いいねやツッコミを送り合う寄合帳
         </p>
       </div>

@@ -24,7 +24,7 @@ export default function SnsLiveResultsFeedList() {
   }, [init]);
 
   if (loading) {
-    return <p className="py-10 text-center font-sans text-xs text-[var(--ink)]/60">読み込み中…</p>;
+    return <p className="py-10 text-center font-sans text-xs text-[var(--ink)]/75">読み込み中…</p>;
   }
 
   if (summaries.length === 0) {
@@ -50,7 +50,7 @@ export default function SnsLiveResultsFeedList() {
             <span className={`${stadiumStyles.surfaceAccent} rounded-full px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               公式ライブ結果
             </span>
-            <span className="font-sans text-[10px] text-[var(--ink)]/60">{summary.endedAtLabel}</span>
+            <span className="font-sans text-[10px] text-[var(--ink)]/75">{summary.endedAtLabel}</span>
           </div>
           <p className="font-sans text-base font-black text-[var(--ink)]">
             {formatLiveTicketNo(summary.sequenceNumber)}
@@ -73,7 +73,7 @@ export default function SnsLiveResultsFeedList() {
             </span>
             <span>コメント {summary.commentCount}件</span>
           </p>
-          <span className="w-fit rounded-full border border-[var(--ink)]/25 px-4 py-1.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]">
+          <span className="w-fit rounded-full border border-[var(--ink)]/25 px-4 py-1.5 font-sans text-xs font-bold text-[var(--ink)] transition hover:border-[var(--accent)] hover:text-[var(--accent-on-light)]">
             結果を見る →
           </span>
         </Link>

@@ -99,7 +99,7 @@ function AccountDeletionSection() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="font-sans text-xs text-[var(--ink)]/50 underline decoration-current/40 underline-offset-2"
+        className="font-sans text-xs text-[var(--ink)]/75 underline decoration-current/40 underline-offset-2"
       >
         アカウントの削除を申請する
       </button>
@@ -269,7 +269,7 @@ function MyProfileEditForm({
           />
           <span
             className={`self-end font-sans text-[11px] ${
-              name.length > NAME_MAX_LENGTH ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"
+              name.length > NAME_MAX_LENGTH ? "font-bold text-[var(--accent-on-light)]" : "text-[var(--ink)]/75"
             }`}
           >
             {name.length} / {NAME_MAX_LENGTH}
@@ -285,12 +285,12 @@ function MyProfileEditForm({
             maxLength={BIO_MAX_LENGTH}
             className="w-full resize-none rounded-xl border border-[var(--ink)]/15 bg-white p-3 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--ink)]"
           />
-          <span className="self-end font-sans text-[11px] text-[var(--ink)]/60">
+          <span className="self-end font-sans text-[11px] text-[var(--ink)]/75">
             {bio.length} / {BIO_MAX_LENGTH}
           </span>
         </label>
 
-        {error && <p className="font-sans text-xs font-bold text-[var(--accent)]">{error}</p>}
+        {error && <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">{error}</p>}
 
         <div className="flex justify-end gap-2">
           <button

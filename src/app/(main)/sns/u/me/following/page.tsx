@@ -18,7 +18,7 @@ export default function MyFollowingPage() {
       <SnsBackButton fallbackHref="/sns" />
 
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">FOLLOWING</p>
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">FOLLOWING</p>
         <h1 className="mt-1 font-sans text-2xl font-black text-[var(--ink)]">
           あなたのフォロー中
         </h1>

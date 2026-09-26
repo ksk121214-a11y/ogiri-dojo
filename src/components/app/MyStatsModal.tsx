@@ -124,13 +124,13 @@ export default function MyStatsModal({
         </div>
 
         {!isMember && (
-          <p className="font-sans text-[11px] text-[var(--ink)]/60">
+          <p className="font-sans text-[11px] text-[var(--ink)]/75">
             ログインするとライブの実績がここに記録されます。
           </p>
         )}
 
         <div className="rounded-none border border-[var(--ink)]/10 bg-white p-5 text-center">
-          <p className="font-sans text-[11px] text-[var(--ink)]/60">段位</p>
+          <p className="font-sans text-[11px] text-[var(--ink)]/75">段位</p>
           <p className="mt-1 font-sans text-3xl font-black text-[var(--ink)]">{rank.label}</p>
           <div className="mx-auto mt-4 h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--ink)]/10">
             <div
@@ -138,7 +138,7 @@ export default function MyStatsModal({
               style={{ width: `${progressRatio * 100}%` }}
             />
           </div>
-          <p className="mt-2 font-sans text-[11px] text-[var(--ink)]/60">
+          <p className="mt-2 font-sans text-[11px] text-[var(--ink)]/75">
             {nextRank ? `次は「${nextRank.label}」` : "最高位「達人」に到達しています"}
           </p>
         </div>
@@ -173,7 +173,7 @@ export default function MyStatsModal({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-none border border-[var(--ink)]/10 bg-white p-3 text-center">
-      <p className="font-sans text-[10px] text-[var(--ink)]/60">{label}</p>
+      <p className="font-sans text-[10px] text-[var(--ink)]/75">{label}</p>
       <p className="mt-1 font-sans text-sm font-bold tabular-nums text-[var(--ink)]">{value}</p>
     </div>
   );

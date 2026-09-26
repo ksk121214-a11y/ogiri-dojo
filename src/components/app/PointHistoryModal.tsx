@@ -99,17 +99,17 @@ export default function PointHistoryModal({
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストはポイントを一切獲得しないため、
   // 残高0円・履歴無しを実データのように見せず、専用の案内に差し替える。
   const listBody = isGuest ? (
-    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/75">
       ゲスト参加中です。Xでログインするとポイントが記録されます。
     </p>
   ) : !authUser ? (
-    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/75">
       ログインするとライブで獲得したポイントの履歴がここに表示されます。
     </p>
   ) : !isMember || loading ? (
-    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">読み込み中…</p>
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/75">読み込み中…</p>
   ) : visibleHistory.length === 0 ? (
-    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/60">
+    <p className="p-2 text-center font-sans text-xs text-[var(--ink)]/75">
       まだ獲得履歴がありません。ライブに参加してみましょう。
     </p>
   ) : null;
@@ -157,13 +157,13 @@ export default function PointHistoryModal({
                   <p className="truncate font-sans text-xs font-bold text-[var(--ink)]">
                     {entry.label}
                   </p>
-                  <p className="font-sans text-[10px] text-[var(--ink)]/60">
+                  <p className="font-sans text-[10px] text-[var(--ink)]/75">
                     {formatDate(entry.created_at)}
                   </p>
                 </div>
                 <span
                   className={`shrink-0 font-sans text-sm font-bold tabular-nums ${
-                    entry.points >= 0 ? "text-dojo-success-strong" : "text-[var(--accent)]"
+                    entry.points >= 0 ? "text-dojo-success-strong" : "text-[var(--accent-on-light)]"
                   }`}
                 >
                   {entry.points >= 0 ? "+" : ""}

@@ -43,7 +43,7 @@ export default function GuestMemberGate({
       >
         Xでログイン
       </button>
-      {xLoginError && <p className="font-sans text-xs text-[var(--accent)]">{xLoginError}</p>}
+      {xLoginError && <p className="font-sans text-xs text-[var(--accent-on-light)]">{xLoginError}</p>}
     </div>
   );
 }

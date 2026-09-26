@@ -136,7 +136,7 @@ export default function NextLiveTicket({
 
           {/* 「チケットを少しだけ縦幅狭くして」の要望で、文字は拡大しつつ上下の余白は詰めている。 */}
           <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
-            <p className="text-base font-bold text-[var(--ink)]/60">{live.year}年</p>
+            <p className="text-base font-bold text-[var(--ink)]/75">{live.year}年</p>
             <p className="whitespace-nowrap text-5xl font-black leading-none tracking-tight text-[var(--ink)]">
               {live.month}
               <span className="text-xl font-bold">月</span>
@@ -144,7 +144,7 @@ export default function NextLiveTicket({
               <span className="text-xl font-bold">日</span>
               <span className="ml-0.5 text-base font-bold">（{live.weekday}）</span>
             </p>
-            <p className="mt-0.5 text-4xl font-black text-[var(--accent)]">
+            <p className="mt-0.5 text-4xl font-black text-[var(--accent-on-light)]">
               {live.time} <span className="text-2xl font-bold">開演</span>
             </p>
             {/* 前回の文字拡大で1行に収まらず折り返っていたため、この行だけ一段階小さくして1行に戻す。 */}

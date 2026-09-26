@@ -42,7 +42,7 @@ export default function JoinLiveButton({
         {!disabled && <span aria-hidden>›</span>}
       </button>
       {error && (
-        <p className="text-center font-sans text-xs font-bold text-[var(--accent)]">{error}</p>
+        <p className="text-center font-sans text-xs font-bold text-[var(--accent-on-dark)]">{error}</p>
       )}
     </div>
   );

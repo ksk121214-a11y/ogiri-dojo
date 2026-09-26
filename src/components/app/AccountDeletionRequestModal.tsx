@@ -57,13 +57,13 @@ export default function AccountDeletionRequestModal({ onClose }: { onClose: () =
               削除され、投稿したお題・回答・ツッコミは一般公開画面に表示されなくなります。この操作は取り消せません。
               申請後、運営が内容を確認した上で削除処理を行います。
             </p>
-            {error && <p className="font-sans text-xs font-bold text-[var(--accent)]">{error}</p>}
+            {error && <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">{error}</p>}
             <div className="mt-2 flex flex-col gap-2">
               <button
                 type="button"
                 disabled={submitting}
                 onClick={handleSubmit}
-                className={`${styles.pressable} rounded-xl border border-[var(--accent)] px-4 py-2.5 font-sans text-sm font-bold text-[var(--accent)] transition disabled:cursor-not-allowed disabled:opacity-40`}
+                className={`${styles.pressable} rounded-xl border border-[var(--accent)] px-4 py-2.5 font-sans text-sm font-bold text-[var(--accent-on-light)] transition disabled:cursor-not-allowed disabled:opacity-40`}
               >
                 {submitting ? "送信中…" : "削除を申請する"}
               </button>

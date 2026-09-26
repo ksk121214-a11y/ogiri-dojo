@@ -55,7 +55,7 @@ export default function SnsLiveResultBody({
           {formatLiveTicketNo(detail.sequenceNumber)}
           {detail.title ? `　${detail.title}` : ""}
         </h1>
-        <p className="mt-1 font-sans text-xs text-[var(--ink)]/60">{detail.endedAtLabel}</p>
+        <p className="mt-1 font-sans text-xs text-[var(--ink)]/75">{detail.endedAtLabel}</p>
         {!readOnly && (
           <div className="mt-3 flex justify-center">
             {/* 2026-09-07:「XでシェアのURLは全てホームのURLで固定」の要望で、
@@ -183,7 +183,7 @@ function LiveResultCard({
       <p className="font-sans text-base font-bold leading-snug text-[var(--ink)] sm:text-lg">{card.body}</p>
 
       {readOnly ? (
-        <p className="flex items-center gap-3 font-sans text-[11px] text-[var(--ink)]/60">
+        <p className="flex items-center gap-3 font-sans text-[11px] text-[var(--ink)]/75">
           <span className="flex items-center gap-1">
             <HeartGlyph filled />
             {card.likes.toLocaleString()}
@@ -196,7 +196,7 @@ function LiveResultCard({
             {isGuest ? (
               // 2026-09-13（再々レビュー対応）：ゲストはいいねできない仕様のため、
               // 操作可能な見た目のボタンではなく件数だけの静的表示にする。
-              <span className="flex items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/50">
+              <span className="flex items-center gap-1 rounded-full border border-[var(--ink)]/15 px-3 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/75">
                 <HeartGlyph filled={card.liked} />
                 <span className="tabular-nums">{card.likes.toLocaleString()}</span>
               </span>
@@ -222,13 +222,13 @@ function LiveResultCard({
             >
               コメント {card.commentCount}件
             </button>
-            {likeError && <span className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</span>}
+            {likeError && <span className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{likeError}</span>}
           </div>
 
           {commentsOpen && (
             <div className="flex flex-col gap-2 border-t border-[var(--ink)]/10 pt-2">
               {cardComments.length === 0 && (
-                <p className="font-sans text-[11px] text-[var(--ink)]/60">まだコメントがありません。</p>
+                <p className="font-sans text-[11px] text-[var(--ink)]/75">まだコメントがありません。</p>
               )}
               {cardComments.map((comment) => (
                 <div
@@ -237,7 +237,7 @@ function LiveResultCard({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <SnsAuthorBadge authorId={comment.authorId} size={22} hideReportButton />
-                    <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/60">
+                    <span className="shrink-0 font-sans text-[10px] text-[var(--ink)]/75">
                       {comment.createdAtLabel}
                     </span>
                   </div>
@@ -254,7 +254,7 @@ function LiveResultCard({
               {isGuest ? (
                 // 2026-09-13（再々レビュー対応）：ゲストはコメントできない仕様のため、
                 // 入力欄・送信ボタン自体を表示しない（コメント一覧の閲覧は許可のまま）。
-                <p className="font-sans text-[11px] font-bold text-[var(--accent)]">
+                <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">
                   ゲストはコメントできません。Xでログインしてください。
                 </p>
               ) : (
@@ -267,7 +267,7 @@ function LiveResultCard({
                     className="w-full rounded-lg border border-[var(--ink)]/20 bg-[var(--paper-muted)] p-2.5 font-sans text-base text-[var(--ink)] outline-none focus:border-[var(--accent)]"
                   />
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-sans text-[11px] text-[var(--ink)]/60">
+                    <span className="font-sans text-[11px] text-[var(--ink)]/75">
                       {commentBody.length} / {MAX_COMMENT_LENGTH}
                     </span>
                     <button

@@ -137,7 +137,7 @@ export default function SnsFeedSection() {
               onClick={() => setFeed(tab.key)}
               className={`flex-1 border-b-2 pb-1 font-sans text-sm font-bold transition ${
                 feed === tab.key
-                  ? "border-[var(--accent)] text-[var(--accent)]"
+                  ? "border-[var(--accent)] text-[var(--accent-on-light)]"
                   : "border-transparent text-[var(--ink)]/75 hover:text-[var(--ink)]"
               }`}
             >
@@ -155,7 +155,7 @@ export default function SnsFeedSection() {
                 onClick={() => setAudience(tab.key)}
                 className={`flex-1 border-b-2 px-3 py-1.5 font-sans text-xs font-bold transition ${
                   audience === tab.key
-                    ? "border-[var(--accent)] text-[var(--accent)]"
+                    ? "border-[var(--accent)] text-[var(--accent-on-light)]"
                     : "border-transparent text-[var(--ink)]/75 hover:text-[var(--ink)]"
                 }`}
               >
@@ -174,7 +174,7 @@ export default function SnsFeedSection() {
                 onClick={() => setSort(tab.key)}
                 className={`rounded-full px-3 py-1 font-sans text-[11px] font-bold transition ${
                   sort === tab.key
-                    ? "border border-[var(--accent)] text-[var(--accent)]"
+                    ? "border border-[var(--accent)] text-[var(--accent-on-light)]"
                     : "border border-transparent text-[var(--ink)]/70 hover:text-[var(--ink)]"
                 }`}
               >

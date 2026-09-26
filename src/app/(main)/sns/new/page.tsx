@@ -69,7 +69,7 @@ export default function SnsNewTopicPage() {
       <StadiumPageShell contentTheme="kraft">
         <SnsBackButton
           fallbackHref="/mypage"
-          className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
+          className="w-fit font-sans text-xs font-bold text-[var(--ink)]/90 hover:text-[var(--ink)]"
         />
         <div className={`${stadiumStyles.surfaceLight} flex flex-col items-center gap-3 p-6 text-center`}>
           <p className="font-sans text-sm text-[var(--ink)]/80">
@@ -86,7 +86,7 @@ export default function SnsNewTopicPage() {
           >
             Xでログイン
           </button>
-          {xLoginError && <p className="font-sans text-xs text-[var(--accent)]">{xLoginError}</p>}
+          {xLoginError && <p className="font-sans text-xs text-[var(--accent-on-light)]">{xLoginError}</p>}
         </div>
       </StadiumPageShell>
     );
@@ -96,17 +96,17 @@ export default function SnsNewTopicPage() {
     <StadiumPageShell contentTheme="kraft">
       <SnsBackButton
         fallbackHref="/mypage"
-        className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
+        className="w-fit font-sans text-xs font-bold text-[var(--ink)]/90 hover:text-[var(--ink)]"
       />
 
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--ink)]/80">
           NEW TOPIC
         </p>
         <h1 className="mt-1 font-sans text-3xl font-black text-[var(--ink)]">
           お題を出す
         </h1>
-        <p className="mt-2 font-sans text-xs text-[var(--ink)]/70">
+        <p className="mt-2 font-sans text-xs text-[var(--ink)]/90">
           みんなに回答してもらうお題を投稿します
         </p>
       </div>
@@ -128,18 +128,18 @@ export default function SnsNewTopicPage() {
         />
         <div className="flex items-center justify-between">
           <span
-            className={`font-sans text-xs ${overLimit ? "font-bold text-[var(--accent)]" : "text-[var(--ink)]/60"}`}
+            className={`font-sans text-xs ${overLimit ? "font-bold text-[var(--accent-on-light)]" : "text-[var(--ink)]/75"}`}
           >
             {body.length} / {MAX_LENGTH}
           </span>
         </div>
         {noTicket && (
-          <p className="font-sans text-xs font-bold text-[var(--accent)]">
+          <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">
             寄合券が0枚のため投稿できません。
             {nextTicketRecoveryAt && `あと${formatMinutesUntil(nextTicketRecoveryAt)}分で1枚回復します。`}
           </p>
         )}
-        {error && <p className="font-sans text-xs font-bold text-[var(--accent)]">{error}</p>}
+        {error && <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">{error}</p>}
         <button
           type="submit"
           disabled={!body.trim() || overLimit || noTicket || submitting}

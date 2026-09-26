@@ -116,7 +116,7 @@ function SoundRow({
         <SpeakerIcon muted={muted} />
         {label}
       </span>
-      <span className={muted ? "text-[var(--muted-on-dark)]" : "text-[var(--accent)]"}>
+      <span className={muted ? "text-[var(--muted-on-dark)]" : "text-[var(--accent-on-light)]"}>
         {muted ? "OFF" : "ON"}
       </span>
     </button>

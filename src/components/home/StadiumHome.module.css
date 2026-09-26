@@ -8,13 +8,15 @@
  */
 
 .shell {
+  /* 2026-08-28: 「背景の黒いテクスチャをほんの少しだけ薄く」→さらに「もう少しだけ薄く」の
+     要望で、2段階に分けてごく僅かに明るく調整。 */
   --bg: #202020;
   --bg-raised: #282723;
-  --paper: #f4f4f5;
-  --paper-muted: #e4e4e7;
-  --ink: #18181b;
-  --text-on-dark: #fafafa;
-  --muted-on-dark: #a1a1aa;
+  --paper: #f1e9d9;
+  --paper-muted: #ddd4c4;
+  --ink: #171513;
+  --text-on-dark: #f1e9d9;
+  --muted-on-dark: #aaa297;
   /* 2026-08-28: 「色を#C8250Cで統一」→「#C8320Cに」の要望でアクセントカラーを変更。 */
   --accent: #c8320c;
   --accent-dark: #902409;
@@ -22,63 +24,145 @@
      暗い背景上・明るい背景上の小さな文字にはこちらを使う。 */
   --accent-on-dark: #ff6a3d;
   --accent-on-light: #a8290a;
-  --accent-textured-base: #c8320c;
+  /* .grainDark等と同じくbackground-blend-mode:overlayをフル強度のまま使うため、
+     overlayの計算式から「暗く沈む分」を逆算し、意図的に明るく振った色を下地にすることで、
+     質感を100%効かせたまま平均的な見た目の色を--accent（文字色）に近づけている。
+     --accentを変更するたびに、この値も--accentに合わせて計算し直す必要がある
+     （このg≈0.113の逆算式はscratchpad/accent-base-solve.pyを参照）。 */
+  --accent-textured-base: #e08b35;
   --border-dark: #312f2b;
-  /* マイページ用の背景（ホームの--bgより一段明るい、ニュートラルな濃色）。 */
-  --bg-deep: #d4d4d8;
-  /* 遊び方ページ用の明るい背景（ニュートラルなライトグレー）。 */
-  --bg-light: #e5e7eb;
-  /* ライブ予定ページの「次回のライブ」チケットの半券用の濃いグレー。 */
+  /* マイページ専用：茶色いクラフト紙の背景（ホームの--bgに対する第3の面色）。
+     ivory-paper（チケット券面）とは別の、コンテンツ全体の背景として使う。 */
+  --bg-deep: #b58f5c;
+  /* 遊び方ページ専用：明るいコンクリートの背景（第4の面色）。 */
+  --bg-light: #d4cec4;
+  /* ライブ予定ページの「次回のライブ」チケット専用：黒だと強すぎるため、
+     「濃いグレー」の要望で変更。タグ（フラットな塗り）にはそのまま見た目通りの
+     --stub-grayを使い、半券（.grainDarkGrayでdark-grainをoverlay合成する側）は
+     --accent-textured-baseと同じ理由でoverlayの暗くなる分を逆算した
+     --stub-gray-textured-baseを使う（この2つの値の関係は--accent／
+     --accent-textured-baseの関係と同じ）。 */
+  /* 2026-08-28: 「次回はもっと濃いグレーに」の要望でさらに暗く調整。 */
   --stub-gray: #3a3a3a;
-  --stub-gray-textured-base: #3a3a3a;
+  --stub-gray-textured-base: #909090;
 
   position: relative;
   isolation: isolate;
+  /* .grainDarkと組み合わせて使うため、background-imageも一緒にリセットしてしまう
+     shorthandのbackgroundではなくbackground-colorのlonghandで指定する
+     （CSSの記述順に依存せず確実にgrainDark側のbackground-imageを残すため）。 */
   background-color: var(--bg);
   color: var(--text-on-dark);
 }
 
 /*
- * 面の色クラス。質感画像・ブレンドモードは使わず、単色のフラットな面にしている
- * （紙・布・ノイズ等の質感表現は行わない。デザイン方針.md参照）。
+ * 表面の質感（活版印刷／コピー用紙風）。実素材（dark-grain-512.webp / ivory-paper-512.webp、
+ * どちらもコントラストを強めたグレースケール化済み）を、各面本来の色（background-color）の上に
+ * background-blend-modeで重ねる。文字は要素の背景の上に乗るだけなので可読性は変わらない。
+ * ・暗い面（黒／赤オレンジ）は"overlay"：中間調を基準に暗部はより暗く、明るい粒はより明るく
+ *   浮かせ、インクのムラ・紙のホコリっぽい質感を出す。
+ * ・生成り紙面は"multiply"：紙のベース色はほぼ保ったまま、繊維の濃い部分だけを
+ *   ほんのり暗く沈める（掛け算のため白に近い部分はほとんど変化しない）。
  * Tailwindのbg-[var(--color)]と併用すると背景色の指定がバッティングするため、
  * このクラスを使う要素からはbg-[var(--color)]を外し、色指定はこちらに一本化する。
  */
 .surfaceDark {
   background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
 }
 
-/* ライブ予定ページの「次回のライブ」チケットの半券用（濃いグレー）。 */
+/* ライブ予定ページの「次回のライブ」チケットの半券用。.grainDarkの黒だと強すぎるとの
+   指摘を受け、下地の色だけを--stub-gray（濃いグレー）に変えた同系のテクスチャ。 */
 .surfaceDarkGray {
   background-color: var(--stub-gray-textured-base);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
 }
 
 .surfaceRaised {
   background-color: var(--bg-raised);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 280px 280px;
 }
 
 .surfaceAccent {
   background-color: var(--accent-textured-base);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-repeat: repeat;
+  background-size: 170px 170px;
 }
 
-/* タイトル文字（ヘッダー／ヒーローの「爆笑スタジアム」）。質感画像は使わず、ニュートラルな白の単色。 */
+/*
+ * タイトル文字（ヘッダーの小さい「爆笑スタジアム」／ヒーローの大きい「爆笑スタジアム」）専用。
+ * background-clip:textで、文字の形の中だけにtitle-ivory-ink-texture-512.png（生成り色＋
+ * インクのかすれ）を敷き詰めて見せる。colorはtransparentにして背景を透かす必要があるため、
+ * このクラスを使う要素にはtext-[var(--...)]など他のcolorユーティリティを付けないこと。
+ */
 .titleTexture {
-  color: var(--text-on-dark);
+  background-image: url("/images/textures/title-ivory-ink-texture-512.webp");
+  background-repeat: repeat;
+  background-size: 240px 240px;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-/* 明るいカード面（チケット・カード類）。 */
 .surfaceLight {
   background-color: var(--paper);
+  background-image: url("/images/textures/ivory-paper-512.webp");
+  /* multiplyだと紙全体が均一に沈んで灰色っぽく見えたため、soft-lightに変更。
+     素材の明るい部分（大半）は生成り色をほぼ保ったまま、濃い繊維の粒だけが
+     ほんのり沈んで見える。 */
+  background-blend-mode: soft-light;
+  background-repeat: repeat;
+  background-size: 260px 260px;
 }
 
-/* マイページ専用の背景（ニュートラルな濃色）。 */
+/*
+ * マイページ専用の背景：茶色いクラフト紙（写真ベースの実素材、warm-kraft-paper-512.png）。
+ * 他の.surface*と違いグレースケール素材の色付けではなく、すでに色の付いた紙の質感写真そのもの
+ * なのでblend-modeは使わず、素材の画像をそのまま敷き詰める（background-colorは読み込み中の
+ * フォールバックとしてのみ機能）。
+ */
 .pageBgDeep {
   background-color: var(--bg-deep);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-repeat: repeat;
+  /* 2026-08-28: 320pxだとスマホ画面内でタイルの継ぎ目（明暗のムラ）が目立ち、
+     参考画像のような均一な紙面に見えなかったため、元画像に近い480pxまで広げて
+     繰り返し回数を減らし、まだら感を抑えている。 */
+  background-size: 480px 480px;
 }
 
-/* 遊び方ページ専用の背景（ニュートラルなライトグレー）。 */
+/* 遊び方ページ専用の背景：明るいコンクリート（実素材、ogiri-light-concrete-seamless.png）。
+   warm-kraft同様、色付きの写真ベースの実素材なのでblend-modeは使わずそのまま敷き詰める。 */
 .pageBgLight {
   background-color: var(--bg-light);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-repeat: repeat;
+  background-size: 480px 480px;
+}
+
+/* 黒い紙の繊維・コピー機のノイズを疑似要素で重ねる。本文やボタンの文字には掛からないよう
+   .shell自体（背景専用の最背面レイヤー）にだけ適用し、子要素のテキストは影響を受けない。 */
+.shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.05;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
 }
 
 .content {
@@ -111,7 +195,7 @@
   inset: 0;
   z-index: 0;
   opacity: 0.7;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Ccircle cx='3' cy='3' r='1' fill='%23f4f4f5' fill-opacity='0.55'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Ccircle cx='3' cy='3' r='1' fill='%23f1e9d9' fill-opacity='0.55'/%3E%3C/svg%3E");
   background-size: 6px 6px;
   -webkit-mask-image: linear-gradient(to left, black 0%, black 45%, transparent 100%);
   mask-image: linear-gradient(to left, black 0%, black 45%, transparent 100%);
@@ -123,7 +207,7 @@
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 104px;
-  /* background-color/imageは.surfaceLight側で指定するため、ここではshorthandの
+  /* background-color/imageは.grainPaper側で指定するため、ここではshorthandの
      backgroundは使わない（shorthandはbackground-imageも一緒にリセットしてしまうため）。 */
   color: var(--ink);
   /* 2026-09-03: 「チケットの丸角をやめて角にする」要望で、外枠の角丸をやめた
@@ -160,7 +244,7 @@
  * 環境依存の消失リスクが低い）を、内部の境界線用に一般化した。
  * --scallop-rightで境界線の位置（半券の幅に応じてずらす量）を、
  * .scallopDark/.scallopDeep/.scallopLightで「そのチケットが乗っている
- * ページ本体の背景」と同じ色を指定する。
+ * ページ本体の背景」と同じ質感を指定する。
  */
 /*
  * 2026-08-28: 「もっと少し小さい楕円形で縦長の円、つなぎめの上下の端は前と同じ感じの
@@ -287,9 +371,9 @@
  * 「リング穴」。既存の.scallopCapTop等と同じ「カードの上に、そのカードが乗って
  * いるページ本体と同じ背景を描いた円を重ねて、そこだけ透けて見える穴が空いて
  * いるように見せる」手法をそのまま流用する（実際に透過させるのではなく、
- * ページの背景と同じ色を描いて錯覚させる）。角丸をやめて四角にしたカードの
+ * ページの背景と同じ質感を描いて錯覚させる）。角丸をやめて四角にしたカードの
  * 左上に、ノートやバインダーの綴じ穴のような丸い穴を1つだけ添える。
- * AccountSummaryはホーム画面（常に.surfaceDarkの背景）にしか使わないため、
+ * AccountSummaryはホーム画面（常に.grainDarkの背景）にしか使わないため、
  * 呼び出し側で.scallopDarkと組み合わせて使う。
  */
 .ringHole {
@@ -309,19 +393,32 @@
   z-index: 2;
 }
 
-/* ホーム（黒背景）に乗るチケットの切り欠き部分の色（ページ背景と同色にする）。 */
+/*
+ * ホーム（背景が黒＋dark-grain）に乗るチケット用。
+ * 2026-08-28: 「窪みから見える色がページ本体の背景と違う」との指摘を受けて確認したところ、
+ * ページ本体の背景（.surfaceDark）はbackground-blend-mode: overlayでテクスチャを
+ * 合成しているのに対し、こちらは合成モード指定が漏れており素のグレースケール画像が
+ * そのまま乗っていた（見た目の色味がずれていた原因）。.grainDarkと同じoverlayに揃えた。
+ */
 .scallopDark {
   background-color: var(--bg);
+  background-image: url("/images/textures/dark-grain-512.webp");
+  background-blend-mode: overlay;
+  background-size: 90px 90px;
 }
 
-/* マイページ（濃色背景）に乗るチケットの切り欠き部分の色。 */
+/* マイページ（背景が茶色いクラフト紙）に乗るチケット用。 */
 .scallopDeep {
   background-color: var(--bg-deep);
+  background-image: url("/images/textures/warm-kraft-paper-512.webp");
+  background-size: 90px 90px;
 }
 
-/* 遊び方・ライブ予定ページ（明るいグレー背景）に乗るチケットの切り欠き部分の色。 */
+/* ライブ予定ページ（背景が明るいコンクリート）に乗るチケット用。 */
 .scallopLight {
   background-color: var(--bg-light);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-size: 90px 90px;
 }
 
 /*
@@ -345,6 +442,8 @@
   z-index: 3;
   pointer-events: none;
   background-color: var(--bg-light);
+  background-image: url("/images/textures/ogiri-light-concrete-512.webp");
+  background-size: 90px 90px;
   -webkit-mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
   mask-image: radial-gradient(circle at 9px 9px, white 8px, transparent 8.5px);
   -webkit-mask-size: 18px 22px;
