@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation";
 import * as audioManager from "@/lib/audio/audioManager";
 import type { AudioManagerState } from "@/lib/audio/audioManager";
 
+import { isNoAudioRoute } from "@/lib/audioRoutes";
+
 import BgmConsentModal from "./BgmConsentModal";
 
 // 運営者専用管理画面(/admin配下)・司会コンソール(/live/host)はBGMを使用しない
@@ -44,9 +46,11 @@ export default function AudioProvider({ children }: { children: React.ReactNode 
   }, []);
 
   // ホーム画面・ライブ画面で使う音声を、実際に鳴らす前に事前読み込みしておく。
+  // 法務文書・/auth/callbackでは読み込まない（移動先の画面で改めて読み込む）。
   useEffect(() => {
+    if (isNoAudioRoute(pathname)) return;
     audioManager.preloadAllSfx();
-  }, []);
+  }, [pathname]);
 
   // 「初回アクセス・ブラウザ更新直後に1回だけ表示、SPA遷移では出さない、
   // React Strict Modeでも二重表示しない」を満たすためのロジック。
@@ -64,7 +68,8 @@ export default function AudioProvider({ children }: { children: React.ReactNode 
   // にしか走らないため実害はない。
   useEffect(() => {
     let flaggedByThisRun = false;
-    if (!audioManager.hasShownBgmPrompt()) {
+    // 法務文書・/auth/callbackで開いた場合は確認済みにせず、次に通常画面へ移った時に出す（下のeffect）。
+    if (!isNoAudioRoute(pathname) && !audioManager.hasShownBgmPrompt()) {
       audioManager.markBgmPromptShown();
       flaggedByThisRun = true;
       if (!isNoBgmPromptPath(pathname)) {
@@ -83,6 +88,15 @@ export default function AudioProvider({ children }: { children: React.ReactNode 
     // マウント時点のパスだけで行い、SPA遷移のたびに再評価しない設計を維持する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 音声対象外の画面から通常画面へSPA遷移した時、まだ確認していなければ1回だけ表示する。
+  useEffect(() => {
+    if (isNoAudioRoute(pathname) || isNoBgmPromptPath(pathname)) return;
+    if (audioManager.hasShownBgmPrompt()) return;
+    audioManager.markBgmPromptShown();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowBgmPrompt(true);
+  }, [pathname]);
 
   return (
     <AudioStateContext.Provider value={state}>

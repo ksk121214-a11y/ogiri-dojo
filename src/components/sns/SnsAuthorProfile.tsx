@@ -7,13 +7,14 @@ import AvatarGlyph from "@/components/app/AvatarGlyph";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import StadiumPageShell from "@/components/home/StadiumPageShell";
-import ReportButton from "@/components/app/ReportButton";
+import SnsAuthorLookupState from "@/components/sns/SnsAuthorLookupState";
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getRankByMeter } from "@/data/collectionData";
-import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { supabase } from "@/lib/supabase";
+import { useAuthorLookup } from "@/lib/useAuthorLookup";
+import { isUuid } from "@/lib/uuid";
 import { useSnsStore } from "@/store/useSnsStore";
 
 type Tab = "answers" | "topics";
@@ -48,14 +49,14 @@ type ProfileAuthor =
 // ブラウザ上でローカル作成されるお題/回答は必ずauthorId==="me"になるため、このページには
 // 現れない（isLocallyCreatedによるリンク無効化は不要）。
 // 2026-08-30: 寄合帳全体を新デザイン（StadiumPageShell）に統一した。
-// 2026-08-30: 実ユーザー（DB投稿者）をタップした際に「演者が見つかりませんでした」に
-// なっていたのを、ダミー投稿者と同じくプロフィール・過去の回答・お題を見られるようにした。
+// 2026-08-30: 実ユーザー（DB投稿者）をタップした際にプロフィールが出なかった
+// のを直し、ダミー投稿者と同じくプロフィール・過去の回答・お題を見られるようにした。
 export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
-  const realAuthor = useSnsStore((s) => s.realAuthorNames[authorId]);
-  const resolveAuthorName = useSnsStore((s) => s.resolveAuthorName);
+  const lookup = useAuthorLookup(authorId);
+  const { dummyAuthor, realAuthor } = lookup;
   const fetchAuthorPosts = useSnsStore((s) => s.fetchAuthorPosts);
 
   const [tab, setTab] = useState<Tab>("answers");
@@ -63,18 +64,15 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
   // 従来どおりsnsAuthors.tsの固定値をそのまま使う。
   const [realCounts, setRealCounts] = useState<{ followers: number; following: number } | null>(null);
 
-  const dummyAuthor = getDummySnsAuthor(authorId);
-
   // 投稿に一度も登場していない実ユーザー（フォロー関係だけで辿り着いた場合等）でも
   // プロフィールが表示できるよう、まだ解決していなければその場で表示名を取得する。
   useEffect(() => {
     if (dummyAuthor) return;
-    resolveAuthorName(authorId);
     fetchAuthorPosts(authorId);
-  }, [authorId, dummyAuthor, resolveAuthorName, fetchAuthorPosts]);
+  }, [authorId, dummyAuthor, fetchAuthorPosts]);
 
   useEffect(() => {
-    if (dummyAuthor) return;
+    if (dummyAuthor || !isUuid(authorId)) return;
     let cancelled = false;
     Promise.all([
       supabase.from("sns_follows").select("id", { count: "exact", head: true }).eq("following_id", authorId),
@@ -128,17 +126,8 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
     return map;
   }, [comments]);
 
-  if (!author) {
-    return (
-      <StadiumPageShell contentTheme="kraft">
-        <div className="flex flex-col items-center gap-4 py-16 text-center">
-          <p className="font-sans text-sm text-[var(--ink)]/70">
-            演者が見つかりませんでした。
-          </p>
-          <SnsBackButton />
-        </div>
-      </StadiumPageShell>
-    );
+  if (lookup.status !== "found" || !author) {
+    return <SnsAuthorLookupState status={lookup.status === "found" ? "not-found" : lookup.status} onRetry={lookup.retry} />;
   }
 
   return (
@@ -146,9 +135,6 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
       <SnsBackButton />
 
       <div className={`${stadiumStyles.surfaceLight} relative flex flex-col items-center gap-3 p-6 text-center text-[var(--ink)]`}>
-        <div className="absolute right-4 top-4">
-          <ReportButton />
-        </div>
         {author.kind === "dummy" ? (
           <span className="flex h-16 w-16 shrink-0 items-center justify-center text-5xl">
             {author.emoji}

@@ -4,15 +4,14 @@ import Link from "next/link";
 import { useMemo } from "react";
 
 import DeleteButton from "@/components/app/DeleteButton";
+import SnsReadOnlyNotice from "@/components/sns/SnsReadOnlyNotice";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
 import SnsLiveResultsFeedList from "@/components/sns/SnsLiveResultsFeedList";
-import { isGuestUser } from "@/lib/guestStatus";
+import { useSnsAccess } from "@/lib/useSnsAccess";
 import { isLocallyCreated } from "@/lib/staticContent";
-import { useAuthStore } from "@/store/useAuthStore";
-import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore, type SnsAudienceKind, type SnsFeedKind, type SnsSortKind } from "@/store/useSnsStore";
 import type { SnsAnswer, SnsTopic } from "@/types/sns";
 
@@ -38,9 +37,8 @@ const SORT_TABS: { key: SnsSortKind; label: string }[] = [
 // 統一したことで旧デザイン（variant="dojo"）を使う画面が無くなったため、分岐ごと削除し
 // 常にこのトンマナ（ホームのチケット意匠＝.surfaceLight等）で表示する。
 export default function SnsFeedSection() {
-  const authUser = useAuthStore((s) => s.user);
-  const profile = useProfileStore((s) => s.profile);
-  const isGuest = isGuestUser(authUser, profile);
+  const access = useSnsAccess();
+  const isGuest = access !== "member";
   const topics = useSnsStore((s) => s.topics);
   const answers = useSnsStore((s) => s.answers);
   const comments = useSnsStore((s) => s.comments);
@@ -111,9 +109,7 @@ export default function SnsFeedSection() {
       {isGuest ? (
         // 2026-09-13（再々レビュー対応）：ゲストは投稿できない仕様のため、押せるのに
         // 拒否される投稿導線自体を見せず、案内文に差し替える（閲覧は引き続き許可）。
-        <p className="text-center font-sans text-xs text-[var(--ink)]/70">
-          ゲスト参加中です。Xでログインすると投稿やリアクションができます。
-        </p>
+        <SnsReadOnlyNotice access={access} verb="投稿・回答・いいね" card={false} />
       ) : (
         <div className="flex justify-center">
           <Link

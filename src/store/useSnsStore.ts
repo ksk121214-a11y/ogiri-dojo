@@ -29,6 +29,7 @@
 // お題・回答・コメントは寄合券を1枚消費するsecurity definer RPC
 // （submit_sns_topic/submit_sns_answer/submit_sns_comment、0043・0058）経由で保存するため、
 // 保存と券消費が同一トランザクションで原子的に行われる（保存に失敗すれば券は減らない）。
+import { isUuid } from "@/lib/uuid";
 import { create } from "zustand";
 
 import {
@@ -193,7 +194,7 @@ interface SnsState {
   fetchAnswerById: (answerId: string) => Promise<SnsAnswer | null>;
   // 投稿に一度も登場していない実ユーザー（フォロー関係だけで存在を知った場合等）の
   // 表示名・アイコンをその場で解決してrealAuthorNamesにキャッシュする。
-  resolveAuthorName: (authorId: string) => Promise<void>;
+  resolveAuthorName: (authorId: string) => Promise<"ok" | "error">;
   // プロフィールページ用：ページネーション導入後は一覧の1ページ目に無いその人の過去投稿が
   // 抜け落ちるため、プロフィールを開いた時点でそのauthorIdの投稿を別途まとめて取得する
   // （N+1ではなく、1ユーザーにつき2回のクエリで完結する）。
@@ -287,9 +288,11 @@ function mapCommentRow(c: DbCommentRow, toAuthorId: (id: string | null) => strin
 }
 
 // 実データ投稿者ID一覧をまとめてsns_author_namesで解決し、storeにキャッシュする。
-async function resolveRealAuthorNames(authorIds: string[]) {
-  if (authorIds.length === 0) return;
-  const { data } = await supabase.rpc("sns_author_names", { p_ids: authorIds });
+// 戻り値：通信・DBエラーなら false（「存在しない」と区別するため）。
+async function resolveRealAuthorNames(authorIds: string[]): Promise<boolean> {
+  if (authorIds.length === 0) return true;
+  const { data, error } = await supabase.rpc("sns_author_names", { p_ids: authorIds });
+  if (error) return false;
   const map: Record<string, RealAuthorInfo> = {};
   for (const row of (data ?? []) as {
     id: string;
@@ -308,6 +311,7 @@ async function resolveRealAuthorNames(authorIds: string[]) {
     };
   }
   useSnsStore.setState((s) => ({ realAuthorNames: { ...s.realAuthorNames, ...map } }));
+  return true;
 }
 
 // Supabaseの一意制約違反（重複いいね・重複フォロー）のエラーコード。連打などで
@@ -543,6 +547,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   fetchTopicById: async (topicId) => {
     const existing = get().topics.find((t) => t.id === topicId);
     if (existing) return existing;
+    if (!isUuid(topicId)) return null;
     const myGeneration = get().generation;
     const { data, error } = await supabase
       .from("sns_topics")
@@ -566,6 +571,7 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   fetchAnswerById: async (answerId) => {
     const existing = get().answers.find((a) => a.id === answerId);
     if (existing) return existing;
+    if (!isUuid(answerId)) return null;
     const myGeneration = get().generation;
     const { data, error } = await supabase
       .from("sns_answers")
@@ -615,12 +621,14 @@ export const useSnsStore = create<SnsState>()((set, get) => ({
   },
 
   resolveAuthorName: async (authorId) => {
-    if (authorId === "me" || get().realAuthorNames[authorId]) return;
-    await resolveRealAuthorNames([authorId]);
+    if (authorId === "me" || get().realAuthorNames[authorId]) return "ok";
+    if (!isUuid(authorId)) return "ok";
+    return (await resolveRealAuthorNames([authorId])) ? "ok" : "error";
   },
 
   fetchAuthorPosts: async (authorId) => {
     if (authorId === "me") return; // 自分の投稿は投稿した瞬間にstateへ入っているため不要。
+    if (!isUuid(authorId)) return;
     const myGeneration = get().generation;
     const myUserId = useAuthStore.getState().user?.id ?? null;
     const toAuthorId = toAuthorIdWith(myUserId);

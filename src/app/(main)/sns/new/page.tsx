@@ -28,6 +28,8 @@ export default function SnsNewTopicPage() {
   const addTopic = useSnsStore((s) => s.addTopic);
   const profile = useProfileStore((s) => s.profile);
   const authUser = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.loading);
+  const profileLoading = useProfileStore((s) => s.loading);
   // 2026-09-25（利用規約同意ゲート対応）：共通の同意ゲート経由にする。
   const signInWithX = useConsentGateStore((s) => s.requestXLogin);
   const [body, setBody] = useState("");
@@ -42,7 +44,9 @@ export default function SnsNewTopicPage() {
   const nextTicketRecoveryAt = displayedTickets.nextRecoveryAt;
 
   const overLimit = body.length > MAX_LENGTH;
-  const noTicket = ticketCount <= 0;
+  // プロフィール取得中・取得失敗（profile null）は券0枚と区別する（誤表示防止）。
+  const ticketKnown = !!profile && !profileLoading;
+  const noTicket = ticketKnown && ticketCount <= 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +68,43 @@ export default function SnsNewTopicPage() {
   // 2026-09-13（0070ゲスト参加レビュー対応）：ゲストはsubmit_sns_topic（DB）が
   // GUEST_NOT_ALLOWEDで拒否するため、フォームを見せずに案内へ差し替える
   // （「寄合券が0枚のため投稿できません」という誤解を招く表示を避ける）。
+  if (authLoading) {
+    return (
+      <StadiumPageShell contentTheme="kraft">
+        <p className="py-16 text-center font-sans text-sm font-bold text-[var(--ink)]/90">読み込み中…</p>
+      </StadiumPageShell>
+    );
+  }
+
+  // 未ログインはフォームを見せず、ログイン案内へ差し替える（投稿にはXログインが必要）。
+  if (!authUser) {
+    return (
+      <StadiumPageShell contentTheme="kraft">
+        <SnsBackButton
+          fallbackHref="/mypage"
+          className="w-fit font-sans text-xs font-bold text-[var(--ink)]/90 hover:text-[var(--ink)]"
+        />
+        <div className={`${stadiumStyles.surfaceLight} flex flex-col items-center gap-3 p-6 text-center`}>
+          <p className="font-sans text-sm text-[var(--ink)]/80">
+            Xでログインすると、お題を投稿できます。
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              setXLoginError(null);
+              const result = await signInWithX();
+              if (!result.ok && result.reason) setXLoginError(result.reason);
+            }}
+            className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+          >
+            Xでログイン
+          </button>
+          {xLoginError && <p className="font-sans text-xs text-[var(--accent-on-light)]">{xLoginError}</p>}
+        </div>
+      </StadiumPageShell>
+    );
+  }
+
   if (isGuestUser(authUser, profile)) {
     return (
       <StadiumPageShell contentTheme="kraft">
@@ -142,7 +183,7 @@ export default function SnsNewTopicPage() {
         {error && <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">{error}</p>}
         <button
           type="submit"
-          disabled={!body.trim() || overLimit || noTicket || submitting}
+          disabled={!body.trim() || overLimit || !ticketKnown || noTicket || submitting}
           className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} w-full px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:!bg-[#71717a] disabled:!text-white`}
         >
           {submitting ? "投稿中…" : "投稿する（寄合券を1枚使う）"}

@@ -74,7 +74,7 @@ function DateLine({
   );
 }
 
-// 半券（バーコード＋チケット番号＋SAMPLE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
+// 半券（バーコード＋チケット番号＋LIVE）。stubClassで本券の色味（赤テクスチャ／黒テクスチャ）を切り替える。
 // ticketNoがnull（=その表示先にまだライブ予定が割り当てられていない「準備中」）の場合も、
 // 半券自体（赤/黒の色分けされた部分）は常に表示したままにし、番号欄だけ空にする
 // （2026-08-30：運営者専用管理画面の追加。準備中でもチケットの型は崩さない要望）。
@@ -105,7 +105,7 @@ function TicketStub({ ticketNo, stubClass }: { ticketNo: string | null; stubClas
         </div>
         <div className="flex flex-col items-center justify-center gap-1">
           <span className="[writing-mode:vertical-rl] text-[11px] leading-none font-bold tracking-normal">
-            SAMPLE
+            LIVE
           </span>
           <span className="flex flex-col items-center gap-0.5 text-[11px] leading-none" aria-hidden>
             <span>★</span>

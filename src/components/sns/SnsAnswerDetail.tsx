@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 
 import DeleteButton from "@/components/app/DeleteButton";
+import SnsReadOnlyNotice from "@/components/sns/SnsReadOnlyNotice";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -15,8 +16,7 @@ import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
-import { isGuestUser } from "@/lib/guestStatus";
-import { useAuthStore } from "@/store/useAuthStore";
+import { useSnsAccess } from "@/lib/useSnsAccess";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -39,7 +39,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const addComment = useSnsStore((s) => s.addComment);
   const fetchAnswerById = useSnsStore((s) => s.fetchAnswerById);
   const profile = useProfileStore((s) => s.profile);
-  const authUser = useAuthStore((s) => s.user);
+  const access = useSnsAccess();
 
   const [body, setBody] = useState("");
   const [likePending, setLikePending] = useState(false);
@@ -56,7 +56,9 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
     : { count: 0, nextRecoveryAt: null };
   const ticketCount = displayedTickets.count;
   const nextTicketRecoveryAt = displayedTickets.nextRecoveryAt;
-  const noTicket = ticketCount <= 0;
+  // 会員情報の取得前・取得失敗は「券0枚」と区別する（誤表示防止）。
+  const ticketKnown = !!profile;
+  const noTicket = ticketKnown && ticketCount <= 0;
   // 取得を試みて完了したか（true になるまでは「読み込み中」、完了してもanswerが
   // 無ければ「見つかりませんでした」を出す）。
   const [loadAttempted, setLoadAttempted] = useState(false);
@@ -102,7 +104,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
   const overLimit = body.length > MAX_LENGTH;
   // 2026-09-13（再々レビュー対応）：ゲストはツッコめない・いいねできない仕様のため、
   // 投稿入力欄・送信ボタン・いいねボタン自体を表示しない（閲覧は引き続き許可する）。
-  const isGuest = isGuestUser(authUser, profile);
+  const isGuest = access !== "member";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -219,11 +221,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
       </div>
 
       {isGuest ? (
-        <p
-          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent-on-light)]`}
-        >
-          ゲストはツッコめません。Xでログインしてください。
-        </p>
+        <SnsReadOnlyNotice access={access} verb="ツッコミ" />
       ) : (
         <form
           onSubmit={handleSubmit}
@@ -257,7 +255,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             </span>
             <button
               type="submit"
-              disabled={!body.trim() || overLimit || noTicket || submitting}
+              disabled={!body.trim() || overLimit || !ticketKnown || noTicket || submitting}
               className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {submitting ? "送信中…" : "ツッコむ（寄合券を1枚使う）"}

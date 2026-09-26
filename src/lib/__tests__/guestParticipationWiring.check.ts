@@ -248,7 +248,7 @@ const snsLiveResultsStore = readFileSync(
 //    （押せるのに拒否される体験を避ける。閲覧は引き続き許可）。
 {
   assert.ok(
-    /if \(isGuestUser\(authUser, profile\)\) return null;/.test(reportButton),
+    /isGuestUser\(authUser, profile\) \|\| !isUuid\(targetId\)\) return null;/.test(reportButton),
     "ReportButtonがゲストに対してnullを返す早期returnを持っていない",
   );
   console.log("PASS: ReportButtonはゲストに対して表示されない");
@@ -258,7 +258,7 @@ const snsLiveResultsStore = readFileSync(
 //    表示しない。
 {
   assert.ok(
-    /if \(isGuestUser\(authUser, profile\)\) return null;/.test(snsFollowButton),
+    /if \(access !== "member"\) return null;/.test(snsFollowButton) && /useSnsAccess\(\)/.test(snsFollowButton),
     "SnsFollowButtonがゲストに対してnullを返す早期returnを持っていない",
   );
   console.log("PASS: SnsFollowButtonはゲストに対して表示されない");
@@ -269,14 +269,14 @@ const snsLiveResultsStore = readFileSync(
 //    操作不可の静的表示に差し替える（閲覧・件数表示は引き続き許可）。
 {
   assert.ok(
-    /const isGuest = isGuestUser\(authUser, profile\);/.test(snsTopicDetail),
+    /const isGuest = access !== "member";/.test(snsTopicDetail),
     "SnsTopicDetailにisGuest判定が無い",
   );
   const formGuestIdx = snsTopicDetail.indexOf("{isGuest ? (");
   assert.ok(formGuestIdx >= 0, "SnsTopicDetailに{isGuest ? (…分岐が見つからない");
   const formBlock = snsTopicDetail.slice(formGuestIdx, formGuestIdx + 400);
   assert.ok(
-    /ゲストは回答できません/.test(formBlock),
+    /<SnsReadOnlyNotice access=\{access\} verb="回答"/.test(formBlock),
     "SnsTopicDetailがゲストに対して回答フォームの代わりの案内文を出していない",
   );
   const likeGuestIdx = snsTopicDetail.indexOf("{isGuest ? (", formGuestIdx + 1);
@@ -293,7 +293,7 @@ const snsLiveResultsStore = readFileSync(
 //    ゲストにはツッコミ投稿欄・いいねボタンを表示しない。
 {
   assert.ok(
-    /const isGuest = isGuestUser\(authUser, profile\);/.test(snsAnswerDetail),
+    /const isGuest = access !== "member";/.test(snsAnswerDetail),
     "SnsAnswerDetailにisGuest判定が無い",
   );
   const likeGuestIdx = snsAnswerDetail.indexOf("{isGuest ? (");
@@ -307,7 +307,7 @@ const snsLiveResultsStore = readFileSync(
   assert.ok(formGuestIdx >= 0, "SnsAnswerDetailに{isGuest ? (…分岐（ツッコミフォーム）が見つからない");
   const formBlock = snsAnswerDetail.slice(formGuestIdx, formGuestIdx + 400);
   assert.ok(
-    /ゲストはツッコめません/.test(formBlock),
+    /<SnsReadOnlyNotice access=\{access\} verb="ツッコミ"/.test(formBlock),
     "SnsAnswerDetailがゲストに対してツッコミフォームの代わりの案内文を出していない",
   );
   console.log("PASS: SnsAnswerDetailはゲストにツッコミフォーム・いいねボタンを表示しない（閲覧は許可）");
@@ -317,14 +317,14 @@ const snsLiveResultsStore = readFileSync(
 //    表示せず、案内文に差し替える。
 {
   assert.ok(
-    /const isGuest = isGuestUser\(authUser, profile\);/.test(snsFeedSection),
+    /const isGuest = access !== "member";/.test(snsFeedSection),
     "SnsFeedSectionにisGuest判定が無い",
   );
   const guestIdx = snsFeedSection.indexOf("{isGuest ? (");
   assert.ok(guestIdx >= 0, "SnsFeedSectionに{isGuest ? (…分岐が見つからない");
   const block = snsFeedSection.slice(guestIdx, guestIdx + 400);
   assert.ok(
-    /ゲスト参加中です。Xでログインすると投稿やリアクションができます/.test(block),
+    /<SnsReadOnlyNotice access=\{access\} verb="投稿・回答・いいね"/.test(block),
     "SnsFeedSectionがゲストに対して投稿導線の代わりの案内文を出していない",
   );
   console.log("PASS: SnsFeedSectionはゲストに「お題を投稿する」導線を表示しない");
@@ -334,7 +334,7 @@ const snsLiveResultsStore = readFileSync(
 //    ゲストにはいいねボタン・コメント入力欄を表示しない（閲覧・コメント一覧は許可）。
 {
   assert.ok(
-    /const isGuest = isGuestUser\(authUser, profile\);/.test(snsLiveResultBody),
+    /const isGuest = access !== "member";/.test(snsLiveResultBody),
     "SnsLiveResultBodyにisGuest判定が無い",
   );
   const likeGuestIdx = snsLiveResultBody.indexOf("{isGuest ? (");
@@ -345,7 +345,7 @@ const snsLiveResultsStore = readFileSync(
     "SnsLiveResultBodyのいいねボタンがゲストに対して静的表示へ差し替わっていない",
   );
   assert.ok(
-    /ゲストはコメントできません。Xでログインしてください。/.test(snsLiveResultBody),
+    /<SnsReadOnlyNotice access=\{access\} verb="コメント"/.test(snsLiveResultBody),
     "SnsLiveResultBodyがゲストに対してコメント入力欄の代わりの案内文を出していない",
   );
   console.log("PASS: SnsLiveResultBodyはゲストにいいねボタン・コメント入力欄を表示しない（閲覧・コメント一覧は許可）");

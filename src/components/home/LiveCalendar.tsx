@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 
+import { pickInitialCalendarMonth } from "@/lib/calendarInitialMonth";
+
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
 export interface CalendarMark {
@@ -22,9 +24,12 @@ const MARK_STYLE: Record<CalendarMark["kind"], string> = {
 // マーキングする（実際の開催通知・繰り返しスケジュール機能は未実装のダミー表示）。
 // 外部の日付ライブラリは使わず、素のDateだけで月グリッドを組み立てている。
 export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
-  // 表示中のダミーライブが実際に見える状態で開くよう、初期表示月は
-  // マーク済み日付の最初の月（=今回のライブがある月）にしている。
-  const initial = marks[0] ?? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  // 初期表示月は「今日以降で最も近い開催日の月」（無ければ最新の過去開催日、マークなしなら今月）。
+  // marksは読み込み完了後に渡すこと（初期値は最初のレンダリングでしか使われない）。
+  const [initial] = useState(() => {
+    const now = new Date();
+    return pickInitialCalendarMonth(marks, { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() });
+  });
   const [viewYear, setViewYear] = useState(initial.year);
   const [viewMonth, setViewMonth] = useState(initial.month);
 

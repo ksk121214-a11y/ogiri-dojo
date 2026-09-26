@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
-import ReportButton from "@/components/app/ReportButton";
 import XShareButton from "@/components/app/XShareButton";
 import MasteryGauge from "@/components/live-demo/MasteryGauge";
 import { MASTERY_GAIN } from "@/data/collectionData";
@@ -246,7 +245,6 @@ export default function FinalResultView({
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="tabular-nums text-[#ff8f00]">{r.total}点</span>
-                        {!isMe && <ReportButton size={16} />}
                       </span>
                     </div>
                   );

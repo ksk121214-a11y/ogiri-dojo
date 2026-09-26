@@ -1,5 +1,6 @@
 "use client";
 
+import { reportTargetAuthorId } from "@/lib/reportSubmit";
 import Link from "next/link";
 
 import AvatarGlyph from "@/components/app/AvatarGlyph";
@@ -100,13 +101,13 @@ export default function SnsAuthorBadge({
           {author?.displayName ?? realAuthor?.displayName ?? "名無しの演者"}
         </span>
       </Link>
-      {!hideReportButton && (
+      {!hideReportButton && reportTarget && (
         <ReportButton
           size={Math.max(16, size * 0.55)}
-          targetType={reportTarget?.type}
-          targetId={reportTarget?.id}
-          targetAuthorId={authorId.startsWith("author-") ? null : authorId}
-          snapshotBody={reportTarget?.body}
+          targetType={reportTarget.type}
+          targetId={reportTarget.id}
+          targetAuthorId={reportTargetAuthorId(authorId)}
+          snapshotBody={reportTarget.body}
         />
       )}
     </span>
@@ -116,6 +117,4 @@ export default function SnsAuthorBadge({
 // カード全体の右端中央にReportButtonを絶対配置したい呼び出し元向けのヘルパー。
 // authorIdが"author-"始まり（ダミー投稿者）の場合はtargetAuthorIdをnullにする
 // SnsAuthorBadge内部と同じ判定を、呼び出し元でも重複させないための共通関数。
-export function reportTargetAuthorId(authorId: string): string | null {
-  return authorId.startsWith("author-") ? null : authorId;
-}
+export { reportTargetAuthorId };

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import DeleteButton from "@/components/app/DeleteButton";
+import SnsReadOnlyNotice from "@/components/sns/SnsReadOnlyNotice";
 import ReportButton from "@/components/app/ReportButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
@@ -13,9 +14,8 @@ import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthor
 import SnsBackButton from "@/components/sns/SnsBackButton";
 import { computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
-import { isGuestUser } from "@/lib/guestStatus";
+import { useSnsAccess } from "@/lib/useSnsAccess";
 import { isLocallyCreated } from "@/lib/staticContent";
-import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsStore } from "@/store/useSnsStore";
 
@@ -39,7 +39,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   const toggleLike = useSnsStore((s) => s.toggleLike);
   const fetchTopicById = useSnsStore((s) => s.fetchTopicById);
   const profile = useProfileStore((s) => s.profile);
-  const authUser = useAuthStore((s) => s.user);
+  const access = useSnsAccess();
 
   const [body, setBody] = useState("");
   const [likeError, setLikeError] = useState<string | null>(null);
@@ -103,11 +103,13 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
   }
 
   const overLimit = body.length > MAX_LENGTH;
-  const noTicket = ticketCount <= 0;
+  // 会員情報の取得前・取得失敗は「券0枚」と区別する（誤表示防止）。
+  const ticketKnown = !!profile;
+  const noTicket = ticketKnown && ticketCount <= 0;
   // 2026-09-13（再々レビュー対応）：ゲストは回答できない仕様のため、投稿入力欄・
   // 送信ボタン自体を表示しない（押せるのに拒否される体験を避ける。閲覧・
   // いいね数の表示は引き続き許可する）。
-  const isGuest = isGuestUser(authUser, profile);
+  const isGuest = access !== "member";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,11 +186,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
       </div>
 
       {isGuest ? (
-        <p
-          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent-on-light)]`}
-        >
-          ゲストは回答できません。Xでログインしてください。
-        </p>
+        <SnsReadOnlyNotice access={access} verb="回答" />
       ) : (
         <form
           onSubmit={handleSubmit}
@@ -222,7 +220,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             </span>
             <button
               type="submit"
-              disabled={!body.trim() || overLimit || noTicket || submitting}
+              disabled={!body.trim() || overLimit || !ticketKnown || noTicket || submitting}
               className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {/* 2026-09-07:「押すと寄合券を使うことがボタンを見ただけで分かるように」の

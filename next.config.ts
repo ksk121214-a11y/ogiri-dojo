@@ -19,6 +19,23 @@ const nextConfig: NextConfig = {
   // 既にキャッシュ済みのブラウザ・CDNには古い内容が長期間残り続ける。素材を更新する
   // 場合は、ファイル名またはパスに新しいバージョンを付けて別URLにすること
   // （既存ファイルの上書きはしない）。
+  // 開発用モック画面（/live-demo・/live/design-preview*）は本番では存在しない画面にする。
+  // 存在しないパスへのrewriteにより、本文だけでなくHTTPステータスも404になる
+  // （layoutのnotFound()だけだと静的生成のストリーミングでステータスが200になるため）。
+  async rewrites() {
+    if (process.env.NODE_ENV !== "production") return [];
+    // 既存ページより先に評価する必要があるためbeforeFiles。
+    const beforeFiles = [
+      { source: "/live-demo", destination: "/__dev-only-not-found" },
+      { source: "/live-demo/:path*", destination: "/__dev-only-not-found" },
+      { source: "/live/design-preview", destination: "/__dev-only-not-found" },
+      { source: "/live/design-preview/:path*", destination: "/__dev-only-not-found" },
+      { source: "/live/design-preview-2", destination: "/__dev-only-not-found" },
+      { source: "/live/design-preview-2/:path*", destination: "/__dev-only-not-found" },
+    ];
+    return { beforeFiles };
+  },
+
   async headers() {
     const immutableCacheHeaders = [
       { key: "Cache-Control", value: "public, max-age=31536000, immutable" },

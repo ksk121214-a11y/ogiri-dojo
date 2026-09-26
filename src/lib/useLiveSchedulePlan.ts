@@ -11,6 +11,9 @@ export interface LiveSchedulePlanResult {
   upcoming: LiveScheduleEntry | null;
   homeUpcoming: LiveScheduleEntry | null;
   loading: boolean;
+  // 直近の取得に失敗した（表示中のデータは最後に成功した内容のまま）。
+  error: boolean;
+  reload: () => Promise<void>;
 }
 
 // 運営者専用管理画面の追加：ホーム・次回ライブ画面・カレンダーが参照する
@@ -31,10 +34,10 @@ export interface LiveSchedulePlanResult {
 // モジュールスコープに前回の取得結果をキャッシュし、次回以降のマウント時は
 // それを初期値として使うことで、同一セッション内での再訪問時は最初から正しい
 // 見た目で表示できるようにする（キャッシュが無い初回訪問時だけは従来どおり）。
-let cachedPlan: LiveSchedulePlanResult | null = null;
+let cachedPlan: Omit<LiveSchedulePlanResult, "reload"> | null = null;
 
 export function useLiveSchedulePlan(): LiveSchedulePlanResult {
-  const [state, setState] = useState<LiveSchedulePlanResult>(
+  const [state, setState] = useState<Omit<LiveSchedulePlanResult, "reload">>(
     () =>
       cachedPlan ?? {
         previous: null,
@@ -42,22 +45,29 @@ export function useLiveSchedulePlan(): LiveSchedulePlanResult {
         upcoming: null,
         homeUpcoming: null,
         loading: true,
+        error: false,
       },
   );
 
   const load = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("live_schedule_entries")
       .select("*")
       .in("display_role", ["previous", "current", "upcoming", "home_upcoming"]);
+    if (error) {
+      // 取得失敗を「予定なし」として表示・キャッシュしない。最後に成功した内容を残す。
+      setState((prev) => ({ ...prev, loading: false, error: true }));
+      return;
+    }
     const rows = (data ?? []) as LiveScheduleEntry[];
     const byRole = (role: string) => rows.find((r) => r.display_role === role) ?? null;
-    const next: LiveSchedulePlanResult = {
+    const next: Omit<LiveSchedulePlanResult, "reload"> = {
       previous: byRole("previous"),
       current: byRole("current"),
       upcoming: byRole("upcoming"),
       homeUpcoming: byRole("home_upcoming"),
       loading: false,
+      error: false,
     };
     cachedPlan = next;
     setState(next);
@@ -78,5 +88,5 @@ export function useLiveSchedulePlan(): LiveSchedulePlanResult {
     };
   }, [load]);
 
-  return state;
+  return { ...state, reload: load };
 }

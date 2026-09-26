@@ -44,7 +44,7 @@ function buildIcsContent(scheduledAtIso: string, ticketNo: string, reception: st
 // 2026-08-30（さらに追記）：「前回/今回/次回」の自動判定をやめ、運営が/admin/scheduleで
 // 手動割り当てるlive_schedule_entries（表示専用データ）から取得するように変更した。
 export default function LiveSchedulePage() {
-  const { previous, current, upcoming, loading } = useLiveSchedulePlan();
+  const { previous, current, upcoming, loading, error, reload } = useLiveSchedulePlan();
 
   const currentReception = current ? formatScheduleReception(current.reception_time) : null;
 
@@ -84,6 +84,21 @@ export default function LiveSchedulePage() {
         <div className="mt-2 h-[3px] w-full bg-[var(--ink)]" aria-hidden />
       </div>
 
+      {error && (
+        <div className="flex flex-col items-center gap-2 bg-[var(--paper)]/70 p-4 text-center">
+          <p className="font-sans text-xs font-bold text-[var(--accent-on-light)]">
+            ライブ予定を取得できませんでした。通信状況を確認してもう一度お試しください。
+          </p>
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="border border-[var(--ink)]/40 px-4 py-1.5 font-sans text-xs font-bold text-[var(--ink)] hover:bg-[var(--ink)]/5"
+          >
+            再試行
+          </button>
+        </div>
+      )}
+
       {!loading && (
         <>
           <PreviousLiveCard
@@ -110,7 +125,17 @@ export default function LiveSchedulePage() {
       )}
 
       <div className="bg-[var(--paper)]/70 p-4">
-        <LiveCalendar marks={calendarMarks} />
+        {loading ? (
+          <p className="py-8 text-center font-sans text-sm font-bold text-[var(--ink)]/75">読み込み中…</p>
+        ) : error && calendarMarks.length === 0 ? (
+          // 取得失敗で予定が一度も得られていない間はカレンダーを出さない
+          // （初期月は初回描画で確定するため、再取得成功後に正しい月で描画し直す）。
+          <p className="py-8 text-center font-sans text-sm font-bold text-[var(--ink)]/75">
+            予定を取得できていないため、カレンダーを表示できません。
+          </p>
+        ) : (
+          <LiveCalendar marks={calendarMarks} />
+        )}
       </div>
 
       {/* 2026-09-01: 「開催通知」トグルは見た目のON/OFFのみで実際の通知配信と

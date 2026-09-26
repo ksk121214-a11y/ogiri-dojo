@@ -151,13 +151,13 @@ async function main() {
   const { useSnsLiveResultsStore } = require("@/store/useSnsLiveResultsStore") as
     typeof import("@/store/useSnsLiveResultsStore");
 
-  liveResultRowById.set("lr1", { id: "lr1", live_id: "live1", manager_best_answer_id: null, manager_comment: null });
+  liveResultRowById.set("a1a1a1a1-0000-4000-8000-0000000000a1", { id: "a1a1a1a1-0000-4000-8000-0000000000a1", live_id: "live1", manager_best_answer_id: null, manager_comment: null });
   liveRowById.set("live1", { id: "live1", official_sequence_number: 1, title: null, ended_at: null, results_published: true });
 
   // 会員Aとして詳細を取得する（このモジュールが読み込まれて以降、初めての
   // fetchDetail呼び出し）。
-  await useSnsLiveResultsStore.getState().fetchDetail("lr1");
-  assert.ok(useSnsLiveResultsStore.getState().details["lr1"], "会員Aの詳細取得が反映されていない");
+  await useSnsLiveResultsStore.getState().fetchDetail("a1a1a1a1-0000-4000-8000-0000000000a1");
+  assert.ok(useSnsLiveResultsStore.getState().details["a1a1a1a1-0000-4000-8000-0000000000a1"], "会員Aの詳細取得が反映されていない");
   const generationAfterA = useSnsLiveResultsStore.getState().generation;
 
   // ---- 最初のアカウント切替（A→B）。以前はこの切替が「初期値の設定」として
@@ -192,12 +192,12 @@ async function main() {
 
   // ---- 古い世代のfetchDetailが遅れて完了しても、新しい世代が同じ
   //      liveResultIdへ既に開始していたdetailLoadingを消さない。----
-  liveResultRowById.set("lr2", { id: "lr2", live_id: "live2", manager_best_answer_id: null, manager_comment: null });
+  liveResultRowById.set("a2a2a2a2-0000-4000-8000-0000000000a2", { id: "a2a2a2a2-0000-4000-8000-0000000000a2", live_id: "live2", manager_best_answer_id: null, manager_comment: null });
   liveRowById.set("live2", { id: "live2", official_sequence_number: 2, title: null, ended_at: null, results_published: true });
 
   liveResultCallSeq = 0; // このシナリオ用にコール番号を振り直す。
   holdLiveResultCall(0); // userB（切替前）からの1回目の呼び出しを保留する。
-  const staleFetch = useSnsLiveResultsStore.getState().fetchDetail("lr2"); // userBとして開始
+  const staleFetch = useSnsLiveResultsStore.getState().fetchDetail("a2a2a2a2-0000-4000-8000-0000000000a2"); // userBとして開始
   await waitMicrotasks(); // 保留ポイントまで進める
 
   // Bのまま留まらず、さらにCへ切り替える（世代が進み、detailLoading等がリセットされる）。
@@ -206,10 +206,10 @@ async function main() {
 
   holdLiveResultCall(1); // userC（切替後）の2回目の呼び出しも保留し、「新しい世代の
   // 処理がまだ完了していない」状態を作る。
-  const freshFetch = useSnsLiveResultsStore.getState().fetchDetail("lr2"); // userCとして開始
+  const freshFetch = useSnsLiveResultsStore.getState().fetchDetail("a2a2a2a2-0000-4000-8000-0000000000a2"); // userCとして開始
   await waitMicrotasks();
   assert.equal(
-    useSnsLiveResultsStore.getState().detailLoading["lr2"],
+    useSnsLiveResultsStore.getState().detailLoading["a2a2a2a2-0000-4000-8000-0000000000a2"],
     true,
     "新しい世代(userC)のfetchDetailがdetailLoadingを立てていない",
   );
@@ -218,12 +218,12 @@ async function main() {
   releaseLiveResultCall(0);
   await staleFetch;
   assert.equal(
-    useSnsLiveResultsStore.getState().detailLoading["lr2"],
+    useSnsLiveResultsStore.getState().detailLoading["a2a2a2a2-0000-4000-8000-0000000000a2"],
     true,
     "古い世代の遅延処理が完了した際、新しい世代がまだ処理中のdetailLoadingを誤って消してしまった",
   );
   assert.equal(
-    useSnsLiveResultsStore.getState().details["lr2"],
+    useSnsLiveResultsStore.getState().details["a2a2a2a2-0000-4000-8000-0000000000a2"],
     undefined,
     "古い世代の遅延処理が、新しい世代のdetailsへ古い内容を書き込んでしまった",
   );
@@ -233,11 +233,11 @@ async function main() {
   releaseLiveResultCall(1);
   await freshFetch;
   assert.equal(
-    useSnsLiveResultsStore.getState().detailLoading["lr2"],
+    useSnsLiveResultsStore.getState().detailLoading["a2a2a2a2-0000-4000-8000-0000000000a2"],
     undefined,
     "新しい世代自身の処理が完了したのにdetailLoadingが解除されていない",
   );
-  assert.ok(useSnsLiveResultsStore.getState().details["lr2"], "新しい世代自身の処理が完了したのにdetailsへ反映されていない");
+  assert.ok(useSnsLiveResultsStore.getState().details["a2a2a2a2-0000-4000-8000-0000000000a2"], "新しい世代自身の処理が完了したのにdetailsへ反映されていない");
   console.log("PASS: 新しい世代自身のfetchDetailは正常に完了し、pendingが正しく解除される");
 
   console.log("ALL USE_SNS_LIVE_RESULTS_STORE_SWITCH CHECKS PASSED");

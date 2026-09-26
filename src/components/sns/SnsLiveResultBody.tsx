@@ -3,16 +3,16 @@
 import { useState } from "react";
 import type { MouseEvent } from "react";
 
+import SnsReadOnlyNotice from "@/components/sns/SnsReadOnlyNotice";
 import ReportButton from "@/components/app/ReportButton";
 import XShareButton from "@/components/app/XShareButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
-import SnsAuthorBadge, { reportTargetAuthorId } from "@/components/sns/SnsAuthorBadge";
+import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import { isOwnAuthorId, reportTargetAuthorId } from "@/lib/reportSubmit";
 import { APP_NAME } from "@/lib/appInfo";
-import { isGuestUser } from "@/lib/guestStatus";
+import { useSnsAccess } from "@/lib/useSnsAccess";
 import { formatLiveTicketNo } from "@/lib/liveTicketNo";
-import { useAuthStore } from "@/store/useAuthStore";
-import { useProfileStore } from "@/store/useProfileStore";
 import { useSnsLiveResultsStore } from "@/store/useSnsLiveResultsStore";
 import type { SnsLiveResultAnswerCard, SnsLiveResultDetail, SnsLiveResultLabel } from "@/types/snsLiveResults";
 
@@ -121,12 +121,11 @@ function LiveResultCard({
   // このカードのresultAnswerIdに紐づくコメントを、いま開いている詳細キャッシュ全体
   // （複数のライブ結果を見た場合はその全部）から拾う。
   const allDetails = useSnsLiveResultsStore((s) => s.details);
-  const authUser = useAuthStore((s) => s.user);
-  const profile = useProfileStore((s) => s.profile);
   // 2026-09-13（再々レビュー対応）：ゲストはライブ結果へのいいね・コメントが
   // できない仕様のため、操作UI自体を表示しない（閲覧・コメント一覧の表示は
   // 引き続き許可する）。
-  const isGuest = isGuestUser(authUser, profile);
+  const access = useSnsAccess();
+  const isGuest = access !== "member";
   const [likePending, setLikePending] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
@@ -242,21 +241,21 @@ function LiveResultCard({
                     </span>
                   </div>
                   <p className="font-sans text-sm text-[var(--ink)]">{comment.body}</p>
-                  <ReportButton
-                    className="absolute right-2 top-1/2 -translate-y-1/2"
-                    targetType="live_result_comment"
-                    targetId={comment.id}
-                    targetAuthorId={reportTargetAuthorId(comment.authorId)}
-                    snapshotBody={comment.body}
-                  />
+                  {!isOwnAuthorId(comment.authorId) && (
+                    <ReportButton
+                      className="absolute right-2 top-1/2 -translate-y-1/2"
+                      targetType="live_result_comment"
+                      targetId={comment.id}
+                      targetAuthorId={reportTargetAuthorId(comment.authorId)}
+                      snapshotBody={comment.body}
+                    />
+                  )}
                 </div>
               ))}
               {isGuest ? (
                 // 2026-09-13（再々レビュー対応）：ゲストはコメントできない仕様のため、
                 // 入力欄・送信ボタン自体を表示しない（コメント一覧の閲覧は許可のまま）。
-                <p className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">
-                  ゲストはコメントできません。Xでログインしてください。
-                </p>
+                <SnsReadOnlyNotice access={access} verb="コメント" card={false} />
               ) : (
                 <form onSubmit={handleSubmitComment} className="flex flex-col gap-1.5">
                   <textarea

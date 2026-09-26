@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 
-import { isGuestUser } from "@/lib/guestStatus";
-import { useAuthStore } from "@/store/useAuthStore";
-import { useProfileStore } from "@/store/useProfileStore";
+import { useSnsAccess } from "@/lib/useSnsAccess";
 import { useSnsStore } from "@/store/useSnsStore";
 
 // 大喜利SNS本家のFollowButton相当。自分自身（authorId === "me"）には表示しない。
@@ -19,8 +17,7 @@ export default function SnsFollowButton({
 }) {
   const following = useSnsStore((s) => s.followingAuthorIds.includes(authorId));
   const toggleFollow = useSnsStore((s) => s.toggleFollow);
-  const authUser = useAuthStore((s) => s.user);
-  const profile = useProfileStore((s) => s.profile);
+  const access = useSnsAccess();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +25,7 @@ export default function SnsFollowButton({
   // 2026-09-13（再々レビュー対応）：ゲストはフォローできない仕様のため、
   // 押せるのに拒否されるボタンを見せず、フォローボタン自体を表示しない
   // （閲覧は引き続き許可されたまま、UIだけ読み取り専用にする）。
-  if (isGuestUser(authUser, profile)) return null;
+  if (access !== "member") return null;
 
   const handleClick = async (e: React.MouseEvent) => {
     // リンクやカードのクリック領域内に置かれた場合に伝播しないようにする。

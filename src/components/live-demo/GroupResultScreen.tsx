@@ -5,7 +5,6 @@ import { useEffect, useRef } from "react";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
-import ReportButton from "@/components/app/ReportButton";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
 import {
   getCurrentTurn,
@@ -76,7 +75,6 @@ export default function GroupResultScreen() {
                   <span className="font-sans font-bold tabular-nums text-[#ff8f00]">
                     {entry.total}点
                   </span>
-                  {!isMe && <ReportButton size={18} />}
                 </span>
               </motion.div>
             );

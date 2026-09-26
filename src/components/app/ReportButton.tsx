@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CheckGlyph, FlagGlyph } from "@/components/home/icons";
 import { isGuestUser } from "@/lib/guestStatus";
 import { supabase } from "@/lib/supabase";
+import { createReportSubmitter, reportTargetAuthorId } from "@/lib/reportSubmit";
+import { isUuid } from "@/lib/uuid";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
@@ -12,13 +14,11 @@ const REASON_OPTIONS = ["不適切な表現", "スパム", "なりすまし", "�
 
 export type ReportTargetType = "sns_topic" | "sns_answer" | "sns_comment" | "live_result_comment";
 
-// 演者アイコンが表示される箇所（寄合帳の投稿・プロフィール、番付表、結果発表など）に共通設置する
-// 通報ボタン。過度に卑猥・グロテスクな表現などの不適切な内容を、確認ダイアログを一度挟んでから
-// 報告済み状態にする。
-// 2026-08-30（運営者専用管理画面の追加・第3段階）：通報対象（target/targetId等）が
-// 渡された場合は実際にreportsテーブルへ保存する（理由選択＋詳細入力を挟む）ようにした。
-// これらのpropsが渡されない呼び出し元（まだ対応していない箇所・ダミー投稿等）では、
-// 従来どおりwindow.confirmのみのダミー確認に留める（保存しない）。
+// 通報ボタン。通報対象（種別とID）を特定できるものだけに設置し、確認（理由選択＋詳細入力）の
+// 後にreportsテーブルへ実際に保存する。保存に成功した場合だけ「報告済み」表示にする。
+// 対象を特定できない画面（演者プロフィール・ライブの結果画面など、DBが通報対象として
+// 未対応のもの）には設置しない：画面上だけ「通報済み」になり運営へ届かない偽の確認を残さないため。
+// 未ログイン・ゲスト（reports_insert_own RLSが拒否）にも表示しない。
 export default function ReportButton({
   size = 22,
   className = "",
@@ -29,42 +29,38 @@ export default function ReportButton({
 }: {
   size?: number;
   className?: string;
-  targetType?: ReportTargetType;
-  targetId?: string;
+  targetType: ReportTargetType;
+  targetId: string;
   targetAuthorId?: string | null;
   snapshotBody?: string;
 }) {
   const [reported, setReported] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  // 送信中ロックと、アンマウント後にstateを更新しないための印。
+  const submitter = useRef(
+    createReportSubmitter(async (payload: Record<string, unknown>) => {
+      const { error } = await supabase.from("reports").insert(payload);
+      return { error };
+    }),
+  );
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const authUser = useAuthStore((s) => s.user);
+  const authLoading = useAuthStore((s) => s.loading);
   const profile = useProfileStore((s) => s.profile);
 
-  // 2026-09-13（再々レビュー対応）：ゲストは通報できない仕様（reports_insert_own、
-  // 0070でRLSがゲストのINSERTを拒否済み）のため、押せるのに拒否される通報ボタン
-  // 自体を表示しない（閲覧は引き続き許可されたまま、UIだけ読み取り専用にする）。
-  if (isGuestUser(authUser, profile)) return null;
+  // 認証確認中・未ログイン・ゲスト・ローカル仮ID（UUIDでない）には表示しない。
+  if (authLoading || !authUser || isGuestUser(authUser, profile) || !isUuid(targetId)) return null;
 
   const handleReport = async () => {
-    if (!targetType || !targetId) {
-      // 通報対象が特定できない呼び出し元向けの、これまでどおりのダミー確認。
-      const confirmed = window.confirm(
-        "報告しますか？\n過度に卑猥な表現やグロテスクな表現など、不適切な内容として運営に報告します。",
-      );
-      if (confirmed) setReported(true);
-      return;
-    }
-
-    const authUser = useAuthStore.getState().user;
-    const userId = authUser?.id;
-    if (!userId) {
-      window.alert("通報にはログインが必要です");
-      return;
-    }
-    // 2026-09-13（0070ゲスト参加レビュー対応）：reports_insert_own（RLS）が
-    // ゲストのINSERTを拒否するため、事前に弾いて「押せるのに拒否される」体験を避ける。
-    if (isGuestUser(authUser, useProfileStore.getState().profile)) {
-      window.alert("ゲストは通報できません。Xでログインしてください。");
-      return;
-    }
+    if (submitter.current.isSubmitting()) return;
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser || isGuestUser(currentUser, useProfileStore.getState().profile)) return;
 
     const reasonInput = window.prompt(
       `通報しますか？\n理由の番号を入力してください。\n${REASON_OPTIONS.map((r, i) => `${i + 1}. ${r}`).join("\n")}`,
@@ -75,16 +71,26 @@ export default function ReportButton({
     const reason = REASON_OPTIONS[idx] ?? REASON_OPTIONS[REASON_OPTIONS.length - 1];
     const detail = window.prompt("詳細があれば入力してください（空欄可）", "") ?? "";
 
-    const { error } = await supabase.from("reports").insert({
-      reporter_id: userId,
+    setSubmitting(true);
+    // 送信中の連打はsubmitterがbusyで弾く。成功・DBエラー・例外のいずれでもロックは解除される。
+    const result = await submitter.current.submit({
+      reporter_id: currentUser.id,
       target_type: targetType,
       target_id: targetId,
-      target_author_id: targetAuthorId ?? null,
+      target_author_id: reportTargetAuthorId(targetAuthorId),
       reason,
       detail: detail || null,
       snapshot_body: snapshotBody ?? "",
     });
-    if (error) {
+    if (result === "busy") return;
+    if (!mounted.current) return;
+    setSubmitting(false);
+    if (result === "duplicate") {
+      window.alert("この内容はすでに通報済みです。");
+      setReported(true);
+      return;
+    }
+    if (result === "failed") {
       window.alert("通報の送信に失敗しました。もう一度お試しください");
       return;
     }
@@ -97,12 +103,13 @@ export default function ReportButton({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (reported) return;
+        if (reported || submitting) return;
         void handleReport();
       }}
-      title={reported ? "報告済みです" : "不適切な内容を報告する"}
-      aria-label={reported ? "報告済みです" : "不適切な内容を報告する"}
-      className={`flex shrink-0 items-center justify-center rounded-full transition ${
+      title={reported ? "報告済みです" : submitting ? "送信中…" : "不適切な内容を報告する"}
+      aria-label={reported ? "報告済みです" : submitting ? "送信中…" : "不適切な内容を報告する"}
+      aria-busy={submitting}
+      className={`flex shrink-0 items-center justify-center rounded-full transition ${submitting ? "animate-pulse opacity-60" : ""} ${
         reported
           ? "text-dojo-curtain-red"
           : "text-dojo-gray-purple hover:text-dojo-curtain-red"

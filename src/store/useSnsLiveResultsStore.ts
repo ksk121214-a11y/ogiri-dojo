@@ -6,6 +6,7 @@
 //
 // ページネーション・楽観的更新・連打防止の作りはuseSnsStore.tsのパターン
 // （PAGE_SIZE件ずつカーソル取得、pendingマップ、失敗時ロールバック）を踏襲している。
+import { isUuid } from "@/lib/uuid";
 import { create } from "zustand";
 
 import { isGuestUser } from "@/lib/guestStatus";
@@ -295,6 +296,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   fetchDetail: async (liveResultId, force = false) => {
     if (!force && get().details[liveResultId]) return;
     if (get().detailLoading[liveResultId]) return;
+    if (!isUuid(liveResultId)) return;
     // 2026-09-13（再々レビュー対応）：この呼び出し開始時点の世代を記録し、
     // 取得完了時に世代が変わっていたら（＝取得中に別ユーザーへ切り替わった）
     // detailsへ書き込まない（authorId="me"変換・コメントの「me」判定・

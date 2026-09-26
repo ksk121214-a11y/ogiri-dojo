@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { playBgm, stopBgm } from "@/lib/bgm";
 import { isAdminRoute } from "@/lib/adminRoutes";
+import { isNoAudioRoute } from "@/lib/audioRoutes";
 
 // ライブ体験（/live・/live-demo）を除く全画面（ホーム・次回ライブ・遊び方・マイページ・
 // 寄合帳・ランキング・ガチャ・楽屋など）共通のBGM。
@@ -22,6 +23,10 @@ export default function AmbientBgmController() {
 
   useEffect(() => {
     if (isAdminRoute(pathname)) {
+      stopBgm();
+      return;
+    }
+    if (isNoAudioRoute(pathname)) {
       stopBgm();
       return;
     }

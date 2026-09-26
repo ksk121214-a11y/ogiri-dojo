@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
-import ReportButton from "@/components/app/ReportButton";
 import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
 import { getBestAnswer, getOverallRanking, getParticipantName } from "@/lib/liveDemoSelectors";
@@ -108,11 +107,6 @@ export default function FinalResultScreen() {
               exit={{ opacity: 0 }}
               className="relative w-full rounded-2xl border border-[#ff3b5b]/70 bg-white/5 p-6 shadow-[0_0_40px_rgba(255,59,91,0.25)]"
             >
-              {bestAnswer.participantId !== MY_PARTICIPANT_ID && (
-                <div className="absolute right-4 top-4">
-                  <ReportButton />
-                </div>
-              )}
               <p className="font-sans text-xs tracking-widest text-[#ff3b5b]">
                 本日のベストアンサー
               </p>
@@ -144,11 +138,6 @@ export default function FinalResultScreen() {
               transition={{ type: "spring", stiffness: 200, damping: 16 }}
               className="relative w-full rounded-2xl border border-[#3b5bff]/70 bg-white/5 p-8 text-center shadow-[0_0_50px_rgba(59,91,255,0.35)]"
             >
-              {top3[3 - step].participant.id !== MY_PARTICIPANT_ID && (
-                <div className="absolute right-4 top-4">
-                  <ReportButton />
-                </div>
-              )}
               <p
                 className={`font-sans text-4xl font-black ${rankColor[3 - step]}`}
               >
@@ -220,7 +209,6 @@ export default function FinalResultScreen() {
                         <span className="tabular-nums text-[#ff8f4a]">
                           {r.total}点
                         </span>
-                        {!isMe && <ReportButton size={16} />}
                       </span>
                     </div>
                   );
