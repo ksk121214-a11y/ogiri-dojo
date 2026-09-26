@@ -96,9 +96,17 @@ export default function StageCharactersView({
           <motion.div
             key={member.id}
             className={`relative flex flex-col items-center ${
-              compact ? "w-12 sm:w-14" : "w-[min(19vw,95px)] -translate-y-[58px]"
+              compact ? "w-12 sm:w-14" : "-translate-y-[58px]"
             }`}
-            style={{ zIndex: isGlowingSeat || showScore ? 30 : 20 }}
+            // 5人以上でも、または狭い画面でも席が横に溢れて隣と重ならないよう、
+            // 1席の幅は「従来の幅」「コンテナ幅を人数で等分した幅」の小さい方にする
+            // （席の位置・並び順は変えない。従来幅で収まる人数ではこれまでと同じ幅）。
+            style={{
+              zIndex: isGlowingSeat || showScore ? 30 : 20,
+              ...(compact
+                ? {}
+                : { width: `min(19vw, 95px, calc((100% - 8px) / ${Math.max(1, members.length)}))` }),
+            }}
           >
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">

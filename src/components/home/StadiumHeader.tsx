@@ -49,7 +49,7 @@ export default function StadiumHeader() {
   const displayName = !authUser ? null : guest ? "ゲスト参加中" : member ? (profile?.displayName ?? "…") : "…";
 
   return (
-    <header className={`${styles.grainDark} border-b border-[var(--paper)]/70`}>
+    <header className={`${styles.surfaceDark} border-b border-[var(--paper)]/70`}>
       <div className="mx-auto flex w-full max-w-[480px] flex-col gap-1 px-4 py-2">
         <div className="flex items-center justify-between gap-2">
           <Link

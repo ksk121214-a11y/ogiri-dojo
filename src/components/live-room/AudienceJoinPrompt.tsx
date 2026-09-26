@@ -25,7 +25,7 @@ export default function AudienceJoinPrompt() {
     <ScreenShell>
       <p className="font-sans text-xs tracking-widest text-white/60">回答受付中</p>
       {currentTopic && (
-        <p className="mt-4 w-full max-w-xl break-words px-2 font-brush text-lg text-[#ffcf4a] sm:text-xl">
+        <p className="mt-4 w-full max-w-xl break-words px-2 font-sans font-bold text-lg text-[#ffcf4a] sm:text-xl">
           {currentTopic.body}
         </p>
       )}

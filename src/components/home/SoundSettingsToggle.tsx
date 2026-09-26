@@ -71,7 +71,7 @@ export default function SoundSettingsToggle() {
           <div
             role="dialog"
             aria-label="音の設定"
-            className={`${styles.grainDark} absolute top-full right-0 z-50 mt-2 flex w-36 flex-col gap-1 rounded-xl border border-[var(--border-dark)] p-2 shadow-xl`}
+            className={`${styles.surfaceDark} absolute top-full right-0 z-50 mt-2 flex w-36 flex-col gap-1 rounded-xl border border-[var(--border-dark)] p-2 shadow-xl`}
           >
             <SoundRow label="BGM" muted={bgmMuted} onToggle={handleToggleBgm} />
             <SoundRow label="SE" muted={sfxMuted} onToggle={handleToggleSfx} />

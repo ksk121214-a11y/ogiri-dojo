@@ -32,6 +32,7 @@
 import { create } from "zustand";
 
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legalInfo";
+import { beginGuestConsentWindow, recordTermsConsentOnce } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 
@@ -157,8 +158,34 @@ async function runXLogin(options?: { isGuestSwitch?: boolean }): Promise<AuthAct
   return useAuthStore.getState().signInWithX(options);
 }
 
-async function runGuestStart(): Promise<AuthActionResult> {
-  return useAuthStore.getState().signInAsGuest();
+type GuestStartResult = { ok: true; userId: string | null } | { ok: false; reason?: string };
+let guestConsentFlight: Promise<{ ok: true } | { ok: false; reason: string }> | null = null;
+
+async function runGuestStart(): Promise<GuestStartResult> {
+  const result = await useAuthStore.getState().signInAsGuest();
+  if (!result.ok) return result;
+  return { ok: true, userId: result.userId ?? null };
+}
+
+// signInAnonymouslyの結果にuserIdが無い場合に限り、認証ストアで利用者が確定するまで
+// 短時間待つ（確定しなければnull。nullのまま記録RPCは呼ばない）。
+function waitForAuthUserId(timeoutMs: number): Promise<string | null> {
+  const now = useAuthStore.getState().user?.id ?? null;
+  if (now) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (id: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(id);
+    };
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.user?.id) finish(state.user.id);
+    });
+    const timer = setTimeout(() => finish(null), timeoutMs);
+  });
 }
 
 export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
@@ -213,20 +240,28 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
         return;
       }
 
-      const result = await runGuestStart();
-      if (!result.ok) {
-        set({ errorReason: result.reason ?? "処理に失敗しました。時間をおいて再度お試しください。" });
-        return;
+      // ゲスト同意処理全体をsingle-flight化する：同時のconfirm（モーダルの再マウント・二重実行・
+      // ストア関数の直接呼び出し）は同じ処理へ合流し、匿名認証も記録RPCも1回だけ実行する。
+      // UIのsubmittingには依存しない。窓（beginGuestConsentWindow）は処理の全期間を覆い、
+      // 成功・失敗・例外のいずれでも必ず解除される。
+      if (!guestConsentFlight) {
+        const endGuestWindow = beginGuestConsentWindow();
+        guestConsentFlight = guestStartAndRecord()
+          .catch(
+            (): { ok: false; reason: string } => ({
+              ok: false,
+              reason: "処理に失敗しました。時間をおいて再度お試しください。",
+            }),
+          )
+          .finally(() => {
+            guestConsentFlight = null;
+            endGuestWindow();
+          });
       }
-      // ゲスト参加自体はここまでで成功している。同意の記録に失敗しても
-      // ゲスト参加を取り消すことはできないため、モーダルは閉じるが、
-      // 記録に失敗した場合はmarkDeviceConsentAckを呼ばない（同意済み扱いに
-      // しない）。この直後にConsentRequiredGateが未同意状態を検知し、
-      // あらためて同意画面を表示する。
-      const { error } = await supabase.rpc("record_terms_consent");
-      if (!error) {
-        clearPendingConsentFlag();
-        markDeviceConsentAck();
+      const outcome = await guestConsentFlight;
+      if (!outcome.ok) {
+        set({ errorReason: outcome.reason });
+        return;
       }
       set({ pendingModal: null, errorReason: null });
     } catch {
@@ -236,3 +271,36 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
 
   cancel: () => set({ pendingModal: null, errorReason: null }),
 }));
+
+// ゲスト参加を開始し、確定したuserIdで同意を記録する。ゲスト参加自体が失敗した場合だけ
+// {ok:false}。同意の記録に失敗しても参加は取り消せないため{ok:true}を返すが、その場合は
+// markDeviceConsentAckを呼ばない（同意済み扱いにしない）。この直後にConsentRequiredGateが
+// 未同意状態を検知し、あらためて同意画面を表示する。
+async function guestStartAndRecord(): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const result = await runGuestStart();
+  if (!result.ok) {
+    return { ok: false, reason: result.reason ?? "処理に失敗しました。時間をおいて再度お試しください。" };
+  }
+  // 記録に使うuserIdは、signInAnonymouslyの結果から確定したものを使う（認証ストアへの
+  // 反映が遅れていても、userId=nullのままRPCを呼んでゲート側の記録と二重にならない）。
+  // 確定できなければRPCは呼ばず、記録はConsentRequiredGateの同意画面に任せる。
+  const startedUserId = result.userId ?? (await waitForAuthUserId(3_000));
+  if (!startedUserId) return { ok: true };
+  const { error } = await recordTermsConsentOnce({
+    userId: startedUserId,
+    termsVersion: TERMS_VERSION,
+    privacyVersion: PRIVACY_VERSION,
+    rpc: async () => {
+      const { error: rpcError } = await supabase.rpc("record_terms_consent");
+      return { error: rpcError };
+    },
+  });
+  // 完了までに別の利用者へ切り替わっていた場合、前の利用者の結果を反映しない
+  // （認証ストアへの反映が未了のnullは「まだ切り替わっていない」として扱う）。
+  const currentUserId = useAuthStore.getState().user?.id ?? null;
+  if ((currentUserId === null || currentUserId === startedUserId) && !error) {
+    clearPendingConsentFlag();
+    markDeviceConsentAck();
+  }
+  return { ok: true };
+}

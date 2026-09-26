@@ -30,7 +30,7 @@ export default function GuestMemberGate({
   if (!isGuestUser(authUser, profile)) return <>{children}</>;
 
   return (
-    <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-3 p-8 text-center text-[var(--ink)]`}>
+    <div className={`${stadiumStyles.surfaceLight} flex flex-col items-center gap-3 p-8 text-center text-[var(--ink)]`}>
       <p className="font-sans text-sm text-[var(--ink)]/80">{message}</p>
       <button
         type="button"
@@ -39,7 +39,7 @@ export default function GuestMemberGate({
           const result = await signInWithX({ isGuestSwitch: true });
           if (!result.ok && result.reason) setXLoginError(result.reason);
         }}
-        className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+        className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
       >
         Xでログイン
       </button>

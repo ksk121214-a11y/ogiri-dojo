@@ -225,7 +225,7 @@ export default function StageAnsweringViewPreview() {
                   : "回答を入力……"
             }
             rows={2}
-            className="w-full resize-none rounded-xl border-2 border-dojo-gray-purple/30 bg-dojo-washi-white px-4 py-2.5 font-sans text-lg text-dojo-ink placeholder:text-dojo-gray-purple focus:border-dojo-curtain-gold focus:outline-none disabled:bg-dojo-light-brown disabled:text-dojo-gray-purple [@media(max-height:600px)]:py-1.5 [@media(max-height:600px)]:text-base"
+            className="w-full resize-none rounded-xl border-2 border-dojo-gray-purple/30 bg-dojo-on-dark px-4 py-2.5 font-sans text-lg text-dojo-ink placeholder:text-dojo-gray-purple focus:border-dojo-curtain-gold focus:outline-none disabled:bg-dojo-surface-muted disabled:text-dojo-gray-purple [@media(max-height:600px)]:py-1.5 [@media(max-height:600px)]:text-base"
           />
           {error && <p className="mt-1 font-sans text-xs text-dojo-curtain-red">{error}</p>}
           <div className="mt-2 flex items-center justify-center gap-3">

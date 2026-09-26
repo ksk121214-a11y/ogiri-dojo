@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
-import styles from "@/components/home/StadiumHome.module.css";
 import { checkConsentForUser, GenerationGuard } from "@/lib/consentCheck";
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legalInfo";
+import { recordTermsConsentOnce, waitForConsentInFlight } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import {
@@ -44,6 +44,9 @@ type GateStatus =
 // （「最新1行を取得して版を比較する」のではなく、現在のTERMS_VERSION/
 // PRIVACY_VERSIONに一致する行があるか自体をクエリの条件にする）。
 async function hasCurrentConsentRow(uid: string): Promise<{ ok: true; exists: boolean } | { ok: false }> {
+  // ゲスト同意直後などで記録RPCが送信中なら、その完了を待ってから確認する
+  // （未着のせいで一瞬「未同意」と判定して同意画面を出さない）。
+  await waitForConsentInFlight(uid, TERMS_VERSION, PRIVACY_VERSION);
   const { data, error } = await supabase
     .from("terms_consents")
     .select("id")
@@ -55,12 +58,22 @@ async function hasCurrentConsentRow(uid: string): Promise<{ ok: true; exists: bo
   return { ok: true, exists: (data?.length ?? 0) > 0 };
 }
 
+function recordConsentOnceFor(userId: string | null) {
+  return recordTermsConsentOnce({
+    userId,
+    termsVersion: TERMS_VERSION,
+    privacyVersion: PRIVACY_VERSION,
+    rpc: async () => {
+      const { error } = await supabase.rpc("record_terms_consent");
+      return { error };
+    },
+  });
+}
+
 function FullScreenNotice({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--paper)] px-4 text-[var(--ink)]">
-      <div
-        className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-4 rounded-none border border-[var(--ink)]/15 p-6 shadow-2xl`}
-      >
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 px-4 text-gray-900">
+      <div className="flex w-full max-w-sm flex-col gap-4 rounded-2xl bg-white p-6 text-gray-900 shadow-2xl ring-1 ring-gray-300">
         {children}
       </div>
     </div>
@@ -96,10 +109,7 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
     const result = await checkConsentForUser(uid, {
       readPendingFlag: readPendingConsentFlag,
       clearPendingFlag: clearPendingConsentFlag,
-      recordConsent: async () => {
-        const { error } = await supabase.rpc("record_terms_consent");
-        return { error };
-      },
+      recordConsent: () => recordConsentOnceFor(uid),
       hasCurrentConsentRow,
       termsVersion: TERMS_VERSION,
       privacyVersion: PRIVACY_VERSION,
@@ -177,7 +187,7 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
     setSubmitting(true);
     setAgreeError(null);
     try {
-      const { error } = await supabase.rpc("record_terms_consent");
+      const { error } = await recordConsentOnceFor(startedUserId);
       if (!ownsThisAttempt()) return; // 保存完了前にログアウト・別ユーザーへ切り替わっていた
       if (error) {
         setAgreeError("同意内容を保存できませんでした。時間をおいて再度お試しください。");
@@ -209,7 +219,7 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
   if (status.kind === "auth-loading" || status.kind === "checking") {
     return (
       <FullScreenNotice>
-        <p className="font-sans text-sm text-[var(--ink)]/70">読み込み中…</p>
+        <p className="font-sans text-base text-gray-800">読み込み中…</p>
       </FullScreenNotice>
     );
   }
@@ -217,12 +227,12 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
   if (status.kind === "error") {
     return (
       <FullScreenNotice>
-        <h2 className="font-sans text-base font-black">エラーが発生しました</h2>
-        <p className="font-sans text-xs leading-relaxed text-[var(--ink)]/80">{status.message}</p>
+        <h2 className="font-sans text-lg font-bold text-gray-900">エラーが発生しました</h2>
+        <p className="font-sans text-sm leading-relaxed text-gray-800">{status.message}</p>
         <button
           type="button"
           onClick={handleRetry}
-          className={`${styles.pressable} ${styles.grainAccent} rounded-xl px-4 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition`}
+          className="rounded-xl bg-gray-900 px-4 py-3 font-sans text-base font-bold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
         >
           再試行
         </button>
@@ -231,7 +241,7 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
           onClick={() => {
             void signOut();
           }}
-          className="rounded-xl border border-[var(--ink)]/30 px-4 py-2 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5"
+          className="rounded-xl border border-gray-400 bg-white px-4 py-3 font-sans text-base font-bold text-gray-900 transition hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
         >
           ログアウト
         </button>
@@ -242,27 +252,27 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
   // status.kind === "consent-required"
   return (
     <FullScreenNotice>
-      <h2 className="font-sans text-base font-black">利用規約・プライバシーポリシーの改定について</h2>
-      <p className="font-sans text-xs leading-relaxed text-[var(--ink)]/80">
+      <h2 className="font-sans text-lg font-bold text-gray-900">利用規約・プライバシーポリシーの改定について</h2>
+      <p className="font-sans text-sm leading-relaxed text-gray-800">
         利用規約・プライバシーポリシーの内容をご確認の上、同意をお願いします。ご同意いただけない場合は、本サービスをご利用いただけません。
       </p>
-      <LegalLinksRow className="font-sans text-xs underline-offset-2" openInNewTab />
-      <label className="flex cursor-pointer items-start gap-2 font-sans text-xs text-[var(--ink)]">
+      <LegalLinksRow className="font-sans text-base font-bold text-blue-800" openInNewTab />
+      <label className="flex cursor-pointer items-start gap-3 font-sans text-base font-medium leading-snug text-gray-900">
         <input
           type="checkbox"
           checked={checked}
           onChange={(e) => setChecked(e.target.checked)}
-          className="mt-0.5 h-4 w-4 shrink-0"
+          className="mt-0.5 h-5 w-5 shrink-0 accent-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
         />
         利用規約に同意し、プライバシーポリシーを確認しました。
       </label>
-      {agreeError && <p className="font-sans text-xs text-[var(--accent)]">{agreeError}</p>}
+      {agreeError && <p role="alert" className="font-sans text-sm font-bold text-red-700">{agreeError}</p>}
       <div className="mt-2 flex flex-col gap-2">
         <button
           type="button"
           disabled={!checked || submitting}
           onClick={handleAgree}
-          className={`${styles.pressable} ${styles.grainAccent} rounded-xl px-4 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition disabled:cursor-not-allowed disabled:opacity-40`}
+          className="rounded-xl bg-gray-900 px-4 py-3 font-sans text-base font-bold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
         >
           {submitting ? "処理中…" : "同意する"}
         </button>
@@ -271,7 +281,7 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
           onClick={() => {
             void signOut();
           }}
-          className="rounded-xl border border-[var(--ink)]/30 px-4 py-2 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5"
+          className="rounded-xl border border-gray-400 bg-white px-4 py-3 font-sans text-base font-bold text-gray-900 transition hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
         >
           同意しない場合はログアウト
         </button>

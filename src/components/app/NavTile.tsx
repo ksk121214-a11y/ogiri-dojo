@@ -34,7 +34,7 @@ export default function NavTile({
         <span className="font-sans text-base font-bold text-dojo-ink">
           {title}
         </span>
-        <span className="font-sans text-xs text-dojo-dark-brown/70">
+        <span className="font-sans text-xs text-dojo-ink-soft/70">
           {description}
         </span>
       </button>
@@ -56,21 +56,21 @@ export default function NavTile({
               className="flex w-full max-w-sm flex-col items-center rounded-3xl bg-white p-6 text-center shadow-2xl"
             >
               {emoji && <span className="text-4xl">{emoji}</span>}
-              <p className="mt-2 font-brush text-xl text-dojo-ink">{title}</p>
-              <p className="mt-3 max-h-72 overflow-y-auto font-sans text-sm leading-relaxed text-dojo-dark-brown">
+              <p className="mt-2 font-sans font-bold text-xl text-dojo-ink">{title}</p>
+              <p className="mt-3 max-h-72 overflow-y-auto font-sans text-sm leading-relaxed text-dojo-ink-soft">
                 {flavorText}
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-full px-5 py-2 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-black/5"
+                  className="rounded-full px-5 py-2 font-sans text-sm font-bold text-dojo-ink-soft transition hover:bg-black/5"
                 >
                   閉じる
                 </button>
                 <Link
                   href={href}
-                  className="rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+                  className="rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-sm font-bold text-dojo-on-dark transition hover:bg-dojo-deep-crimson"
                 >
                   {title}へ行く
                 </Link>

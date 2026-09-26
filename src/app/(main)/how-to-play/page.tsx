@@ -104,7 +104,7 @@ export default function HowToPlayPage() {
 
       <Link
         href="/live-schedule"
-        className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:opacity-90`}
+        className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:opacity-90`}
       >
         <CalendarGlyph />
         次回のライブを見る
@@ -128,7 +128,7 @@ function StepCard({
   children: ReactNode;
 }) {
   return (
-    <div className={`${stadiumStyles.stepTicket} ${stadiumStyles.grainPaper} flex items-start gap-3 px-5 py-4 text-[var(--ink)]`}>
+    <div className={`${stadiumStyles.stepTicket} ${stadiumStyles.surfaceLight} flex items-start gap-3 px-5 py-4 text-[var(--ink)]`}>
       {number && (
         <span className="w-9 shrink-0 font-sans text-4xl font-black leading-none text-[var(--accent)]">
           {number}
@@ -160,7 +160,7 @@ function PeopleTag({
     <div className="flex flex-col items-center gap-1.5">
       <span
         className={`rounded-sm px-2 py-0.5 font-sans text-[10px] font-bold text-[var(--paper)] ${
-          tone === "accent" ? stadiumStyles.grainAccent : "bg-[var(--ink)]"
+          tone === "accent" ? stadiumStyles.surfaceAccent : "bg-[var(--ink)]"
         }`}
       >
         {label}

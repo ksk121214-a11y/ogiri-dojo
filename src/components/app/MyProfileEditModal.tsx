@@ -63,7 +63,7 @@ export default function MyProfileEditModal({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+          className={`${styles.surfaceLight} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
         >
           <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
           <p className="font-sans text-sm text-[var(--ink)]/70">
@@ -199,7 +199,7 @@ function MyProfileEditForm({
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
-        className={`${styles.grainPaper} flex max-h-[76vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        className={`${styles.surfaceLight} flex max-h-[76vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
       >
         <h2 className="font-sans text-lg font-black">プロフィールを編集</h2>
 

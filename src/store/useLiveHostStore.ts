@@ -14,6 +14,20 @@ import { create } from "zustand";
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { getLiveRoomTiming, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
 import { logAdminAction } from "@/lib/adminActionLog";
+import {
+  botAnswerKey,
+  botHumanGraceMs,
+  classifyBotAnswerInsertError,
+  createBotAnswerGuard,
+  createBotIdleTracker,
+  decideBotAnswerGate,
+  finishBotAnswer,
+  observeBotIdleWindow,
+  resetBotAnswerGuard,
+  resetBotIdleTracker,
+  tryBeginBotAnswer,
+  type BotAnswerInsertOutcome,
+} from "@/lib/botAnswerPolicy";
 import { randomBotAnswerBody, randomBotScore, randomDelay } from "@/lib/liveDemoLogic";
 import {
   answersSnapshotMatches,
@@ -312,6 +326,8 @@ function applyAuthoritativeLive(row: LiveRow) {
   liveGate.begin();
   useLiveHostStore.setState({ live: row, liveSnapshotConfirmed: true });
 }
+const botIdleTracker = createBotIdleTracker();
+const botAnswerGuard = createBotAnswerGuard();
 const botCooldownUntil = new Map<string, number>(); // 参加者ID(ボット) → 次の行動を許可する時刻
 // 回答ID → その回答をボット審査員全員が満点(3点)にする「パーフェクト回」かどうか。
 // ボットは1tickごとに低確率で個別に採点するため、抽選を毎回独立にすると全員一致で
@@ -1175,67 +1191,114 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
       });
   }
 
-  // 各ボットの行動判定・DB書き込みは互いに独立しているため、for...ofの逐次awaitではなく
-  // Promise.allで並列実行する。ボット数が多い（審査員が多い組）ほど、直列だと
-  // 「ボット数×DBラウンドトリップ」ぶん合計レイテンシが線形に伸び、500ms間隔のポーリング
-  // 全体を遅延させ続けてしまう（効果音が遅れる・回答フリップが出ない等の一因と考えられる）。
-  await Promise.all(
-    bots.map(async (bot) => {
-      const participant = participants.find((p) => p.id === bot.participantId);
-      if (!participant || participant.role !== "player") return;
-      if ((botCooldownUntil.get(bot.participantId) ?? 0) > now) return;
+  // 送信可能な時間帯（busyでない期間）を追跡する。時刻はサーバー同期時計のみ。
+  const nowFresh = serverClock.nowIfFresh();
+  observeBotIdleWindow(botIdleTracker, { turnId: turn.id, busy, nowMs: nowFresh });
 
-      if (participant.group_id === turn.group_id) {
-        if (answeringTimeUp || busy) return;
-        // 舞台上のボット：残り回答数があれば低確率で送信する。
-        const myAnswerCount = answers.filter((a) => a.participant_id === bot.participantId).length;
-        if (myAnswerCount >= 5) return;
-        if (Math.random() >= 0.03) return;
-        // insert 直前に、凍結していない かつ await 前と同じ live.id / current_turn_id
-        // のままであることを再確認する（P2：Promise.all 内で stop / ターン変更が
-        // 起きたら insert しない）。
-        if (!stillOnThisTurn()) return;
-        const { error } = await bot.client.from("answers").insert({
-          turn_id: turn.id,
-          participant_id: bot.participantId,
-          seq: myAnswerCount + 1,
-          body: randomBotAnswerBody(),
-        });
-        if (!error) {
-          botCooldownUntil.set(bot.participantId, now + randomDelay(3_000, 9_000));
-        }
-      } else if (activeAnswer && botScoringOk) {
-        // 客席のボット：表示中の回答にまだ採点していなければ低確率で採点する。
-        const alreadyScored = scores.some((s) => s.judge_participant_id === bot.participantId);
-        if (alreadyScored) return;
-        if (Math.random() >= 0.2) return;
-        if (!answerPerfectRoundIds.has(activeAnswer.id)) {
-          answerPerfectRoundIds.set(activeAnswer.id, Math.random() < 0.8);
-        }
-        const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
-        // insert 直前の再確認（P2）：凍結していない・同じ live/turn・表示中の回答が
-        // 今も activeAnswer のまま・その scoresSnapshot が確認済み。
-        if (!stillOnThisTurn()) return;
-        const sNow = useLiveHostStore.getState();
-        if (!sNow.answers.some((a) => a.id === activeAnswer.id && a.revealed_at && !a.resolved)) {
-          return;
-        }
-        if (
-          !scoresSnapshotMatches(sNow.scoresSnapshot, live.id, turn.id, activeAnswer.id)
-        ) {
-          return;
-        }
-        const { error } = await bot.client.from("scores").insert({
-          answer_id: activeAnswer.id,
-          judge_participant_id: bot.participantId,
-          points: isPerfectRound ? 3 : randomBotScore(),
-        });
-        if (!error) {
-          botCooldownUntil.set(bot.participantId, now + randomDelay(1_000, 3_000));
-        }
+  // ボットの回答は「全ボット合計で1tickにつき最大1件」。従来は各ボットが
+  // Promise.allで同時にINSERTでき、answers_one_unresolved_per_turn等に衝突していた。
+  // 人間の未送信回答者（このターンの舞台にいる、ボットではない、退場していない、
+  // まだ1件も送っていない人）がいる間は、送信可能になってから一定の猶予の間は
+  // ボットに送らせない（人間の送信機会を優先。botAnswerPolicy.ts参照）。
+  const botParticipantIds = new Set(bots.map((b) => b.participantId));
+  const humanUnsentCount = participants.filter(
+    (p) =>
+      p.role === "player" &&
+      p.group_id === turn.group_id &&
+      !p.kicked_at &&
+      !botParticipantIds.has(p.id) &&
+      !answers.some((a) => a.participant_id === p.id),
+  ).length;
+  const answerStep = async () => {
+    if (answeringTimeUp) return;
+    const gate = decideBotAnswerGate({
+      nowMs: nowFresh,
+      busy,
+      paused: live.answering_paused,
+      phaseDeadlineMs: live.phase_deadline ? new Date(live.phase_deadline).getTime() : null,
+      humanUnsentCount,
+      tracker: botIdleTracker,
+      graceMs: botHumanGraceMs(live.timing_profile),
+    });
+    if (!gate.allow) return;
+    const candidates = bots.filter((bot) => {
+      const participant = participants.find((p) => p.id === bot.participantId);
+      if (!participant || participant.role !== "player" || participant.kicked_at) return false;
+      if (participant.group_id !== turn.group_id) return false;
+      if ((botCooldownUntil.get(bot.participantId) ?? 0) > now) return false;
+      const count = answers.filter((a) => a.participant_id === bot.participantId).length;
+      return count < 5;
+    });
+    // 従来と同じ「1tickあたりボット1体につき3%」の低確率抽選（自然にばらけさせる）。
+    const bot = candidates.find(() => Math.random() < 0.03);
+    if (!bot) return;
+    const myAnswerCount = answers.filter((a) => a.participant_id === bot.participantId).length;
+    const seq = myAnswerCount + 1;
+    const key = botAnswerKey(turn.id, bot.participantId, seq);
+    // INSERT直前の再確認：凍結していない・同じlive/turn・今もbusyでない。
+    if (!stillOnThisTurn()) return;
+    const sNow = useLiveHostStore.getState();
+    if (isAnsweringBusy(sNow.answers, sNow.live)) return;
+    if (nowFresh === null || !tryBeginBotAnswer(botAnswerGuard, key, nowFresh)) return;
+    let outcome: BotAnswerInsertOutcome = "transient";
+    try {
+      const { error } = await bot.client.from("answers").insert({
+        turn_id: turn.id,
+        participant_id: bot.participantId,
+        seq,
+        body: randomBotAnswerBody(),
+      });
+      outcome = classifyBotAnswerInsertError(error);
+      if (outcome === "unknown-conflict" || outcome === "transient") {
+        console.warn("[bot] 回答の送信に失敗（バックオフ後に再試行）", outcome, error);
       }
-    }),
-  );
+    } finally {
+      finishBotAnswer(botAnswerGuard, key, outcome, serverClock.nowIfFresh() ?? nowFresh);
+    }
+    // 成功・既存(同じ回答の重複)は、次の回答までクールダウンを入れる。競合・拒否・通信断は
+    // finishBotAnswerのバックオフ（500ms tickの連打にしない）で再試行する。
+    if (outcome === "ok" || outcome === "already-exists") {
+      botCooldownUntil.set(bot.participantId, now + randomDelay(3_000, 9_000));
+    }
+  };
+
+  // 採点は従来どおり各ボットが独立に並列実行する（重複は既存のscores UNIQUE＋
+  // alreadyScoredで防いでいる）。
+  const scoringStep = async (bot: (typeof bots)[number]) => {
+    const participant = participants.find((p) => p.id === bot.participantId);
+    if (!participant || participant.role !== "player") return;
+    if ((botCooldownUntil.get(bot.participantId) ?? 0) > now) return;
+    if (participant.group_id === turn.group_id) return;
+    if (!activeAnswer || !botScoringOk) return;
+    // 客席のボット：表示中の回答にまだ採点していなければ低確率で採点する。
+    const alreadyScored = scores.some((s) => s.judge_participant_id === bot.participantId);
+    if (alreadyScored) return;
+    if (Math.random() >= 0.2) return;
+    if (!answerPerfectRoundIds.has(activeAnswer.id)) {
+      answerPerfectRoundIds.set(activeAnswer.id, Math.random() < 0.8);
+    }
+    const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
+    // insert 直前の再確認（P2）：凍結していない・同じ live/turn・表示中の回答が
+    // 今も activeAnswer のまま・その scoresSnapshot が確認済み。
+    if (!stillOnThisTurn()) return;
+    const sNow = useLiveHostStore.getState();
+    if (!sNow.answers.some((a) => a.id === activeAnswer.id && a.revealed_at && !a.resolved)) {
+      return;
+    }
+    if (!scoresSnapshotMatches(sNow.scoresSnapshot, live.id, turn.id, activeAnswer.id)) {
+      return;
+    }
+    const { error } = await bot.client.from("scores").insert({
+      answer_id: activeAnswer.id,
+      judge_participant_id: bot.participantId,
+      points: isPerfectRound ? 3 : randomBotScore(),
+    });
+    if (!error) {
+      botCooldownUntil.set(bot.participantId, now + randomDelay(1_000, 3_000));
+    }
+  };
+
+  await Promise.all([answerStep(), ...bots.map(scoringStep)]);
 }
 
 type HydrateOutcome =
@@ -1809,6 +1872,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       // 終わらせない）。init最後の一括setは無く、各スライスをゲート越しに個別反映する。
       const outcome = await ensureHostRecovery(myGeneration);
       if (stopped() || outcome === "stopped") {
+        // 追い越された（stopHostProgressではない）場合、確認済みの状態が既にあるなら
+        // loadingを残さない（終了処理など別経路が確定させた状態を「確認中」のまま
+        // 隠さない）。未確認のままの場合は、追い越した側の取得が最終的に解除する。
+        if (!stopped() && get().liveSnapshotConfirmed) set({ loading: false });
         // stopされた／別の取得に追い越された。ここでcleanupChannels()は呼ばない。
         // progressGenerationが変わるのはstopHostProgress()のときだけで、そこで必ず
         // cleanupChannels()が呼ばれている（このinitがsubscribeLiveChannelsで
@@ -1889,6 +1956,8 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     scoresRetryAt = 0;
     resolvingAnswerIds.clear();
     botCooldownUntil.clear();
+    resetBotIdleTracker(botIdleTracker);
+    resetBotAnswerGuard(botAnswerGuard);
     answerPerfectRoundIds.clear();
     lastBotTsukkomiAt = 0;
     // 2026-09-10/11/12（再レビュー対応）：ログアウト→再ログイン時に、前セッションの
@@ -2672,6 +2741,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       answersGate.begin();
       scoresGate.begin();
       runtimeReadyLiveId = null;
+    // 終了確定後は、進行中だった復旧（init/hydrate）の結果を待たず、"ライブ無しの確定状態"として
+    // loadingを必ず解除する（追い越された復旧がloadingをtrueのまま残さない）。
+    recovery.invalidate();
+    resolvedGate.begin();
       set({
         live: null,
         participants: [],
@@ -2687,6 +2760,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         answersSnapshot: null,
         scoresSnapshot: null,
         liveSnapshotConfirmed: true,
+      loading: false,
         error: null,
       });
       return { ok: true };
@@ -2701,12 +2775,18 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       set({ error: message });
     }
     cleanupChannels();
-    useLiveBotStore.getState().removeAllBots();
+    // ボットの一覧は即座に空にし（以後のtickがボットを使わない）、実際のログアウト完了は
+    // 画面状態を確定させた後で待つ。
+    const botLogout = useLiveBotStore.getState().removeAllBots();
     liveGate.begin();
     childrenGate.begin();
     answersGate.begin();
     scoresGate.begin();
     runtimeReadyLiveId = null;
+    // 終了確定後は、進行中だった復旧（init/hydrate）の結果を待たず、"ライブ無しの確定状態"として
+    // loadingを必ず解除する（追い越された復旧がloadingをtrueのまま残さない）。
+    recovery.invalidate();
+    resolvedGate.begin();
     // closed状態の行を持ち続けると画面が「開始前」に戻らない(!liveでのみ判定しているため)。
     // ライブそのものを無かった状態に戻す（errorは上で立てていれば維持する）。
     set((s) => ({
@@ -2724,8 +2804,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       answersSnapshot: null,
       scoresSnapshot: null,
       liveSnapshotConfirmed: true,
+      loading: false,
       error: result.rewards_applied ? null : s.error,
     }));
+    // ボットのログアウト完了を待つ。通信が遅くても短いタイムアウトで打ち切り、失敗は警告に留める
+    // （画面状態は既に確定済みで、終了処理はここで必ず完了する）。
+    await botLogout;
     return { ok: true };
   },
 
@@ -2766,6 +2850,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       answersGate.begin();
       scoresGate.begin();
       runtimeReadyLiveId = null;
+    // 終了確定後は、進行中だった復旧（init/hydrate）の結果を待たず、"ライブ無しの確定状態"として
+    // loadingを必ず解除する（追い越された復旧がloadingをtrueのまま残さない）。
+    recovery.invalidate();
+    resolvedGate.begin();
       set({
         live: null,
         participants: [],
@@ -2781,18 +2869,25 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
         answersSnapshot: null,
         scoresSnapshot: null,
         liveSnapshotConfirmed: true,
+      loading: false,
         error: null,
       });
       return { ok: true };
     }
     await logAdminAction({ action: "live_emergency_closed", targetType: "lives", targetId: live.id });
     cleanupChannels();
-    useLiveBotStore.getState().removeAllBots();
+    // ボットの一覧は即座に空にし（以後のtickがボットを使わない）、実際のログアウト完了は
+    // 画面状態を確定させた後で待つ。
+    const botLogout = useLiveBotStore.getState().removeAllBots();
     liveGate.begin();
     childrenGate.begin();
     answersGate.begin();
     scoresGate.begin();
     runtimeReadyLiveId = null;
+    // 終了確定後は、進行中だった復旧（init/hydrate）の結果を待たず、"ライブ無しの確定状態"として
+    // loadingを必ず解除する（追い越された復旧がloadingをtrueのまま残さない）。
+    recovery.invalidate();
+    resolvedGate.begin();
     set({
       live: null,
       participants: [],
@@ -2808,8 +2903,12 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       answersSnapshot: null,
       scoresSnapshot: null,
       liveSnapshotConfirmed: true,
+      loading: false,
       error: null,
     });
+    // ボットのログアウト完了を待つ。通信が遅くても短いタイムアウトで打ち切り、失敗は警告に留める
+    // （画面状態は既に確定済みで、終了処理はここで必ず完了する）。
+    await botLogout;
     return { ok: true };
   },
 

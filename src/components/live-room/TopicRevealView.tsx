@@ -109,7 +109,7 @@ export default function TopicRevealView() {
         initial={{ opacity: 0, x: 40 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.5, duration: 0.5 }}
-        className="mt-3 w-full max-w-full break-words px-2 font-brush text-xl text-[#ffcf4a] sm:text-2xl"
+        className="mt-3 w-full max-w-full break-words px-2 font-sans font-bold text-xl text-[#ffcf4a] sm:text-2xl"
       >
         {stageMembers
           .map((p) => participantNames[p.id] ?? "（名前未設定）")

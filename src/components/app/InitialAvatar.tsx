@@ -21,7 +21,7 @@ export default function InitialAvatar({
   const idx = ((seed % GRADIENTS.length) + GRADIENTS.length) % GRADIENTS.length;
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-full border border-dojo-washi-white/20 bg-gradient-to-br font-brush text-dojo-washi-white ${GRADIENTS[idx]}`}
+      className={`flex shrink-0 items-center justify-center rounded-full border border-dojo-on-dark/20 bg-gradient-to-br font-sans font-bold text-dojo-on-dark ${GRADIENTS[idx]}`}
       style={{ width: size, height: size, fontSize: size * 0.45 }}
     >
       {name.slice(0, 1)}

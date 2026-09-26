@@ -61,12 +61,12 @@ export default function ScoreButtons({
             playSfx("buttonPress");
             onScore?.(btn.points);
           }}
-          className={`flex h-14 w-14 items-center justify-center rounded-full border-2 text-dojo-washi-white transition hover:scale-105 hover:bg-white/15 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 ${
+          className={`flex h-14 w-14 items-center justify-center rounded-full border-2 text-dojo-on-dark transition hover:scale-105 hover:bg-white/15 active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 ${
             scaleUp ? "sm:h-16 sm:w-16" : ""
           } ${
             myScore === btn.points
               ? "border-[#fff23c] bg-white/20 ring-2 ring-[#fff23c]"
-              : "border-dojo-washi-white/70 bg-white/5"
+              : "border-dojo-on-dark/70 bg-white/5"
           }`}
         >
           <ScoreIcon points={btn.points} scaleUp={scaleUp} />

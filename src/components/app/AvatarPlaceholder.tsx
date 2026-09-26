@@ -11,23 +11,23 @@ export default function AvatarPlaceholder({ size = 96 }: { size?: number }) {
       role="img"
       aria-label="仮の演者アバター"
     >
-      <circle cx="48" cy="48" r="47" fill="#5B4530" fillOpacity={0.15} />
+      <circle cx="48" cy="48" r="47" fill="#3F3F46" fillOpacity={0.15} />
       {/* 肩から上のシルエット（衣装レイヤーの土台） */}
       <path
         d="M6 94 C6 66 24 54 48 54 C72 54 90 66 90 94 Z"
-        fill="#5B4530"
+        fill="#3F3F46"
       />
       {/* 首 */}
       <rect x="40" y="46" width="16" height="16" rx="4" fill="#EEC79A" />
       {/* 顔 */}
       <circle cx="48" cy="34" r="24" fill="#F3D2A6" />
       {/* 目 */}
-      <circle cx="39" cy="33" r="2.6" fill="#2E2A24" />
-      <circle cx="57" cy="33" r="2.6" fill="#2E2A24" />
+      <circle cx="39" cy="33" r="2.6" fill="#18181B" />
+      <circle cx="57" cy="33" r="2.6" fill="#18181B" />
       {/* 口（穏やかな笑み） */}
       <path
         d="M39 42 Q48 49 57 42"
-        stroke="#2E2A24"
+        stroke="#18181B"
         strokeWidth="2.2"
         fill="none"
         strokeLinecap="round"

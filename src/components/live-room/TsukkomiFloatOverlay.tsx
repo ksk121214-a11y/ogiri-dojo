@@ -57,7 +57,7 @@ export default function TsukkomiFloatOverlay() {
             className={`absolute -translate-x-1/2 whitespace-nowrap ${
               item.kind === "clap"
                 ? "text-2xl"
-                : "rounded-full border border-[#ffcf4a] bg-[#1a1a3a]/90 px-4 py-1 font-brush text-sm text-[#ffcf4a]"
+                : "rounded-full border border-[#ffcf4a] bg-[#1a1a3a]/90 px-4 py-1 font-sans font-bold text-sm text-[#ffcf4a]"
             }`}
           >
             {item.kind === "clap" ? "👏" : item.text}

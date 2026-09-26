@@ -30,7 +30,7 @@ export default function BotSetupPanel({ liveId }: { liveId: string }) {
   };
 
   return (
-    <div className="w-full rounded-xl border border-dojo-dark-brown/20 p-3 text-left">
+    <div className="w-full rounded-xl border border-dojo-ink-soft/20 p-3 text-left">
       <p className="font-sans text-xs font-bold text-dojo-ink">
         ボット参加者（{bots.length}体 参加中）
       </p>
@@ -39,16 +39,16 @@ export default function BotSetupPanel({ liveId }: { liveId: string }) {
         onChange={(e) => setText(e.target.value)}
         rows={3}
         placeholder={"bot1@example.com,password1\nbot2@example.com,password2"}
-        className="mt-2 w-full rounded-lg border border-dojo-dark-brown/25 bg-dojo-washi-white p-2 font-sans text-xs text-dojo-ink outline-none"
+        className="mt-2 w-full rounded-lg border border-dojo-ink-soft/25 bg-dojo-on-dark p-2 font-sans text-xs text-dojo-ink outline-none"
       />
-      <p className="mt-1 font-sans text-[10px] text-dojo-dark-brown">
+      <p className="mt-1 font-sans text-[10px] text-dojo-ink-soft">
         1行に「メールアドレス,パスワード」で入力（複数行可）。この場でのみ使用し、保存はされません。
       </p>
       <button
         type="button"
         onClick={handleAdd}
         disabled={loading}
-        className="mt-2 rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-xs font-bold text-dojo-washi-white disabled:opacity-50"
+        className="mt-2 rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-xs font-bold text-dojo-on-dark disabled:opacity-50"
       >
         {loading ? "参加処理中…" : "ボットを参加させる"}
       </button>

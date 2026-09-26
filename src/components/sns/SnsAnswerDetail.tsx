@@ -159,7 +159,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
         </Link>
       )}
 
-      <div className={`${stadiumStyles.grainPaper} relative flex flex-col gap-3 p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
+      <div className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-3 p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
@@ -220,14 +220,14 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
 
       {isGuest ? (
         <p
-          className={`${stadiumStyles.grainPaper} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
+          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
         >
           ゲストはツッコめません。Xでログインしてください。
         </p>
       ) : (
         <form
           onSubmit={handleSubmit}
-          className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)]`}
+          className={`${stadiumStyles.surfaceLight} flex flex-col gap-2 p-4 text-[var(--ink)]`}
         >
           <textarea
             value={body}
@@ -258,7 +258,7 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             <button
               type="submit"
               disabled={!body.trim() || overLimit || noTicket || submitting}
-              className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+              className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {submitting ? "送信中…" : "ツッコむ（寄合券を1枚使う）"}
             </button>
@@ -271,14 +271,14 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
           ツッコミ {answerComments.length}件
         </h2>
         {answerComments.length === 0 && (
-          <p className={`${stadiumStyles.grainPaper} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
+          <p className={`${stadiumStyles.surfaceLight} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
             まだツッコミがありません。最初のツッコミを入れてみましょう。
           </p>
         )}
         {answerComments.map((comment) => (
           <div
             key={comment.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-1.5 py-3 pl-4 pr-9 text-[var(--ink)]`}
+            className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-1.5 py-3 pl-4 pr-9 text-[var(--ink)]`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={comment.authorId} size={24} hideReportButton />

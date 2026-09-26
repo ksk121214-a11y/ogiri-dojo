@@ -100,7 +100,7 @@ export default function PrivacyPage() {
         </>
       }
     >
-      <p className="font-sans text-sm leading-relaxed text-dojo-ink/90">
+      <p className="font-sans text-base leading-7 text-gray-900">
         {OPERATOR_NAME}（以下「運営」といいます。）は、オンライン大喜利ライブサービス「爆笑スタジアム」
         （以下「本サービス」といいます。）における利用者の情報の取り扱いについて、本プライバシーポリシー
         （以下「本ポリシー」といいます。）を定めます。
@@ -118,7 +118,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <span className="font-bold">プロフィール情報</span
-            >：表示名（高座名）、アイコン（種類・色の組み合わせ）、一言コメント
+            >：表示名（演者名）、アイコン（種類・色の組み合わせ）、一言コメント
           </li>
           <li>
             <span className="font-bold">ライブ参加・成績情報</span
@@ -204,12 +204,12 @@ export default function PrivacyPage() {
       <LegalSection id="x-login-scope" heading="Xログイン情報の利用範囲">
         <p>
           X連携は、ログイン認証、アカウントの識別及び初期プロフィールの作成に使用します。ログイン時に
-          Xから提供されるユーザー名（@ID）、表示名及びプロフィール画像のURLを取得し、初期の高座名（表示名）・
+          Xから提供されるユーザー名（@ID）、表示名及びプロフィール画像のURLを取得し、初期の演者名（表示名）・
           プロフィールとして保存します。本サービスは、利用者本人のXアカウントから自動投稿すること、
           Xアカウントでダイレクトメッセージを送信すること、及びXのタイムライン等の投稿情報を取得・保存する
           ことは行いません。本サービス内の「Xでシェア」ボタンは、X側の投稿画面（ポップアップ）を開くだけの
           機能であり、実際に投稿するかどうかは利用者ご自身がその画面上で判断・操作します。なお、投稿内容・
-          高座名・得点・順位等を運営が公式Xで紹介する場合があります（「投稿内容の公式Xへの掲載について」
+          演者名・得点・順位等を運営が公式Xで紹介する場合があります（「投稿内容の公式Xへの掲載について」
           及び利用規約第8条をご確認ください）。
         </p>
       </LegalSection>
@@ -233,7 +233,7 @@ export default function PrivacyPage() {
               href="https://supabase.com/privacy"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               Supabaseのプライバシーポリシー
             </a>
@@ -244,7 +244,7 @@ export default function PrivacyPage() {
               href="https://vercel.com/legal/privacy-policy"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               Vercelのプライバシーポリシー
             </a>
@@ -257,7 +257,7 @@ export default function PrivacyPage() {
               href="https://x.com/en/privacy"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               Xのプライバシーポリシー
             </a>
@@ -269,7 +269,7 @@ export default function PrivacyPage() {
               href="https://policies.google.com/privacy"
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               Googleのプライバシーポリシー
             </a>
@@ -295,7 +295,7 @@ export default function PrivacyPage() {
         <p>
           運営は、本サービス及び運営が指定する公式Xアカウント（以下「公式X」といいます。）の紹介、広報並びに
           ライブ結果の紹介を目的として、寄合帳の投稿内容（お題・回答・ツッコミ）、ライブでの得点・順位その他の結果、及び
-          アプリ内の高座名（表示名）を公式Xへ掲載する場合があります。この掲載は、利用規約第8条への同意に基づき
+          アプリ内の演者名（表示名）を公式Xへ掲載する場合があります。この掲載は、利用規約第8条への同意に基づき
           運営が公式X上で一般に公開するものであり、投稿ごとの事前通知又は個別確認は行いません。この許諾は、
           利用規約の制定日（施行日）以後に投稿された投稿内容に適用され、それより前に投稿された内容については
           運営が別途対応します。利用者のXのユーザー名（@ID）及びXのプロフィール画像は、別途利用者の許可を
@@ -311,7 +311,7 @@ export default function PrivacyPage() {
           第三者に提供しません。公式Xへの掲載については「投稿内容の公式Xへの掲載について」をご確認ください。
         </p>
         <p>
-          本サービスには、高座名（表示名）、アプリアイコン、自己紹介（一言コメント）、段位（習熟度）、
+          本サービスには、演者名（表示名）、アプリアイコン、自己紹介（一言コメント）、段位（習熟度）、
           寄合帳への投稿（お題・回答・ツッコミ）、ライブ結果及びライブ結果へのコメント等を、未ログインの
           利用者を含む第三者が閲覧できる状態で表示する機能があります。これらは本サービスの性質上、これらの
           機能をご利用いただくことに伴って表示されるものであり、投稿等ごとに公開・非公開を個別に選択できる
@@ -378,7 +378,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           アプリ内から申請できない場合は、以下の窓口へお問い合わせいただけます。ただし、この場合も、
-          高座名（表示名）、Xのユーザー名（@ID）、寄合帳への投稿内容等、一般に公開されている情報だけでは、
+          演者名（表示名）、Xのユーザー名（@ID）、寄合帳への投稿内容等、一般に公開されている情報だけでは、
           ご本人からのご依頼であることの確認にはなりません。アプリ内で発行された申請番号を本文にご記載
           いただくか、運営が別途ご案内する方法によりご本人であることを確認できる場合に限り対応します。
         </p>
@@ -387,7 +387,7 @@ export default function PrivacyPage() {
             受付先：
             <a
               href={CONTACT_MAILTO}
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               {CONTACT_EMAIL}
             </a>
@@ -396,7 +396,7 @@ export default function PrivacyPage() {
             件名例：
             <a
               href={contactMailtoWithSubject(ACCOUNT_DELETION_MAIL_SUBJECT)}
-              className="ml-1 underline decoration-dojo-dark-brown/40 underline-offset-2"
+              className="ml-1 text-blue-800 underline underline-offset-2"
             >
               「{ACCOUNT_DELETION_MAIL_SUBJECT}」
             </a>

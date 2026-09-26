@@ -9,20 +9,20 @@ export const RARITY_LABEL: Record<Rarity, string> = {
   SSR: "SSR",
 };
 
-// ガチャ/ショップは畳生成りベースの明るい画面（§2.5）のため、暗背景前提の
+// ガチャ/ショップは明るい面の画面（§2.5）のため、暗背景前提の
 // 灰紫・灯り橙系の淡色ではなく、明るい面でも視認できる濃色をレアリティ表示に使う。
-// SSRは幕金（gold）だと薄茶・畳生成りの背景でコントラストが不足するため、
+// SSRは幕金（gold）だと明るいグレーの背景でコントラストが不足するため、
 // 同系統の濃い色である深緋（dojo-deep-crimson）を使う（第5ラウンドフィードバック）。
 export const RARITY_TEXT_CLASS: Record<Rarity, string> = {
-  N: "text-dojo-dark-brown/70",
-  R: "text-dojo-tatami-green",
+  N: "text-dojo-ink-soft/70",
+  R: "text-dojo-success-strong",
   SR: "text-dojo-cheer-pink",
   SSR: "text-dojo-deep-crimson",
 };
 
 export const RARITY_BORDER_CLASS: Record<Rarity, string> = {
-  N: "border-dojo-dark-brown/30",
-  R: "border-dojo-tatami-green/60",
+  N: "border-dojo-ink-soft/30",
+  R: "border-dojo-success-strong/60",
   SR: "border-dojo-cheer-pink/60",
   SSR: "border-dojo-curtain-gold",
 };
@@ -49,12 +49,12 @@ export const ITEM_TYPE_EMOJI: Record<ItemType, string> = {
 // 背景柄IDごとの部屋プレビュー用グラデーション（実アセット導入までのダミー表現）。
 // 自分の楽屋（backstage-room）・他プレイヤーの楽屋見学の両方で共通利用する。
 export const ROOM_BG_CLASS: Record<string, string> = {
-  "bg-chochin": "from-dojo-curtain-red/30 via-dojo-spotlight-orange/20 to-dojo-tatami-cream",
-  "bg-seigaiha": "from-dojo-backstage-navy/30 via-dojo-gray-purple/20 to-dojo-tatami-cream",
-  "bg-kinpaku": "from-dojo-gold-foil/35 via-dojo-curtain-gold/15 to-dojo-tatami-cream",
-  "bg-donchou-gara": "from-dojo-curtain-red/35 via-dojo-curtain-gold/20 to-dojo-tatami-cream",
-  "bg-spotlight": "from-dojo-spotlight-orange/35 via-dojo-spotlight-orange-light/15 to-dojo-tatami-cream",
-  "bg-neon-yose": "from-dojo-cheer-pink/30 via-dojo-spotlight-orange/20 to-dojo-tatami-cream",
-  "bg-kamifubuki": "from-dojo-cheer-pink/30 via-dojo-gold-foil/25 to-dojo-tatami-cream",
+  "bg-chochin": "from-dojo-curtain-red/30 via-dojo-spotlight-orange/20 to-dojo-surface",
+  "bg-seigaiha": "from-dojo-backstage-navy/30 via-dojo-gray-purple/20 to-dojo-surface",
+  "bg-kinpaku": "from-dojo-gold-foil/35 via-dojo-curtain-gold/15 to-dojo-surface",
+  "bg-donchou-gara": "from-dojo-curtain-red/35 via-dojo-curtain-gold/20 to-dojo-surface",
+  "bg-spotlight": "from-dojo-spotlight-orange/35 via-dojo-spotlight-orange-light/15 to-dojo-surface",
+  "bg-neon-yose": "from-dojo-cheer-pink/30 via-dojo-spotlight-orange/20 to-dojo-surface",
+  "bg-kamifubuki": "from-dojo-cheer-pink/30 via-dojo-gold-foil/25 to-dojo-surface",
 };
-export const DEFAULT_ROOM_BG_CLASS = "from-dojo-light-brown/40 via-dojo-tatami-cream to-dojo-tatami-cream";
+export const DEFAULT_ROOM_BG_CLASS = "from-dojo-surface-muted/40 via-dojo-surface to-dojo-surface";

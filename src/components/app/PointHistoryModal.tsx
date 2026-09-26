@@ -15,11 +15,11 @@ interface PointHistoryRow {
   created_at: string;
 }
 
-// ヘッダー（畳生成りテーマの/ranking・/gacha等）の「段位・名前・ポイント」バッジ、または
+// ヘッダー（明るい面の/ranking・/gacha等）の「段位・名前・ポイント」バッジ、または
 // ホーム/マイページ（地下ライブハウステーマ）の「ポイント残高」表示を押すと開く獲得履歴モーダル。
 // 2026-08-28: ホーム下部のポイント残高（AccountSummary）から開けるようにしたのに合わせて、
 // variant="stadium"のときだけ見た目を地下ライブハウステーマに合わせられるようにした
-// （畳生成りテーマ側のAppHeaderからの利用は従来通りvariant="dojo"のまま）。
+// （明るい面側のAppHeaderからの利用は従来通りvariant="dojo"のまま）。
 // 2026-08-31（段位・ポイント・実績の実データ化）：固定ダミー配列(POINT_HISTORY)ではなく、
 // Supabaseのpoint_history（ライブ終了時にapply_live_rank_rewards()が1行ずつ記録する）を
 // ログイン中の自分の分だけ取得して表示するようにした。ポイント残高もuseProfileStoreの実データ。
@@ -122,7 +122,7 @@ export default function PointHistoryModal({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`${stadiumStyles.grainPaper} flex w-full max-w-sm flex-col gap-4 rounded-3xl p-6 text-[var(--ink)] shadow-2xl`}
+          className={`${stadiumStyles.surfaceLight} flex w-full max-w-sm flex-col gap-4 rounded-3xl p-6 text-[var(--ink)] shadow-2xl`}
         >
           <div className="flex items-center justify-between">
             <h2 className="font-sans text-base font-black text-[var(--ink)]">獲得履歴</h2>
@@ -137,7 +137,7 @@ export default function PointHistoryModal({
           </div>
 
           {isMember && (
-            <div className={`${stadiumStyles.grainAccent} rounded-2xl p-4 text-center`}>
+            <div className={`${stadiumStyles.surfaceAccent} rounded-2xl p-4 text-center`}>
               <p className="font-sans text-[11px] text-[var(--paper)]/80">現在のポイント残高</p>
               <p className="mt-1 font-sans text-2xl font-black tabular-nums text-[var(--paper)]">
                 {points.toLocaleString()}
@@ -163,7 +163,7 @@ export default function PointHistoryModal({
                 </div>
                 <span
                   className={`shrink-0 font-sans text-sm font-bold tabular-nums ${
-                    entry.points >= 0 ? "text-dojo-tatami-green" : "text-[var(--accent)]"
+                    entry.points >= 0 ? "text-dojo-success-strong" : "text-[var(--accent)]"
                   }`}
                 >
                   {entry.points >= 0 ? "+" : ""}
@@ -192,7 +192,7 @@ export default function PointHistoryModal({
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="rounded-full px-2 py-1 font-sans text-sm text-dojo-dark-brown hover:bg-black/5"
+            className="rounded-full px-2 py-1 font-sans text-sm text-dojo-ink-soft hover:bg-black/5"
           >
             ✕
           </button>
@@ -203,11 +203,11 @@ export default function PointHistoryModal({
             （以前はここだけ常時表示になっており、実データの無いユーザーにも
             0ptが実際の残高であるかのように見えてしまっていた）。 */}
         {isMember && (
-          <div className="rounded-2xl bg-dojo-tatami-cream p-4 text-center">
-            <p className="font-sans text-[11px] text-dojo-dark-brown/70">現在のポイント残高</p>
+          <div className="rounded-2xl bg-dojo-surface p-4 text-center">
+            <p className="font-sans text-[11px] text-dojo-ink-soft/70">現在のポイント残高</p>
             <p className="mt-1 font-sans text-2xl font-bold tabular-nums text-dojo-ink">
               {points.toLocaleString()}
-              <span className="ml-1 text-sm font-normal text-dojo-dark-brown/70">pt</span>
+              <span className="ml-1 text-sm font-normal text-dojo-ink-soft/70">pt</span>
             </p>
           </div>
         )}
@@ -217,19 +217,19 @@ export default function PointHistoryModal({
           {visibleHistory.map((entry) => (
             <div
               key={entry.id}
-              className="flex items-center justify-between gap-3 rounded-xl bg-dojo-tatami-cream/60 px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-xl bg-dojo-surface/60 px-3 py-2"
             >
               <div className="min-w-0">
                 <p className="truncate font-sans text-xs font-bold text-dojo-ink">
                   {entry.label}
                 </p>
-                <p className="font-sans text-[10px] text-dojo-dark-brown/60">
+                <p className="font-sans text-[10px] text-dojo-ink-soft/60">
                   {formatDate(entry.created_at)}
                 </p>
               </div>
               <span
                 className={`shrink-0 font-sans text-sm font-bold tabular-nums ${
-                  entry.points >= 0 ? "text-dojo-tatami-green" : "text-dojo-deep-crimson"
+                  entry.points >= 0 ? "text-dojo-success-strong" : "text-dojo-deep-crimson"
                 }`}
               >
                 {entry.points >= 0 ? "+" : ""}

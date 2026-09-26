@@ -7,7 +7,7 @@ import { isConfirmedMember } from "@/lib/guestStatus";
 import { useAuthStore } from "@/store/useAuthStore";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore } from "@/store/useProfileStore";
 
-// ログイン後、display_name_set=falseの間だけ表示する高座名(演者名)の初回設定モーダル。
+// ログイン後、display_name_set=falseの間だけ表示する演者名（表示名）の初回設定モーダル。
 // 後から自由に変更できる想定のため、閉じるボタンは置かず「決めるまで進めない」形にしている。
 export default function DisplayNameSetupModal() {
   const profile = useProfileStore((s) => s.profile);
@@ -36,37 +36,40 @@ export default function DisplayNameSetupModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-tatami-cream p-6 shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="display-name-setup-title"
+        className="w-full max-w-sm rounded-2xl bg-white p-6 text-gray-900 shadow-2xl ring-1 ring-gray-300"
       >
-        <h2 className="font-brush text-lg text-dojo-dark-brown">高座名を決めましょう</h2>
-        <p className="mt-2 font-sans text-xs text-dojo-dark-brown">
+        <h2 id="display-name-setup-title" className="font-sans text-xl font-bold text-gray-900">演者名を決めましょう</h2>
+        <p className="mt-2 font-sans text-sm leading-relaxed text-gray-800">
           {APP_NAME}で名乗る名前を{DISPLAY_NAME_MAX_LENGTH}文字以内で決めてください。後からでも変更できます。
         </p>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="例: 高座の花子"
+          placeholder="例: たろう"
           autoFocus
-          className="mt-4 w-full rounded-full border border-dojo-dark-brown/30 bg-dojo-washi-white px-4 py-2 font-sans text-base text-dojo-ink outline-none focus:border-dojo-curtain-red"
+          className="mt-4 w-full rounded-lg border border-gray-400 bg-white px-4 py-2.5 font-sans text-base text-gray-900 placeholder:text-gray-500 outline-none focus:border-blue-700 focus:ring-2 focus:ring-blue-700/40"
         />
         <span
           className={`mt-1 block text-right font-sans text-[11px] ${
-            name.length > DISPLAY_NAME_MAX_LENGTH ? "font-bold text-dojo-deep-crimson" : "text-dojo-dark-brown/70"
+            name.length > DISPLAY_NAME_MAX_LENGTH ? "font-bold text-red-700" : "text-gray-700"
           }`}
         >
           {name.length} / {DISPLAY_NAME_MAX_LENGTH}
         </span>
         {error && (
-          <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{error}</p>
+          <p role="alert" className="mt-2 font-sans text-sm font-bold text-red-700">{error}</p>
         )}
         <button
           type="submit"
           disabled={submitting || !name.trim() || name.trim().length > DISPLAY_NAME_MAX_LENGTH}
-          className="mt-4 w-full rounded-full bg-dojo-curtain-red px-4 py-2 font-sans text-sm font-bold text-dojo-washi-white transition disabled:opacity-50"
+          className="mt-4 w-full rounded-xl bg-gray-900 px-4 py-3 font-sans text-base font-bold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-700"
         >
           {submitting ? "設定中…" : "この名前にする"}
         </button>

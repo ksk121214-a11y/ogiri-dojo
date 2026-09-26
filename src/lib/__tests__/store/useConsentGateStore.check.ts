@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legalInfo";
+import { recordTermsConsentOnce, resetTermsConsentRecorderForTests, waitForConsentInFlight } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import {
@@ -46,8 +47,10 @@ const fakeLocalStorage = new FakeLocalStorage();
 // record_terms_consent即時呼び出しを検証するために必要）。----
 let rpcCalls: { name: string }[] = [];
 let rpcResponse: { error: unknown } = { error: null };
+let rpcDelayMs = 0;
 (supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc = async (name) => {
   rpcCalls.push({ name });
+  if (rpcDelayMs > 0) await new Promise((r) => setTimeout(r, rpcDelayMs));
   return rpcResponse;
 };
 
@@ -56,7 +59,7 @@ function readPendingFlagFromStorage(): PendingConsentFlag | null {
   return raw ? (JSON.parse(raw) as PendingConsentFlag) : null;
 }
 
-function resetAuthMocks() {
+function resetAuthMocks(guestUserId: string | null = "guest-mock") {
   const xLoginCalls: unknown[] = [];
   let guestStartCalls: number = 0;
   useAuthStore.setState({
@@ -66,7 +69,7 @@ function resetAuthMocks() {
     },
     signInAsGuest: async () => {
       guestStartCalls += 1;
-      return { ok: true };
+      return { ok: true, userId: guestUserId };
     },
   });
   return {
@@ -253,6 +256,248 @@ async function main() {
   assert.equal(useConsentGateStore.getState().pendingModal, null, "ゲスト参加自体は成功しているのにモーダルが閉じていない");
   rpcResponse = { error: null };
   console.log("PASS: ゲスト参加自体は成功しても、同意の記録(record_terms_consent)に失敗した場合は端末の同意済みフラグを記録しない（同意済み扱いにしない）");
+
+  // ---- テスト11（二重送信の防止）：利用者が確定している状態で、同意操作の連打・
+  //      複数経路（ConsentRequiredGate側の記録）・Strict Mode相当の二重実行が
+  //      重なっても、record_terms_consentのRPCは論理的に1回だけ。 ----
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: { id: "guest-u1", is_anonymous: true } as never });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  rpcResponse = { error: null };
+  rpcDelayMs = 30;
+  mocks = resetAuthMocks("guest-u1");
+  await useConsentGateStore.getState().requestGuestStart();
+  const gateSideRecord = recordTermsConsentOnce({
+    userId: "guest-u1",
+    termsVersion: TERMS_VERSION,
+    privacyVersion: PRIVACY_VERSION,
+    rpc: async () => {
+      const { error } = await supabase.rpc("record_terms_consent");
+      return { error };
+    },
+  });
+  await Promise.all([
+    useConsentGateStore.getState().confirm(),
+    useConsentGateStore.getState().confirm(), // 連打・Strict Mode相当の二重実行
+    gateSideRecord, // ConsentRequiredGate側の記録経路
+  ]);
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "同意のRPCが1回ではない（二重送信）");
+  assert.equal(
+    fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY),
+    `${TERMS_VERSION}|${PRIVACY_VERSION}`,
+    "二重実行でも端末の同意済みフラグが記録されていない",
+  );
+  console.log("PASS: 同意の連打・複数経路・二重実行が重なっても、record_terms_consentは1回だけ");
+
+  // ---- テスト12（失敗時は再試行できる）：記録に失敗した後の再度の同意操作では再送する。 ----
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: { id: "guest-u2", is_anonymous: true } as never });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  rpcDelayMs = 0;
+  rpcResponse = { error: { message: "network error" } };
+  mocks = resetAuthMocks("guest-u2");
+  await useConsentGateStore.getState().requestGuestStart();
+  await useConsentGateStore.getState().confirm();
+  assert.equal(fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY), null, "失敗したのに同意済みになった");
+  rpcResponse = { error: null };
+  const retry = await recordTermsConsentOnce({
+    userId: "guest-u2",
+    termsVersion: TERMS_VERSION,
+    privacyVersion: PRIVACY_VERSION,
+    rpc: async () => {
+      const { error } = await supabase.rpc("record_terms_consent");
+      return { error };
+    },
+  });
+  assert.equal(retry.error, null);
+  assert.equal(rpcCalls.length, 2, "失敗後の再試行でRPCが再送されていない");
+  console.log("PASS: 記録に失敗した場合は、次の同意操作で安全に再試行できる");
+
+  // ---- テスト13（利用者切替）：同意の記録中に別の利用者へ切り替わった場合、前の利用者の
+  //      完了結果（同意済みフラグ）を今の端末へ反映しない。 ----
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: { id: "guest-a", is_anonymous: true } as never });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  rpcDelayMs = 40;
+  rpcResponse = { error: null };
+  mocks = resetAuthMocks("guest-a");
+  await useConsentGateStore.getState().requestGuestStart();
+  const inFlight = useConsentGateStore.getState().confirm();
+  await new Promise((r) => setTimeout(r, 10));
+  useAuthStore.setState({ user: { id: "guest-b", is_anonymous: true } as never }); // 記録中に切替
+  await inFlight;
+  assert.equal(
+    fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY),
+    null,
+    "前の利用者の同意完了が、切り替わった後の端末の同意済みフラグとして反映された",
+  );
+  rpcDelayMs = 0;
+  console.log("PASS: 記録中に利用者が切り替わった場合、前の利用者の完了結果は反映されない");
+
+  // ---- テスト14（認証結果は返ったがuseAuthStore反映前）：signInAnonymouslyの結果から確定した
+  //      userIdで記録し、ゲート側の記録（userIdが反映された後に同じuserIdで呼ぶ）と1本に合流する。
+  //      userId=nullのままRPCは呼ばない。 ----
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: null });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  rpcResponse = { error: null };
+  rpcDelayMs = 40;
+  mocks = resetAuthMocks("guest-early");
+  await useConsentGateStore.getState().requestGuestStart();
+  const early = useConsentGateStore.getState().confirm();
+  await new Promise((r) => setTimeout(r, 10));
+  // ここで認証ストアへ反映される（結果が返った後）。ゲート側の記録経路が同じuserIdで呼ぶ。
+  useAuthStore.setState({ user: { id: "guest-early", is_anonymous: true } as never });
+  const gateSide = recordTermsConsentOnce({
+    userId: "guest-early",
+    termsVersion: TERMS_VERSION,
+    privacyVersion: PRIVACY_VERSION,
+    rpc: async () => {
+      const { error } = await supabase.rpc("record_terms_consent");
+      return { error };
+    },
+  });
+  await Promise.all([early, gateSide]);
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "認証ストア反映前後で二重送信になった");
+  assert.equal(fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY), `${TERMS_VERSION}|${PRIVACY_VERSION}`, "認証ストア未反映でも記録成功後に同意済みが記録されていない");
+  rpcDelayMs = 0;
+  console.log("PASS: 認証結果は返ったがuseAuthStore反映前でも、確定したuserIdで1回だけ記録される（ゲート側と1本に合流）");
+
+  // userIdが確定しない（結果にも認証ストアにも無い）場合、記録RPCは呼ばない。
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: null });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  mocks = resetAuthMocks(null);
+  await useConsentGateStore.getState().requestGuestStart();
+  await useConsentGateStore.getState().confirm();
+  assert.equal(rpcCalls.length, 0, "userIdが確定しないのにrecord_terms_consentを呼んだ（userId=nullのまま記録）");
+  assert.equal(fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY), null, "記録していないのに同意済みになった");
+  console.log("PASS: userIdが確定しない間はrecord_terms_consentを呼ばない（同意画面側の記録に任せる）");
+
+  // ---- テスト15（同じSPAセッション中に同意行をリセット）：成功をキャッシュしないため、
+  //      DBの同意行が削除された後の再同意ではRPCが再実行される。 ----
+  resetTermsConsentRecorderForTests();
+  rpcCalls = [];
+  rpcResponse = { error: null };
+  const rec = () =>
+    recordTermsConsentOnce({
+      userId: "user-reset",
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      rpc: async () => {
+        const { error } = await supabase.rpc("record_terms_consent");
+        return { error };
+      },
+    });
+  await rec();
+  assert.equal(rpcCalls.length, 1);
+  // （ここでDBの同意行がリセットされたと仮定する）再同意。
+  await rec();
+  assert.equal(rpcCalls.length, 2, "同意行のリセット後の再同意でRPCが再実行されない（成功キャッシュが残っている）");
+  console.log("PASS: 成功をキャッシュしない。同意行をリセットした後の再同意ではRPCが再実行される");
+
+  // ---- テスト16（ログアウト後に同じ利用者が再ログイン）：完了後はDBを正とし、再度の同意記録はRPCを再実行できる。 ----
+  rpcCalls = [];
+  useAuthStore.setState({ user: { id: "user-reset", is_anonymous: false } as never });
+  useAuthStore.setState({ user: null });
+  useAuthStore.setState({ user: { id: "user-reset", is_anonymous: false } as never });
+  await rec();
+  assert.equal(rpcCalls.length, 1, "ログアウト→同じ利用者の再ログイン後に記録RPCが実行されない");
+  // 同時呼び出しは1本に合流する。
+  rpcCalls = [];
+  rpcDelayMs = 30;
+  await Promise.all([rec(), rec(), rec()]);
+  assert.equal(rpcCalls.length, 1, "同時呼び出しが1本に合流していない");
+  rpcDelayMs = 0;
+  console.log("PASS: ログアウト後の同じ利用者の再ログインでも記録でき、同時呼び出しは1本に合流する");
+
+  // ---- テスト17（ゲスト同意処理の多重実行）：先発confirmが認証・記録中に後発confirmが開始しても、
+  //      処理は1つに合流し、匿名認証もrecord_terms_consentも1回だけ。後発が先に終了しても、
+  //      同意確認は先発の完了まで待ち、待機解除後にDBの同意行を確認してacceptedになる。 ----
+  resetTermsConsentRecorderForTests();
+  fakeLocalStorage.clear();
+  useAuthStore.setState({ user: null });
+  useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+  rpcCalls = [];
+  rpcResponse = { error: null };
+  rpcDelayMs = 60;
+  let signInCalls = 0;
+  let signInDelay = 60;
+  useAuthStore.setState({
+    signInAsGuest: async () => {
+      signInCalls += 1;
+      await new Promise((r) => setTimeout(r, signInDelay));
+      return { ok: true, userId: "guest-race" };
+    },
+  });
+  await useConsentGateStore.getState().requestGuestStart();
+  const first = useConsentGateStore.getState().confirm();
+  await new Promise((r) => setTimeout(r, 10));
+  const second = useConsentGateStore.getState().confirm(); // 後発（再マウント・二重実行・直接呼び出し）
+  // 同意確認（ConsentRequiredGate）の代わり：待機解除後にDBの同意行を確認する。
+  let dbRow = false;
+  const gateCheck = waitForConsentInFlight("guest-race", TERMS_VERSION, PRIVACY_VERSION).then(() => (dbRow ? "accepted" : "consent-required"));
+  const secondDone = second.then(() => "second-done");
+  const earlyResult = await Promise.race([secondDone, new Promise((r) => setTimeout(() => r("timeout"), 20))]);
+  assert.equal(earlyResult, "timeout", "後発confirmが先発の完了を待たずに先に終了した（合流していない）");
+  // 記録RPCの完了でDBに同意行ができる、というモデル。
+  const rpcSpy = (supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc;
+  (supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc = async (name: string) => {
+    const r = await rpcSpy(name);
+    if (name === "record_terms_consent" && !r.error) dbRow = true;
+    return r;
+  };
+  await Promise.all([first, second]);
+  const gateResult = await gateCheck;
+  (supabase as unknown as { rpc: unknown }).rpc = rpcSpy;
+  assert.equal(signInCalls, 1, "ゲスト認証が二重に実行された");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "同意RPCが1回ではない");
+  assert.equal(gateResult, "accepted", "待機解除後の同意確認がacceptedにならない（未同意画面を誤表示）");
+  assert.equal(useConsentGateStore.getState().pendingModal, null);
+  console.log("PASS: 先発confirmの認証・記録中に後発confirmが開始しても1つに合流し、RPCは1回、同意確認は先発の完了まで待ってacceptedになる");
+
+  // ---- テスト18（失敗・例外・再試行）：失敗しても例外でも窓は必ず解除され、再試行できる。 ----
+  rpcDelayMs = 0;
+  signInDelay = 0;
+  let mode: "fail" | "throw" | "ok" = "fail";
+  useAuthStore.setState({
+    signInAsGuest: async () => {
+      signInCalls += 1;
+      if (mode === "throw") throw new Error("boom");
+      if (mode === "fail") return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };
+      return { ok: true, userId: "guest-retry" };
+    },
+  });
+  signInCalls = 0;
+  useConsentGateStore.setState({ pendingModal: { kind: "guest" }, errorReason: null });
+  await useConsentGateStore.getState().confirm();
+  assert.equal(useConsentGateStore.getState().pendingModal?.kind, "guest", "失敗時にモーダルが閉じた");
+  let waitedFail = false;
+  await Promise.race([waitForConsentInFlight("guest-retry", TERMS_VERSION, PRIVACY_VERSION).then(() => (waitedFail = true)), new Promise((r) => setTimeout(r, 200))]);
+  assert.equal(waitedFail, true, "失敗後も窓が解除されず、同意確認が待たされ続ける");
+  mode = "throw";
+  await useConsentGateStore.getState().confirm();
+  assert.ok(useConsentGateStore.getState().errorReason, "例外時に日本語の失敗理由が表示されていない");
+  waitedFail = false;
+  await Promise.race([waitForConsentInFlight("guest-retry", TERMS_VERSION, PRIVACY_VERSION).then(() => (waitedFail = true)), new Promise((r) => setTimeout(r, 200))]);
+  assert.equal(waitedFail, true, "例外後も窓が解除されず、永久待機になっている");
+  mode = "ok";
+  rpcCalls = [];
+  await useConsentGateStore.getState().confirm();
+  assert.equal(signInCalls, 3, "失敗・例外の後に再試行（再度のゲスト認証）ができていない");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "再試行で同意RPCが1回実行されていない");
+  assert.equal(useConsentGateStore.getState().pendingModal, null);
+  console.log("PASS: 失敗・例外でも窓は必ず解除され（永久待機にならない）、次のconfirmで再試行できる");
 
   console.log("ALL USE_CONSENT_GATE_STORE CHECKS PASSED");
 }

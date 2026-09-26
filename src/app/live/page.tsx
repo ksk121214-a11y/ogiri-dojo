@@ -236,12 +236,12 @@ export default function LivePage() {
             const result = await signInWithX();
             if (!result.ok && result.reason) setXLoginError(result.reason);
           }}
-          className="rounded-full bg-dojo-ink px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white"
+          className="rounded-full bg-white px-5 py-2.5 font-sans text-sm font-bold text-gray-900"
         >
           Xでログイン
         </button>
         {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
-        <p className="mt-4 mb-2 font-sans text-xs text-dojo-dark-brown/70">
+        <p className="mt-4 mb-2 font-sans text-xs text-white/70">
           ゲストは観客としてライブを視聴できます。回答・採点・ポイント記録はできません。
           爆笑・ツッコミ・拍手は利用できます。
         </p>
@@ -253,7 +253,7 @@ export default function LivePage() {
             const result = await signInAsGuest();
             if (!result.ok) setGuestSignInError(result.reason ?? null);
           }}
-          className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown disabled:opacity-50"
+          className="rounded-full border border-white/40 px-5 py-2.5 font-sans text-sm font-bold text-white/85 transition hover:bg-white/10 disabled:opacity-50"
         >
           {guestSigningIn ? "準備中…" : "ログインせず観客として見る"}
         </button>
@@ -262,7 +262,7 @@ export default function LivePage() {
         )}
         {/* Xログイン・ゲスト観戦、両方のボタンの近くに表示する同意文言。既存の
             ログイン/ゲスト参加処理（signInWithX/signInAsGuest）自体は変更しない。 */}
-        <LegalConsentNote className="mt-4 font-sans text-[11px] text-dojo-dark-brown/60" />
+        <LegalConsentNote className="mt-4 font-sans text-[11px] text-white/60" />
       </CenterMessage>
     );
   }
@@ -280,13 +280,13 @@ export default function LivePage() {
         <p>{syncError ? "ライブ状態の取得に失敗しました" : "ライブ入場中…"}</p>
         {syncError && (
           <>
-            <p className="mt-2 max-w-xs font-sans text-xs text-dojo-dark-brown/70">
+            <p className="mt-2 max-w-xs font-sans text-xs text-white/70">
               {syncError}。自動的に再試行しています。
             </p>
             <button
               type="button"
               onClick={() => retrySync()}
-              className="mt-4 rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+              className="mt-4 rounded-full border border-white/40 px-5 py-2.5 font-sans text-sm font-bold text-white/85 transition hover:bg-white/10"
             >
               今すぐ再試行
             </button>
@@ -301,15 +301,15 @@ export default function LivePage() {
   if (myParticipant?.kicked_at) {
     return (
       <CenterMessage>
-        <p className="mb-2 font-sans text-base font-bold text-dojo-ink">
+        <p className="mb-2 font-sans text-base font-bold text-white">
           運営により退場となりました
         </p>
-        <p className="mb-4 font-sans text-xs text-dojo-dark-brown/70">
+        <p className="mb-4 font-sans text-xs text-white/70">
           このライブへの参加はできません。
         </p>
         <Link
           href="/"
-          className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+          className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-on-dark transition hover:bg-dojo-deep-crimson"
         >
           ホームに戻る
         </Link>
@@ -323,7 +323,7 @@ export default function LivePage() {
   // 2026-09-03: 以前はtopic_reveal/answering中に「まだ参加登録していない人
   // （観客として途中参加しようとしている人）」と、group_result/final_result
   // フェーズ全体（参加者・観客問わず）が、この没入デザインに入れず、下の
-  // 旧デザイン（和風・washi配色、font-brush見出し）のフォールバック画面に
+  // 旧デザインのフォールバック画面に
   // 流れてしまっていた。実況で「途中で観客として入ってくる画面が旧デザインの
   // ままだった」と発覚した不具合。進行中の全フェーズ（interlude〜final_result）を
   // 没入デザインの対象にし、フォールバック画面は「ライブ開始前(scheduled)」
@@ -408,22 +408,22 @@ export default function LivePage() {
       <AnnouncementBanner />
       <AudienceHomeButton />
       <SoundToggle />
-      <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
+      <p className="font-sans text-xs tracking-widest text-white/85">
         爆笑スタジアムライブ
       </p>
-      <h1 className="font-brush text-2xl text-dojo-dark-brown">
+      <h1 className="font-sans font-bold text-2xl text-white/85">
         {profile?.displayName ?? "..."}
       </h1>
 
       {/* liveLoadingはこの時点で必ずfalse（上のガードで既に抜けている）。 */}
       {!live ? (
         <>
-          <p className="font-sans text-sm text-dojo-dark-brown">
+          <p className="font-sans text-sm text-white/85">
             まだライブは開演していません。司会の開始をお待ちください。
           </p>
           <Link
             href="/"
-            className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+            className="rounded-full border border-white/40 px-5 py-2.5 font-sans text-sm font-bold text-white/85 transition hover:bg-white/10"
           >
             ホームに戻る
           </Link>
@@ -433,25 +433,25 @@ export default function LivePage() {
         // 開始する」を押していない）の間は、参加登録受付(opening)より前の
         // 状態として、既存の「!live」ケースと同じ体裁で案内する。
         <>
-          <p className="font-sans text-sm text-dojo-dark-brown">
+          <p className="font-sans text-sm text-white/85">
             {live.title ? `「${live.title}」は` : "次回のライブは"}
             ただいま準備中です。参加受付が始まるまでお待ちください。
           </p>
           <Link
             href="/"
-            className="rounded-full border border-dojo-dark-brown/30 px-5 py-2.5 font-sans text-sm font-bold text-dojo-dark-brown transition hover:bg-dojo-light-brown"
+            className="rounded-full border border-white/40 px-5 py-2.5 font-sans text-sm font-bold text-white/85 transition hover:bg-white/10"
           >
             ホームに戻る
           </Link>
         </>
       ) : live.current_phase === "closed" ? (
         <>
-          <p className="font-sans text-sm text-dojo-dark-brown">
+          <p className="font-sans text-sm text-white/85">
             本日のライブは終了しました。お疲れさまでした！
           </p>
           <Link
             href="/"
-            className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-washi-white transition hover:bg-dojo-deep-crimson"
+            className="rounded-full bg-dojo-curtain-red px-5 py-2.5 font-sans text-sm font-bold text-dojo-on-dark transition hover:bg-dojo-deep-crimson"
           >
             ホームに戻る
           </Link>
@@ -459,11 +459,11 @@ export default function LivePage() {
       ) : (
         <>
           <div className="flex flex-col items-center gap-1">
-            <p className="font-brush text-xl text-dojo-curtain-red">
+            <p className="font-sans font-bold text-xl text-dojo-curtain-red">
               {PHASE_LABEL[live.current_phase] ?? live.current_phase}
             </p>
             {(remainingSec !== null || remaining.syncing) && (
-              <p className="font-sans text-sm tabular-nums text-dojo-dark-brown">
+              <p className="font-sans text-sm tabular-nums text-white/85">
                 {remaining.syncing ? "時刻を同期中…" : `残り${remainingSec}秒`}
                 {live.answering_paused && "（審査中は一時停止）"}
               </p>
@@ -484,7 +484,7 @@ export default function LivePage() {
                   await joinLive("audience");
                   setJoining(false);
                 }}
-                className="rounded-full border border-dojo-dark-brown/30 px-5 py-3 font-sans text-sm font-bold text-dojo-dark-brown disabled:opacity-50"
+                className="rounded-full border border-white/40 px-5 py-3 font-sans text-sm font-bold text-white/85 disabled:opacity-50"
               >
                 {joining ? "参加処理中…" : "観客として参加する"}
               </button>
@@ -495,7 +495,7 @@ export default function LivePage() {
           )}
 
           {myParticipant && (
-            <p className="font-sans text-xs text-dojo-dark-brown">
+            <p className="font-sans text-xs text-white/85">
               {myParticipant.group_id
                 ? `組分け済み・${myParticipant.role === "player" ? "演者" : "見学"}`
                 : `組分け待ち・${myParticipant.preferred_role === "player" ? "演者希望" : "見学希望"}`}
@@ -516,9 +516,9 @@ export default function LivePage() {
           {currentTopic &&
             live.current_phase !== "group_result" &&
             live.current_phase !== "final_result" && (
-              <div className="w-full rounded-2xl border border-dojo-curtain-gold/40 bg-dojo-light-brown/60 p-4">
-                <p className="font-sans text-xs text-dojo-dark-brown">お題</p>
-                <p className="mt-1 font-sans text-base font-bold text-dojo-ink">
+              <div className="w-full rounded-2xl border border-dojo-curtain-gold/40 bg-white/10 p-4">
+                <p className="font-sans text-xs text-white/85">お題</p>
+                <p className="mt-1 font-sans text-base font-bold text-white">
                   {currentTopic.body}
                 </p>
               </div>
@@ -552,7 +552,7 @@ export default function LivePage() {
 
 function CenterMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-svh w-full flex-col items-center justify-center px-4 text-center font-sans text-sm text-dojo-dark-brown">
+    <div className="flex min-h-svh w-full flex-col items-center justify-center px-4 text-center font-sans text-sm text-white/85">
       {children}
     </div>
   );

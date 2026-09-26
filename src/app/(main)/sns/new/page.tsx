@@ -71,7 +71,7 @@ export default function SnsNewTopicPage() {
           fallbackHref="/mypage"
           className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
         />
-        <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-3 p-6 text-center`}>
+        <div className={`${stadiumStyles.surfaceLight} flex flex-col items-center gap-3 p-6 text-center`}>
           <p className="font-sans text-sm text-[var(--ink)]/80">
             ゲスト参加中です。Xでログインするとお題を投稿できます。
           </p>
@@ -82,7 +82,7 @@ export default function SnsNewTopicPage() {
               const result = await signInWithX({ isGuestSwitch: true });
               if (!result.ok && result.reason) setXLoginError(result.reason);
             }}
-            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+            className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} rounded-xl px-6 py-2.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
           >
             Xでログイン
           </button>
@@ -100,7 +100,7 @@ export default function SnsNewTopicPage() {
       />
 
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">
           NEW TOPIC
         </p>
         <h1 className="mt-1 font-sans text-3xl font-black text-[var(--ink)]">
@@ -113,7 +113,7 @@ export default function SnsNewTopicPage() {
 
       <form
         onSubmit={handleSubmit}
-        className={`${stadiumStyles.grainPaper} flex flex-col gap-4 p-5 shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}
+        className={`${stadiumStyles.surfaceLight} flex flex-col gap-4 p-5 shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}
       >
         <textarea
           value={body}
@@ -143,7 +143,7 @@ export default function SnsNewTopicPage() {
         <button
           type="submit"
           disabled={!body.trim() || overLimit || noTicket || submitting}
-          className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} w-full px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+          className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} w-full px-6 py-3 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:!bg-[#71717a] disabled:!text-white`}
         >
           {submitting ? "投稿中…" : "投稿する（寄合券を1枚使う）"}
         </button>

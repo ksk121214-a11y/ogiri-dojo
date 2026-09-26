@@ -145,7 +145,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
     <StadiumPageShell contentTheme="kraft">
       <SnsBackButton />
 
-      <div className={`${stadiumStyles.grainPaper} relative flex flex-col items-center gap-3 p-6 text-center text-[var(--ink)]`}>
+      <div className={`${stadiumStyles.surfaceLight} relative flex flex-col items-center gap-3 p-6 text-center text-[var(--ink)]`}>
         <div className="absolute right-4 top-4">
           <ReportButton />
         </div>
@@ -219,7 +219,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           onClick={() => setTab("answers")}
           className={
             tab === "answers"
-              ? `${stadiumStyles.grainAccent} rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition`
+              ? `${stadiumStyles.surfaceAccent} rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition`
               : "rounded-full bg-[var(--ink)]/10 px-4 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/70 transition hover:bg-[var(--ink)]/15"
           }
         >
@@ -230,7 +230,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           onClick={() => setTab("topics")}
           className={
             tab === "topics"
-              ? `${stadiumStyles.grainAccent} rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition`
+              ? `${stadiumStyles.surfaceAccent} rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition`
               : "rounded-full bg-[var(--ink)]/10 px-4 py-1.5 font-sans text-xs font-bold text-[var(--ink)]/70 transition hover:bg-[var(--ink)]/15"
           }
         >
@@ -250,7 +250,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
             return (
               <div
                 key={answer.id}
-                className={`${stadiumStyles.grainPaper} flex flex-col gap-1.5 p-3 text-[var(--ink)]`}
+                className={`${stadiumStyles.surfaceLight} flex flex-col gap-1.5 p-3 text-[var(--ink)]`}
               >
                 {topic && (
                   <Link
@@ -285,7 +285,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
             <Link
               key={topic.id}
               href={`/sns/${topic.id}`}
-              className={`${stadiumStyles.grainPaper} flex flex-col gap-1 p-3 text-[var(--ink)]`}
+              className={`${stadiumStyles.surfaceLight} flex flex-col gap-1 p-3 text-[var(--ink)]`}
             >
               <p className="font-sans text-sm font-bold text-[var(--ink)]">{topic.body}</p>
               <p className="font-sans text-[11px] text-[var(--ink)]/70">

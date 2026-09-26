@@ -36,7 +36,7 @@ const SORT_TABS: { key: SnsSortKind; label: string }[] = [
 // 2026-08-28: マイページの地下ライブハウス風トンマナに合わせた見せ方を追加した際は
 // variant="dojo"|"stadium"の二重実装にしていたが、2026-08-30に寄合帳全体を新デザインへ
 // 統一したことで旧デザイン（variant="dojo"）を使う画面が無くなったため、分岐ごと削除し
-// 常にこのトンマナ（ホームのチケット意匠＝.grainPaper等）で表示する。
+// 常にこのトンマナ（ホームのチケット意匠＝.surfaceLight等）で表示する。
 export default function SnsFeedSection() {
   const authUser = useAuthStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
@@ -118,7 +118,7 @@ export default function SnsFeedSection() {
         <div className="flex justify-center">
           <Link
             href="/sns/new"
-            className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} ${stadiumStyles.tornBanner} flex w-full items-center justify-center gap-2.5 px-6 py-5 font-sans text-xl font-black text-[var(--paper)] transition hover:opacity-95`}
+            className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} ${stadiumStyles.tornBanner} flex w-full items-center justify-center gap-2.5 px-6 py-5 font-sans text-xl font-black text-[var(--paper)] transition hover:opacity-95`}
           >
             <span aria-hidden>✎</span>
             お題を投稿する
@@ -126,7 +126,7 @@ export default function SnsFeedSection() {
         </div>
       )}
 
-      <div className={`${stadiumStyles.grainPaper} flex flex-col gap-3 p-3 text-[var(--ink)] sm:p-4`}>
+      <div className={`${stadiumStyles.surfaceLight} flex flex-col gap-3 p-3 text-[var(--ink)] sm:p-4`}>
         {/* 3タブを均等幅にし、ラベルの文字数差（「ライブ結果」が長い等）に関わらず
             中央のタブ（回答）が常に画面中央に来るようにする。 */}
         <div className="flex w-full border-b border-[var(--ink)]/15 pb-2.5">
@@ -138,7 +138,7 @@ export default function SnsFeedSection() {
               className={`flex-1 border-b-2 pb-1 font-sans text-sm font-bold transition ${
                 feed === tab.key
                   ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-transparent text-[var(--ink)]/55 hover:text-[var(--ink)]"
+                  : "border-transparent text-[var(--ink)]/75 hover:text-[var(--ink)]"
               }`}
             >
               {tab.label}
@@ -156,7 +156,7 @@ export default function SnsFeedSection() {
                 className={`flex-1 border-b-2 px-3 py-1.5 font-sans text-xs font-bold transition ${
                   audience === tab.key
                     ? "border-[var(--accent)] text-[var(--accent)]"
-                    : "border-transparent text-[var(--ink)]/55 hover:text-[var(--ink)]"
+                    : "border-transparent text-[var(--ink)]/75 hover:text-[var(--ink)]"
                 }`}
               >
                 {tab.label}
@@ -175,7 +175,7 @@ export default function SnsFeedSection() {
                 className={`rounded-full px-3 py-1 font-sans text-[11px] font-bold transition ${
                   sort === tab.key
                     ? "border border-[var(--accent)] text-[var(--accent)]"
-                    : "border border-transparent text-[var(--ink)]/50 hover:text-[var(--ink)]"
+                    : "border border-transparent text-[var(--ink)]/70 hover:text-[var(--ink)]"
                 }`}
               >
                 {tab.label}
@@ -188,7 +188,7 @@ export default function SnsFeedSection() {
       {feed === "results" ? (
         <SnsLiveResultsFeedList />
       ) : showFollowingEmpty ? (
-        <div className={`${stadiumStyles.grainPaper} flex flex-col items-center gap-2 px-6 py-16 text-center text-[var(--ink)]`}>
+        <div className={`${stadiumStyles.surfaceLight} flex flex-col items-center gap-2 px-6 py-16 text-center text-[var(--ink)]`}>
           <p className="font-sans text-sm font-bold text-[var(--ink)]">
             フォロー中の演者の投稿はまだありません
           </p>
@@ -198,7 +198,7 @@ export default function SnsFeedSection() {
           <button
             type="button"
             onClick={() => setAudience("forYou")}
-            className={`${stadiumStyles.grainAccent} mt-2 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition active:scale-95`}
+            className={`${stadiumStyles.surfaceAccent} mt-2 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition active:scale-95`}
           >
             おすすめを見る
           </button>
@@ -268,15 +268,15 @@ function TopicFeedList({
         return (
           <div
             key={topic.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={topic.authorId} hideReportButton />
               <div className="flex shrink-0 flex-col items-end gap-1 pr-5">
-                <span className={`${stadiumStyles.grainAccent} rounded-full px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
+                <span className={`${stadiumStyles.surfaceAccent} rounded-full px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
                   お題
                 </span>
-                <span className="font-sans text-[10px] text-[var(--ink)]/60">
+                <span className="font-sans text-[10px] text-[var(--ink)]/75">
                   {topic.createdAtLabel}
                 </span>
               </div>
@@ -339,11 +339,11 @@ function AnswerFeedList({
         return (
           <div
             key={answer.id}
-            className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
+            className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-2 p-4 text-[var(--ink)] transition sm:p-5`}
           >
             <div className="flex items-center justify-between gap-2">
               <SnsAuthorBadge authorId={answer.authorId} hideReportButton />
-              <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/60">
+              <span className="shrink-0 pr-5 font-sans text-[10px] text-[var(--ink)]/75">
                 {answer.createdAtLabel}
               </span>
             </div>

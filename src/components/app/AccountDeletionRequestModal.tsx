@@ -7,7 +7,7 @@ import { ACCOUNT_DELETION_MAIL_SUBJECT, contactMailtoWithSubjectAndBody } from "
 import { supabase } from "@/lib/supabase";
 
 // アプリ内からアカウント削除を申請するモーダル。
-// 2026-09-25：これまでの「メール本文に高座名とXの@IDを書くだけ」の依頼方法は、
+// 2026-09-25：これまでの「メール本文に演者名とXの@IDを書くだけ」の依頼方法は、
 // いずれも公開情報のため他人になりすませてしまい、ゲストにはXの@ID自体が無い。
 // ここでは、現在ログイン中（Xログインの通常会員・匿名セッションが有効なゲストの
 // いずれも）の認証済みユーザーIDにDB側で結び付いた申請番号を発行する
@@ -47,7 +47,7 @@ export default function AccountDeletionRequestModal({ onClose }: { onClose: () =
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-4 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        className={`${styles.surfaceLight} flex w-full max-w-sm flex-col gap-4 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
       >
         {step === "confirm" ? (
           <>

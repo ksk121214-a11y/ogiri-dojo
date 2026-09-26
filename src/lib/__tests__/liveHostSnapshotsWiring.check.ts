@@ -198,7 +198,7 @@ const count = (needle: string) => src.split(needle).length - 1;
     /const botScoringOk = botScoringAllowed\(/.test(fn[0]),
     "runBotBehavior が botScoringAllowed（scores同期中はボット採点しない）を使っていない",
   );
-  assert.ok(/} else if \(activeAnswer && botScoringOk\) \{/.test(fn[0]), "ボット採点分岐が botScoringOk でガードされていない");
+  assert.ok(/if \(!activeAnswer \|\| !botScoringOk\) return;/.test(fn[0]), "ボット採点分岐が botScoringOk でガードされていない");
   assert.ok(
     /if \(!stillOnThisTurn\(\)\) return;/.test(fn[0]) && count("if (!stillOnThisTurn()) return;") >= 2,
     "Promise.all 内の insert 直前に stillOnThisTurn()（insertGuardPasses）再確認が無い",
@@ -559,9 +559,11 @@ const count = (needle: string) => src.split(needle).length - 1;
     /const handleOnline = \(\) => \{\s*\n\s*if \(isMyGenCurrent\(\)\) refetchAll\(\);/.test(follower),
     "online 経路が isMyGenCurrent() を確認していない",
   );
+  // 認証状態の変化は、上位のsubscribe()が内部セッション（世代付き）を停止して新しい
+  // 世代で開始し直すことで扱う（未認証の間は内部セッション自体を開始しない）。
   assert.ok(
-    /lastAuthUserId = nextUserId;\s*\n\s*if \(isMyGenCurrent\(\)\) refetchAll\(\);/.test(follower),
-    "auth変更経路が isMyGenCurrent() を確認していない",
+    /const applyAuth = \(\) => \{[\s\S]*?stopSession\(\);[\s\S]*?stopSession = startSession\(\);/.test(follower),
+    "auth変更経路が、停止→新しい世代で開始（applyAuth）になっていない",
   );
   console.log("PASS: 配線-16h（観客側：refetchAll/failStage/scheduleRetry/visibility/online/auth変更が購読世代に縛られている）");
 }

@@ -55,7 +55,7 @@ export default function AccountSummary() {
   if (authLoading) {
     return (
       <section
-        className={`${styles.grainPaper} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]/40`}
+        className={`${styles.surfaceLight} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]/40`}
         aria-hidden
       >
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
@@ -67,7 +67,7 @@ export default function AccountSummary() {
 
   if (!authUser) {
     return (
-      <section className={`${styles.grainPaper} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
+      <section className={`${styles.surfaceLight} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
         <p className="text-sm font-bold text-[var(--ink)]/70">
           ログインすると段位・ポイントが確認できます
@@ -79,7 +79,7 @@ export default function AccountSummary() {
             const result = await signInWithX();
             if (!result.ok && result.reason) setXLoginError(result.reason);
           }}
-          className={`${styles.pressable} ${styles.grainAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+          className={`${styles.pressable} ${styles.surfaceAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
         >
           Xでログイン
         </button>
@@ -96,7 +96,7 @@ export default function AccountSummary() {
   // 匿名ユーザーも即座にゲストとして扱える（下のprofile未確定ガードを待たない）。
   if (isGuestUser(authUser, profile)) {
     return (
-      <section className={`${styles.grainPaper} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
+      <section className={`${styles.surfaceLight} relative flex items-center justify-between gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
         <p className="text-sm font-bold text-[var(--ink)]/70">
           ゲスト参加中です。Xでログインすると段位・ポイントが記録されます
@@ -108,7 +108,7 @@ export default function AccountSummary() {
             const result = await signInWithX({ isGuestSwitch: true });
             if (!result.ok && result.reason) setXLoginError(result.reason);
           }}
-          className={`${styles.pressable} ${styles.grainAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+          className={`${styles.pressable} ${styles.surfaceAccent} shrink-0 rounded-xl px-4 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
         >
           Xでログイン
         </button>
@@ -126,7 +126,7 @@ export default function AccountSummary() {
   if (!isConfirmedMember({ authUser, profile, profileLoading })) {
     return (
       <section
-        className={`${styles.grainPaper} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]/40`}
+        className={`${styles.surfaceLight} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]/40`}
         aria-hidden
       >
         <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
@@ -142,7 +142,7 @@ export default function AccountSummary() {
   const pointsBalance = profile?.pointsBalance ?? 0;
 
   return (
-    <section className={`${styles.grainPaper} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
+    <section className={`${styles.surfaceLight} relative flex items-center gap-3 pl-7 pr-4 pt-6 pb-3.5 text-[var(--ink)]`}>
       <div className={`${styles.ringHole} ${styles.scallopDark}`} aria-hidden />
       {/*
         「アイコンは丸で囲わずそのままの感じで」の要望のため、円形の縁取り・背景は付けず、

@@ -63,7 +63,7 @@ export default function TsukkomiFloatOverlayPreview() {
             className={`absolute -translate-x-1/2 whitespace-nowrap ${
               item.kind === "clap"
                 ? "text-2xl"
-                : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-brush text-sm text-dojo-curtain-gold"
+                : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-sans font-bold text-sm text-dojo-curtain-gold"
             }`}
           >
             {item.kind === "clap" ? "👏" : item.text}

@@ -46,20 +46,20 @@ export default function AuthCallbackPage() {
   }, [router, errorMessage]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-dojo-tatami-cream px-6 text-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-dojo-surface px-6 text-center">
       {errorMessage ? (
         <>
           <p className="font-sans text-sm text-dojo-ink">ログインに失敗しました：{errorMessage}</p>
           <button
             type="button"
             onClick={() => router.replace("/")}
-            className="rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-sm font-bold text-dojo-washi-white"
+            className="rounded-full bg-dojo-curtain-red px-5 py-2 font-sans text-sm font-bold text-dojo-on-dark"
           >
             ホームに戻る
           </button>
         </>
       ) : (
-        <p className="font-sans text-sm text-dojo-dark-brown">ログイン処理中です…</p>
+        <p className="font-sans text-sm text-dojo-ink-soft">ログイン処理中です…</p>
       )}
     </div>
   );

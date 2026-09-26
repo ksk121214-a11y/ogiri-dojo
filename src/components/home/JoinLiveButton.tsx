@@ -35,7 +35,7 @@ export default function JoinLiveButton({
         onClick={onClick}
         disabled={disabled}
         aria-busy={busy}
-        className={`${styles.pressable} ${styles.grainAccent} flex min-h-[56px] w-2/3 items-center justify-center gap-2 px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-70`}
+        className={`${styles.pressable} ${styles.surfaceAccent} flex min-h-[56px] w-2/3 items-center justify-center gap-2 px-5 font-sans text-xl font-bold text-[var(--paper)] transition hover:bg-[var(--accent-dark)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--paper)] disabled:cursor-not-allowed disabled:opacity-70`}
       >
         <TicketGlyph />
         {LABEL[status]}

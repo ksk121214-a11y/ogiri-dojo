@@ -48,12 +48,12 @@ export default function AppHeader() {
     (authUser?.user_metadata?.full_name as string | undefined);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-dojo-dark-brown/20 bg-dojo-tatami-cream/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-dojo-ink-soft/20 bg-dojo-surface/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-3 sm:px-6">
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/"
-            className="shrink-0 whitespace-nowrap font-brush text-base text-dojo-dark-brown sm:text-xl"
+            className="shrink-0 whitespace-nowrap font-sans font-bold text-base text-dojo-ink-soft sm:text-xl"
           >
             爆笑スタジアム
           </Link>
@@ -65,9 +65,9 @@ export default function AppHeader() {
               <button
                 type="button"
                 onClick={() => setHistoryOpen(true)}
-                className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 text-right transition hover:bg-dojo-curtain-gold/30 sm:gap-2 sm:px-3"
+                className="flex min-w-0 shrink items-center gap-1.5 rounded-2xl bg-dojo-surface-muted px-2.5 py-1.5 text-right transition hover:bg-dojo-curtain-gold/30 sm:gap-2 sm:px-3"
               >
-                <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-dark-brown sm:text-xs">
+                <span className="min-w-[4ch] truncate font-sans text-[10px] text-dojo-ink-soft sm:text-xs">
                   <span className="hidden sm:inline">{rank.label}・</span>
                   {displayName}
                 </span>
@@ -77,7 +77,7 @@ export default function AppHeader() {
               </button>
             )}
             {guest && (
-              <span className="shrink-0 rounded-2xl bg-dojo-light-brown px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown sm:text-xs">
+              <span className="shrink-0 rounded-2xl bg-dojo-surface-muted px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-ink-soft sm:text-xs">
                 ゲスト参加中
               </span>
             )}
@@ -91,7 +91,7 @@ export default function AppHeader() {
                       const result = await signInWithX({ isGuestSwitch: true });
                       if (!result.ok && result.reason) setXLoginError(result.reason);
                     }}
-                    className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
+                    className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-on-dark hover:opacity-90 sm:text-xs"
                   >
                     Xでログイン
                   </button>
@@ -99,7 +99,7 @@ export default function AppHeader() {
                   <button
                     type="button"
                     onClick={() => signOut()}
-                    className="shrink-0 rounded-full border border-dojo-dark-brown/30 px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-dark-brown hover:bg-dojo-light-brown sm:text-xs"
+                    className="shrink-0 rounded-full border border-dojo-ink-soft/30 px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-ink-soft hover:bg-dojo-surface-muted sm:text-xs"
                     title={xScreenName ? `@${xScreenName}` : undefined}
                   >
                     ログアウト
@@ -113,7 +113,7 @@ export default function AppHeader() {
                     const result = await signInWithX();
                     if (!result.ok && result.reason) setXLoginError(result.reason);
                   }}
-                  className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-washi-white hover:opacity-90 sm:text-xs"
+                  className="shrink-0 rounded-full bg-dojo-ink px-2.5 py-1.5 font-sans text-[10px] font-bold text-dojo-on-dark hover:opacity-90 sm:text-xs"
                 >
                   Xでログイン
                 </button>
@@ -141,8 +141,8 @@ export default function AppHeader() {
                 href={link.href}
                 className={`shrink-0 rounded-full px-2.5 py-1.5 font-sans text-[11px] font-bold transition sm:px-3 sm:text-sm ${
                   active
-                    ? "bg-dojo-curtain-red text-dojo-washi-white shadow-[0_0_10px_rgba(192,38,63,0.45)]"
-                    : "text-dojo-dark-brown hover:bg-dojo-light-brown hover:text-dojo-ink"
+                    ? "bg-dojo-curtain-red text-dojo-on-dark shadow-[0_0_10px_rgba(192,38,63,0.45)]"
+                    : "text-dojo-ink-soft hover:bg-dojo-surface-muted hover:text-dojo-ink"
                 }`}
               >
                 {link.label}

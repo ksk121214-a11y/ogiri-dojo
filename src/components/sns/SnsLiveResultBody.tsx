@@ -24,7 +24,7 @@ const LABEL_STYLE: Record<SnsLiveResultLabel, { text: string; className: string 
   rank2: { text: "2位代表", className: "bg-[#c7c7cf] text-[#2c2c31]" },
   rank3: { text: "3位代表", className: "bg-[#b08d57] text-[#2c2013]" },
   managerBest: { text: "運営ベスト", className: "bg-dojo-curtain-red text-[var(--paper)]" },
-  perfect: { text: "満点", className: "bg-[#2e2a24] text-dojo-curtain-gold" },
+  perfect: { text: "満点", className: "bg-[#18181b] text-dojo-curtain-gold" },
 };
 
 // 順位ごとのカード縁取り（金/銀/銅を控えめに）。ラベル無し（運営ベスト単体等）は縁取りしない。
@@ -48,7 +48,7 @@ export default function SnsLiveResultBody({
   return (
     <div className="flex flex-col gap-6">
       <div className="text-center">
-        <span className={`${stadiumStyles.grainAccent} inline-block rounded-full px-3 py-1 font-sans text-[11px] font-bold text-[var(--paper)]`}>
+        <span className={`${stadiumStyles.surfaceAccent} inline-block rounded-full px-3 py-1 font-sans text-[11px] font-bold text-[var(--paper)]`}>
           公式ライブ結果
         </span>
         <h1 className="mt-2 font-sans text-xl font-black text-[var(--ink)]">
@@ -88,7 +88,7 @@ export default function SnsLiveResultBody({
           <h2 className="font-sans text-sm font-bold text-[var(--ink)]">運営ベスト</h2>
           <LiveResultCard card={detail.managerBest} readOnly={readOnly} />
           {detail.managerComment && (
-            <p className={`${stadiumStyles.grainPaper} p-3 font-sans text-xs text-[var(--ink)]/80`}>
+            <p className={`${stadiumStyles.surfaceLight} p-3 font-sans text-xs text-[var(--ink)]/80`}>
               運営コメント：{detail.managerComment}
             </p>
           )}
@@ -159,7 +159,7 @@ function LiveResultCard({
 
   return (
     <div
-      className={`${stadiumStyles.grainPaper} relative flex flex-col gap-2 p-4 text-[var(--ink)] sm:p-5 ${
+      className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-2 p-4 text-[var(--ink)] sm:p-5 ${
         rank ? RANK_BORDER[rank] : ""
       }`}
     >
@@ -273,7 +273,7 @@ function LiveResultCard({
                     <button
                       type="submit"
                       disabled={!commentBody.trim() || commentBody.length > MAX_COMMENT_LENGTH}
-                      className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+                      className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} shrink-0 rounded-full px-4 py-1.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
                     >
                       コメントする
                     </button>

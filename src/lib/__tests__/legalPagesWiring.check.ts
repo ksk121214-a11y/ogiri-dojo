@@ -622,15 +622,15 @@ console.log("PASS: ローカルストレージの説明が、段位・ポイン�
 }
 console.log("PASS: 利用規約・プライバシーポリシーのバージョンが定数化され、明示同意時に同意日時・バージョンを記録する旨が第1条に記載されている");
 
-// 32（アカウント削除申請の安全な本人紐付け）：メール本文に高座名・Xの@IDを
+// 32（アカウント削除申請の安全な本人紐付け）：メール本文に演者名・Xの@IDを
 //    書かせるだけの旧方式ではなく、アプリ内で発行した申請番号を使う方式に
 //    変わっており、パスワード等の認証情報を送らせない旨・ゲストのセッション
 //    喪失時の取扱いも記載されている。
 {
   const accountDeletionBody3 = sectionBody(privacyPage, "account-deletion");
   assert.ok(
-    !accountDeletionBody3.includes("本文に、アプリ内の高座名（表示名）と、連携しているXのユーザー名（@ID）をご記載ください"),
-    "プライバシーポリシーに、公開情報のみで本人確認する旧方式（高座名・Xの@ID記載）の説明が残っている",
+    !accountDeletionBody3.includes("本文に、アプリ内の演者名（表示名）と、連携しているXのユーザー名（@ID）をご記載ください"),
+    "プライバシーポリシーに、公開情報のみで本人確認する旧方式（演者名・Xの@ID記載）の説明が残っている",
   );
   assert.ok(
     accountDeletionBody3.includes("アプリ内の設定画面から申請できます"),
@@ -774,10 +774,14 @@ console.log("PASS: 同意モーダル・既存ユーザー向け同意画面の�
   const confirmBodyMatch = consentGateStore.match(/confirm:\s*async \(\)\s*=>\s*\{([\s\S]*?)\n  \},/);
   assert.ok(confirmBodyMatch, "useConsentGateStoreのconfirm関数本体が見つからない");
   const confirmBody = confirmBodyMatch![1];
-  const guestBranchStart = confirmBody.indexOf("const result = await runGuestStart();");
-  assert.ok(guestBranchStart >= 0, "useConsentGateStore.confirmにゲスト枝（runGuestStart呼び出し）が見当たらない");
+  const guestBranchStart = confirmBody.indexOf("beginGuestConsentWindow()");
+  assert.ok(guestBranchStart >= 0, "useConsentGateStore.confirmにゲスト枝（ゲスト同意の窓）が見当たらない");
   const xLoginPart = confirmBody.slice(0, guestBranchStart);
-  const guestPart = confirmBody.slice(guestBranchStart);
+  // ゲスト枝の実処理は guestStartAndRecord（同ファイル内の関数）に切り出している。
+  const guestFnMatch = consentGateStore.match(/async function guestStartAndRecord\(\)[\s\S]*$/);
+  assert.ok(guestFnMatch, "guestStartAndRecord関数が見つからない");
+  assert.ok(/guestConsentFlight = guestStartAndRecord\(\)/.test(confirmBody) && confirmBody.includes("await guestConsentFlight"), "confirmのゲスト枝が、single-flight化したguestStartAndRecordを経由していない（多重実行で窓・認証が重複する）");
+  const guestPart = guestFnMatch![0];
 
   const xRunIdx = xLoginPart.search(/await runXLogin/);
   const xCheckIdx = xLoginPart.indexOf("if (!result.ok)");
@@ -792,13 +796,18 @@ console.log("PASS: 同意モーダル・既存ユーザー向け同意画面の�
   const gRunIdx = guestPart.search(/await runGuestStart/);
   const gCheckIdx = guestPart.indexOf("if (!result.ok)");
   const gRpcIdx = guestPart.indexOf('supabase.rpc("record_terms_consent")');
-  const gErrorCheckIdx = guestPart.indexOf("if (!error)");
+  assert.ok(guestPart.includes("result.userId") && guestPart.includes("if (!startedUserId) return"), "ゲスト枝が、確定したuserIdが無いままrecord_terms_consentを呼ぶ余地がある");
+  const gErrorCheckIdx = guestPart.indexOf("&& !error)");
   const gMarkIdx = guestPart.indexOf("markDeviceConsentAck()");
   assert.ok(gRunIdx >= 0, "useConsentGateStore.confirmのゲスト枝が実処理(runGuestStart)を呼んでいない");
   assert.ok(gCheckIdx > gRunIdx, "useConsentGateStore.confirmのゲスト枝がsignInAsGuestの戻り値を確認していない");
   assert.ok(
     gRpcIdx > gCheckIdx,
     "useConsentGateStore.confirmのゲスト枝が、signInAsGuestの戻り値確認より前にrecord_terms_consentを呼んでいる",
+  );
+  assert.ok(
+    guestPart.includes("recordTermsConsentOnce("),
+    "useConsentGateStore.confirmのゲスト枝が、共通のsingle-flight(recordTermsConsentOnce)を経由せずにrecord_terms_consentを呼んでいる（二重送信の恐れ）",
   );
   assert.ok(
     gErrorCheckIdx > gRpcIdx && gMarkIdx > gErrorCheckIdx,
@@ -892,7 +901,7 @@ console.log("PASS: アカウント削除時の説明（プライバシーポリ�
   const peekIdx = handleAgreeBody.indexOf("guardRef.current.peek()");
   const startedUserIdIdx = handleAgreeBody.indexOf("const startedUserId = userId");
   const ownsDefIdx = handleAgreeBody.indexOf("const ownsThisAttempt = ()");
-  const rpcIdx = handleAgreeBody.search(/await supabase\.rpc\("record_terms_consent"\)/);
+  const rpcIdx = handleAgreeBody.search(/await recordConsentOnceFor\(/);
   const firstCheckIdx = handleAgreeBody.indexOf("if (!ownsThisAttempt())");
   const clearPendingIdx = handleAgreeBody.indexOf("clearPendingConsentFlag()");
   const markIdx = handleAgreeBody.indexOf("markDeviceConsentAck()");
@@ -1064,10 +1073,10 @@ console.log("PASS: ライブ結果コメントが利用者コンテンツとし�
   );
   const thirdPartyDisclosureBody = sectionBody(privacyPage, "third-party-disclosure");
   assert.ok(
-    thirdPartyDisclosureBody.includes("高座名（表示名）、アプリアイコン、自己紹介（一言コメント）、段位（習熟度）") &&
+    thirdPartyDisclosureBody.includes("演者名（表示名）、アプリアイコン、自己紹介（一言コメント）、段位（習熟度）") &&
       thirdPartyDisclosureBody.includes("未ログインの") &&
       thirdPartyDisclosureBody.includes("利用者を含む第三者が閲覧できる状態で表示する機能があります"),
-    "プライバシーポリシーに、本サービスの公開機能（高座名・アイコン・自己紹介・段位・投稿・ライブ結果等）の説明がない",
+    "プライバシーポリシーに、本サービスの公開機能（演者名・アイコン・自己紹介・段位・投稿・ライブ結果等）の説明がない",
   );
 
   assert.ok(!termsPage.includes("運営者名："), "利用規約に「運営者名：」という法的名称であるかのような旧表記が残っている");
@@ -1128,14 +1137,14 @@ console.log("PASS: 取得情報・利用目的へ同意管理・削除申請・�
 console.log("PASS: 安全管理措置セクションが、実装で確認できている5つの措置だけを列挙し、未確認の措置（MFA・暗号化・監視体制・社内規程等）を記載しない構成になっている");
 
 // 47（最終レビュー対応：アカウント削除の本人確認を安全にする）：メールでの
-//    削除依頼において、高座名（表示名）等の公開情報だけでは本人確認にならない
-//    旨が明記され、公開情報のみを本人確認の根拠とする旧来の代替手段（高座名等の
+//    削除依頼において、演者名（表示名）等の公開情報だけでは本人確認にならない
+//    旨が明記され、公開情報のみを本人確認の根拠とする旧来の代替手段（演者名等の
 //    記載で足りるとする表現）が残っていないことを確認する。
 {
   const accountDeletionBody5 = sectionBody(privacyPage, "account-deletion");
   assert.ok(
-    !accountDeletionBody5.includes("高座名（表示名）等、ご本人であることが分かる範囲の情報をご記載ください"),
-    "プライバシーポリシーに、公開情報（高座名等）だけで本人確認の代替とする旧表現が残っている",
+    !accountDeletionBody5.includes("演者名（表示名）等、ご本人であることが分かる範囲の情報をご記載ください"),
+    "プライバシーポリシーに、公開情報（演者名等）だけで本人確認の代替とする旧表現が残っている",
   );
   assert.ok(
     accountDeletionBody5.includes("一般に公開されている情報だけでは、ご本人からのご依頼であることの確認にはなりません"),
@@ -1150,7 +1159,7 @@ console.log("PASS: アカウント削除依頼において、公開情報だけ�
 
 // 48（最終レビュー対応：管理画面に公開情報だけでの削除判断を戒める注意書き）：
 //    アカウント削除申請の管理画面（/admin/account-deletion-requests）に、
-//    高座名・Xの@ID等の公開情報だけを根拠に本人からの依頼と判断して削除して
+//    演者名・Xの@ID等の公開情報だけを根拠に本人からの依頼と判断して削除して
 //    はいけない旨の注意書きがあることを確認する。
 {
   const adminDeletionRequestsPage = read("src", "app", "admin", "account-deletion-requests", "page.tsx");

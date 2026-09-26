@@ -57,6 +57,8 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../bgmCorrection.ts"
   "$SCRIPT_DIR/../bgmStartIntent.ts"
   "$SCRIPT_DIR/../bgmStartPlan.ts"
+  "$SCRIPT_DIR/../botAnswerPolicy.ts"
+  "$SCRIPT_DIR/../termsConsentRecorder.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -187,6 +189,49 @@ else
   FAILED=1
 fi
 rm -rf "$FOLLOWER_RACE_DIR"
+
+# useLiveFollowerStore.subscribe() の認証連動（未認証では取得・購読・tickを開始しない、
+# ログアウト・再ログインの世代管理）と、組切替時の追い越し(superseded)を取得失敗として
+# 扱わないことの検証。専用tsconfig経由（理由はuseLiveFollowerStoreRace.check.tsと同じ）。
+FOLLOWER_AUTH_GATE_DIR="$(mktemp -d)"
+FOLLOWER_AUTH_GATE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.followerAuthGate.json"
+FOLLOWER_AUTH_GATE_ENTRY="$FOLLOWER_AUTH_GATE_DIR/src/lib/__tests__/store/useLiveFollowerStoreAuthGate.check.js"
+
+echo "--- useLiveFollowerStoreAuthGate.check.ts ---"
+if npx tsc -p "$FOLLOWER_AUTH_GATE_TSCONFIG" --outDir "$FOLLOWER_AUTH_GATE_DIR" && [ -f "$FOLLOWER_AUTH_GATE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$FOLLOWER_AUTH_GATE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_AUTH_GATE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreAuthGate.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FOLLOWER_AUTH_GATE_DIR"
+
+# 司会画面：ライブ終了(closeLive)後に「状態を確認中…」のまま止まらないことの検証
+# （復旧中のinitが終了処理に追い越されてもloadingを解除する）。専用tsconfig経由。
+HOST_CLOSE_DIR="$(mktemp -d)"
+HOST_CLOSE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.hostCloseLive.json"
+HOST_CLOSE_ENTRY="$HOST_CLOSE_DIR/src/lib/__tests__/store/useLiveHostStoreCloseLive.check.js"
+
+echo "--- useLiveHostStoreCloseLive.check.ts ---"
+if npx tsc -p "$HOST_CLOSE_TSCONFIG" --outDir "$HOST_CLOSE_DIR" && [ -f "$HOST_CLOSE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$HOST_CLOSE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$HOST_CLOSE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveHostStoreCloseLive.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$HOST_CLOSE_DIR"
 
 # src/lib/__tests__/store/useLiveFollowerStoreJoinReferral.check.ts も同じ理由
 # （useLiveFollowerStore.ts/useProfileStore.tsが"@/..."エイリアス・実際の

@@ -281,19 +281,6 @@ export default function StageAnsweringView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {Array.from({ length: MAX_ANSWERS_PER_PLAYER }).map((_, i) => (
-              <span
-                key={i}
-                className={`h-4 w-4 rounded-full border border-[#3b5bff] ${
-                  i < myAnswerCount ? "bg-[#3b5bff]" : "bg-transparent"
-                }`}
-              />
-            ))}
-            <span className="ml-1 font-sans text-xs text-white/60">
-              残り{Math.max(0, MAX_ANSWERS_PER_PLAYER - myAnswerCount)}回
-            </span>
-          </div>
         </div>
 
         <div className="relative flex min-h-0 w-full flex-1 items-start justify-center overflow-visible">
@@ -361,6 +348,20 @@ export default function StageAnsweringView() {
           animate={{ opacity: 1 }}
           className="relative z-10 mx-auto w-full max-w-xl"
         >
+          {/* 残り回答回数は、舞台（回答席・名前）と重ならないよう入力欄の直上に置く。 */}
+          <div className="mb-1.5 flex items-center justify-center gap-1.5">
+            {Array.from({ length: MAX_ANSWERS_PER_PLAYER }).map((_, i) => (
+              <span
+                key={i}
+                className={`h-3 w-3 rounded-full border border-[#3b5bff] ${
+                  i < myAnswerCount ? "bg-[#3b5bff]" : "bg-transparent"
+                }`}
+              />
+            ))}
+            <span className="ml-1 font-sans text-xs text-white/70">
+              残り{Math.max(0, MAX_ANSWERS_PER_PLAYER - myAnswerCount)}回
+            </span>
+          </div>
           <textarea
             ref={textareaRef}
             value={draft}

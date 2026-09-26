@@ -482,7 +482,7 @@ export default function ScoringPhysicsBoardPreview({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden rounded-2xl border-4 border-dojo-curtain-gold bg-dojo-washi-white shadow-[0_0_30px_rgba(232,184,76,0.35)]"
+      className="relative h-full w-full overflow-hidden rounded-2xl border-4 border-dojo-curtain-gold bg-dojo-on-dark shadow-[0_0_30px_rgba(232,184,76,0.35)]"
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 

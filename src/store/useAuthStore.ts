@@ -19,7 +19,9 @@ interface AuthState {
   signInWithX: (
     options?: { isGuestSwitch?: boolean },
   ) => Promise<{ ok: true } | { ok: false; reason?: string }>;
-  signInAsGuest: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  // userId：signInAnonymouslyの結果から確定したゲストのuser id（useAuthStoreへの反映より先に
+  // 返る）。同意記録など、確定したuserIdが必要な処理がこれを使う。
+  signInAsGuest: () => Promise<{ ok: true; userId?: string | null } | { ok: false; reason: string }>;
   signOut: () => Promise<void>;
 }
 
@@ -87,11 +89,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (get().guestSigningIn) return { ok: false, reason: "処理中です" };
     set({ guestSigningIn: true });
     try {
-      const { error } = await supabase.auth.signInAnonymously();
+      const { data, error } = await supabase.auth.signInAnonymously();
       if (error) {
         return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };
       }
-      return { ok: true };
+      return { ok: true, userId: data?.user?.id ?? data?.session?.user?.id ?? null };
     } catch {
       return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };
     } finally {

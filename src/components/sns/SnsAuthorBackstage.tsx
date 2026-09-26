@@ -79,7 +79,7 @@ export default function SnsAuthorBackstage({ authorId }: { authorId: string }) {
         <div className="relative">
           <AvatarPlaceholder size={104} />
           {icon && (
-            <span className={`${stadiumStyles.grainAccent} absolute -right-2 -top-2 flex h-9 w-9 items-center justify-center rounded-full text-lg text-[var(--paper)] shadow`}>
+            <span className={`${stadiumStyles.surfaceAccent} absolute -right-2 -top-2 flex h-9 w-9 items-center justify-center rounded-full text-lg text-[var(--paper)] shadow`}>
               {ITEM_TYPE_EMOJI.icon_part}
             </span>
           )}

@@ -40,7 +40,7 @@ const ICON_PARTS: CollectionItem[] = [
 const BG_PATTERNS: CollectionItem[] = [
   { id: "bg-chochin", type: "bg_pattern", rarity: "N", name: "提灯柄", description: "幕金の提灯シルエットが並ぶ、和の記号的な柄", priceForShop: 100 },
   { id: "bg-seigaiha", type: "bg_pattern", rarity: "N", name: "青海波", description: "伝統紋様。舞台闇寄りの藍〜紫トーン", priceForShop: 100 },
-  { id: "bg-kinpaku", type: "bg_pattern", rarity: "R", name: "金箔散らし", description: "幕金・光箔の箔押し風パターン、和紙白ベース", priceForShop: 180 },
+  { id: "bg-kinpaku", type: "bg_pattern", rarity: "R", name: "金箔散らし", description: "幕金・光箔の箔押し風パターン、ホワイトベース", priceForShop: 180 },
   { id: "bg-donchou-gara", type: "bg_pattern", rarity: "R", name: "緞帳幕柄", description: "緞帳赤ベース＋金縁の波模様", priceForShop: 180 },
   { id: "bg-spotlight", type: "bg_pattern", rarity: "SR", name: "スポットライト光条", description: "灯り橙のグラデーション光条が放射状に広がる柄", priceForShop: 260 },
   { id: "bg-neon-yose", type: "bg_pattern", rarity: "SR", name: "ネオン寄席ネオンライン", description: "歓声ピンク×灯り橙のネオンライン、現代的な「ネオン寄席」感", priceForShop: 260 },

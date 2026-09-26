@@ -130,7 +130,7 @@ export default function LiveCalendar({ marks }: { marks: CalendarMark[] }) {
         })}
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-dashed border-[var(--ink)]/20 pt-2.5 font-sans text-[11px] font-bold text-[var(--ink)]/60">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-dashed border-[var(--ink)]/20 pt-2.5 font-sans text-[11px] font-bold text-[var(--ink)]/80">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full bg-[var(--ink)]/25" aria-hidden />
           前回のライブ

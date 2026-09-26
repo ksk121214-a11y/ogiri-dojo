@@ -96,12 +96,12 @@ export default function NextLiveTicket({
     // 半券（stub、参加操作に関わる部分）は準備中は意味を持たないため出さない。
     return (
       <div className="relative">
-        <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
+        <span className={`${styles.surfaceAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
           ライブ
         </span>
 
         <div className={styles.nextLiveTicketRow}>
-          <div className={`${styles.nextLiveTicketMain} ${styles.grainPaper}`}>
+          <div className={`${styles.nextLiveTicketMain} ${styles.surfaceLight}`}>
             <div className={`${styles.scallopDivider} ${styles.scallopDark}`} aria-hidden />
             <div className={`${styles.scallopCapTop} ${styles.scallopDark}`} aria-hidden />
             <div className={`${styles.scallopCapBottom} ${styles.scallopDark}`} aria-hidden />
@@ -124,12 +124,12 @@ export default function NextLiveTicket({
     // 掛かっている）の外側に置く。内側の子にすると上にはみ出した分がクリップされ
     // 半分隠れてしまうため。
     <div className="relative">
-      <span className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
+      <span className={`${styles.surfaceAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}>
         ライブ
       </span>
 
       <div className={styles.nextLiveTicketRow}>
-        <div className={`${styles.nextLiveTicketMain} ${styles.grainPaper}`}>
+        <div className={`${styles.nextLiveTicketMain} ${styles.surfaceLight}`}>
           <div className={`${styles.scallopDivider} ${styles.scallopDark}`} aria-hidden />
           <div className={`${styles.scallopCapTop} ${styles.scallopDark}`} aria-hidden />
           <div className={`${styles.scallopCapBottom} ${styles.scallopDark}`} aria-hidden />
@@ -168,7 +168,7 @@ export default function NextLiveTicket({
         */}
         {stubVisible && (
           <div
-            className={`${styles.nextLiveTicketStub} ${styles.grainAccent} relative px-2 py-1.5 text-[var(--ink)] ${
+            className={`${styles.nextLiveTicketStub} ${styles.surfaceAccent} relative px-2 py-1.5 text-[var(--ink)] ${
               isDetaching ? styles.nextLiveTicketStubDetaching : ""
             }`}
             onAnimationEnd={isDetaching ? handleAnimationEnd : undefined}

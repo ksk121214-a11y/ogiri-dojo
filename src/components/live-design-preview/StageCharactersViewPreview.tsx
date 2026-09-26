@@ -115,7 +115,7 @@ export default function StageCharactersViewPreview({
                   )}
                   <p
                     className={`absolute -top-3 left-1/2 z-20 max-w-full -translate-x-1/2 whitespace-nowrap truncate text-center font-sans text-xs ${
-                      isActive ? "font-bold text-dojo-curtain-gold" : "text-dojo-washi-white/70"
+                      isActive ? "font-bold text-dojo-curtain-gold" : "text-dojo-on-dark/70"
                     }`}
                   >
                     {member.name}

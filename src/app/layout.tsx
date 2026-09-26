@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Noto_Sans_JP, Orbitron, Yuji_Syuku } from "next/font/google";
+import { Noto_Sans_JP, Orbitron } from "next/font/google";
 
 import AmbientBgmController from "@/components/app/AmbientBgmController";
 import AudioProvider from "@/components/app/AudioProvider";
@@ -12,12 +12,6 @@ import "./globals.css";
 
 const notoSansJP = Noto_Sans_JP({
   variable: "--font-noto-sans-jp",
-  subsets: ["latin"],
-});
-
-const yujiSyuku = Yuji_Syuku({
-  variable: "--font-yuji-syuku",
-  weight: "400",
   subsets: ["latin"],
 });
 
@@ -51,7 +45,7 @@ export default function RootLayout({
   return (
     <html
       lang="ja"
-      className={`${notoSansJP.variable} ${yujiSyuku.variable} ${orbitron.variable} h-full antialiased`}
+      className={`${notoSansJP.variable} ${orbitron.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
         <AudioProvider>

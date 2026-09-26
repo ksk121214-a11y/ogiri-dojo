@@ -98,7 +98,7 @@ export default function StageHeaderBanner({
         )}
         <div className="rounded-lg border-2 border-dojo-curtain-gold bg-dojo-backstage-navy px-4 py-1 shadow-[0_0_15px_rgba(232,184,76,0.4)]">
           <p
-            className={`whitespace-nowrap font-sans text-sm font-black tracking-wide text-dojo-washi-white ${
+            className={`whitespace-nowrap font-sans text-sm font-black tracking-wide text-dojo-on-dark ${
               scaleUp ? "sm:text-lg" : ""
             }`}
           >

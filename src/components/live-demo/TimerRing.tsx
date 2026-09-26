@@ -123,7 +123,7 @@ export default function TimerRing({
                 ? "text-dojo-gray-purple"
                 : urgent
                   ? "text-dojo-curtain-red"
-                  : "text-dojo-washi-white"
+                  : "text-dojo-on-dark"
         }`}
       >
         {syncing ? (

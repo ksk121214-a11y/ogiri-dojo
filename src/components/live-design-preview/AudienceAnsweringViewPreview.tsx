@@ -233,7 +233,7 @@ export default function AudienceAnsweringViewPreview() {
               )
             }
             disabled={!!activeAnswer}
-            className="flex-1 rounded-xl border-2 border-dojo-curtain-red bg-dojo-curtain-red px-4 py-3 font-sans text-base font-bold text-dojo-washi-white transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-washi-white"
+            className="flex-1 rounded-xl border-2 border-dojo-curtain-red bg-dojo-curtain-red px-4 py-3 font-sans text-base font-bold text-dojo-on-dark transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-on-dark"
           >
             ツッコミ
           </button>
@@ -241,7 +241,7 @@ export default function AudienceAnsweringViewPreview() {
             type="button"
             onClick={() => sendTsukkomi("stamp", "爆笑")}
             disabled={!!activeAnswer}
-            className="flex-1 rounded-xl border-2 border-dojo-curtain-gold bg-dojo-curtain-gold px-4 py-3 font-sans text-base font-bold text-dojo-stage-dark transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-washi-white"
+            className="flex-1 rounded-xl border-2 border-dojo-curtain-gold bg-dojo-curtain-gold px-4 py-3 font-sans text-base font-bold text-dojo-stage-dark transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-on-dark"
           >
             爆笑
           </button>
@@ -249,7 +249,7 @@ export default function AudienceAnsweringViewPreview() {
             type="button"
             onClick={() => sendTsukkomi("clap", "👏")}
             disabled={!!activeAnswer}
-            className="flex-1 rounded-xl border-2 border-dojo-backstage-navy bg-dojo-backstage-navy px-4 py-3 font-sans text-base font-bold text-dojo-curtain-gold transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-washi-white"
+            className="flex-1 rounded-xl border-2 border-dojo-backstage-navy bg-dojo-backstage-navy px-4 py-3 font-sans text-base font-bold text-dojo-curtain-gold transition active:scale-95 disabled:cursor-not-allowed disabled:border-dojo-gray-purple disabled:bg-dojo-gray-purple disabled:text-dojo-on-dark"
           >
             拍手
           </button>

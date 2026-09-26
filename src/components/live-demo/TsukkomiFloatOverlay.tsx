@@ -88,7 +88,7 @@ export default function TsukkomiFloatOverlay({
                 ? "text-2xl"
                 : palette === "neon2"
                   ? "rounded-full border border-[#3b5bff] bg-[#0d0a1a]/90 px-4 py-1 font-sans text-sm font-bold text-[#7ab2ff]"
-                  : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-brush text-sm text-dojo-curtain-gold"
+                  : "rounded-full border border-dojo-curtain-gold bg-dojo-stage-dark/90 px-4 py-1 font-sans font-bold text-sm text-dojo-curtain-gold"
             }`}
           >
             {item.kind === "clap" ? "👏" : item.text}

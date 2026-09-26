@@ -12,7 +12,7 @@ import styles from "@/components/home/StadiumHome.module.css";
 // マイページの演者名カードから開く、段位・ポイント・表彰実績の詳細モーダル。
 // 常時表示だと情報過多になるため、普段は隠しておき見たい人だけがここを開く構成にした。
 // 2026-08-28: マイページ本体（Stadiumテーマ）に合わせ、旧dojoテーマの見た目から
-// チケット言語（.grainPaper・--ink／--accent等）を使ったデザインに刷新。
+// チケット言語（.surfaceLight・--ink／--accent等）を使ったデザインに刷新。
 // 2026-08-31（段位・ポイント・実績の実データ化）：段位進捗・ポイント・参加回数・
 // 表彰回数・ベストアンサーはすべてuseUserStore（ローカルダミー）ではなく
 // useProfileStore（Supabaseのprofiles、ライブ終了時にapply_live_rank_rewards()が
@@ -74,7 +74,7 @@ export default function MyStatsModal({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`${styles.grainPaper} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+          className={`${styles.surfaceLight} flex w-full max-w-sm flex-col gap-5 rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
         >
           <div className="flex items-center justify-between">
             <h2 className="font-sans text-lg font-black">段位・実績</h2>
@@ -109,7 +109,7 @@ export default function MyStatsModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`${styles.grainPaper} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
+        className={`${styles.surfaceLight} flex max-h-[90vh] w-full max-w-sm flex-col gap-5 overflow-y-auto rounded-none border border-[var(--ink)]/15 p-6 text-[var(--ink)] shadow-2xl`}
       >
         <div className="flex items-center justify-between">
           <h2 className="font-sans text-lg font-black">段位・実績</h2>
@@ -134,7 +134,7 @@ export default function MyStatsModal({
           <p className="mt-1 font-sans text-3xl font-black text-[var(--ink)]">{rank.label}</p>
           <div className="mx-auto mt-4 h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--ink)]/10">
             <div
-              className={`${styles.grainAccent} h-full rounded-full transition-all`}
+              className={`${styles.surfaceAccent} h-full rounded-full transition-all`}
               style={{ width: `${progressRatio * 100}%` }}
             />
           </div>
@@ -154,7 +154,7 @@ export default function MyStatsModal({
         <div>
           <h3 className="mb-2 font-sans text-sm font-bold">表彰実績</h3>
           <div className="flex gap-2 font-sans text-xs">
-            <span className={`${styles.grainAccent} rounded-full px-3 py-1.5 font-bold text-[var(--paper)]`}>
+            <span className={`${styles.surfaceAccent} rounded-full px-3 py-1.5 font-bold text-[var(--paper)]`}>
               1位 × {awardFirst}
             </span>
             <span className="rounded-full bg-[var(--ink)] px-3 py-1.5 font-bold text-[var(--paper)]">

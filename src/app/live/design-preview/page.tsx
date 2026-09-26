@@ -52,7 +52,7 @@ export default function LiveDesignPreviewPage() {
             className={`rounded-full px-2 py-0.5 font-sans font-bold transition ${
               view === "stage"
                 ? "bg-dojo-curtain-gold text-dojo-stage-dark"
-                : "text-dojo-washi-white/70 hover:text-dojo-washi-white"
+                : "text-dojo-on-dark/70 hover:text-dojo-on-dark"
             }`}
           >
             舞台
@@ -63,7 +63,7 @@ export default function LiveDesignPreviewPage() {
             className={`rounded-full px-2 py-0.5 font-sans font-bold transition ${
               view === "audience"
                 ? "bg-dojo-curtain-gold text-dojo-stage-dark"
-                : "text-dojo-washi-white/70 hover:text-dojo-washi-white"
+                : "text-dojo-on-dark/70 hover:text-dojo-on-dark"
             }`}
           >
             客席
@@ -71,7 +71,7 @@ export default function LiveDesignPreviewPage() {
           <button
             type="button"
             onClick={resetPreview}
-            className="rounded-full border border-dojo-gray-purple/50 px-2 py-0.5 font-sans text-dojo-washi-white/70 transition hover:border-dojo-curtain-gold hover:text-dojo-curtain-gold"
+            className="rounded-full border border-dojo-gray-purple/50 px-2 py-0.5 font-sans text-dojo-on-dark/70 transition hover:border-dojo-curtain-gold hover:text-dojo-curtain-gold"
           >
             やり直す
           </button>

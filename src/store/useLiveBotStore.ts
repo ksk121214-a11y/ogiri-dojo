@@ -8,6 +8,9 @@ import { createBotClient, type BotSession } from "@/lib/liveBotClients";
 import type { ParticipantRow } from "@/lib/liveRoomTypes";
 import { getParticipantAvatarColor, getParticipantAvatarIconId } from "@/lib/participantAvatar";
 
+// ライブ終了処理を止めないための、ボットのログアウト待ちの上限。
+export const BOT_LOGOUT_TIMEOUT_MS = 2_000;
+
 interface LiveBotState {
   bots: BotSession[];
   loading: boolean;
@@ -16,7 +19,9 @@ interface LiveBotState {
     liveId: string,
     credentials: { email: string; password: string }[],
   ) => Promise<void>;
-  removeAllBots: () => void;
+  // 全ボットをログアウトさせる。各ログアウトの完了（または短いタイムアウト）まで待つ。
+  // 失敗・タイムアウトは警告に留め、呼び出し側（ライブ終了処理）は必ず先へ進める。
+  removeAllBots: (timeoutMs?: number) => Promise<void>;
 }
 
 export const useLiveBotStore = create<LiveBotState>()((set, get) => ({
@@ -105,10 +110,31 @@ export const useLiveBotStore = create<LiveBotState>()((set, get) => ({
     }));
   },
 
-  removeAllBots: () => {
-    for (const bot of get().bots) {
-      bot.client.auth.signOut();
-    }
+  removeAllBots: async (timeoutMs = BOT_LOGOUT_TIMEOUT_MS) => {
+    const bots = get().bots;
     set({ bots: [] });
+    if (bots.length === 0) return;
+    // 各ボットのセッションをサーバー側でも失効させる。以前は戻り値のPromiseを放置しており、
+    // ページ状態の切替後に通信が中断され（logoutのnet::ERR_ABORTED）、完了したかも分からなかった。
+    // 全件の完了（allSettled）を待つが、通信が遅くてもライブ終了画面が止まらないよう
+    // 短いタイムアウトで打ち切る。失敗・タイムアウトは警告に留める。
+    const logouts = Promise.allSettled(
+      bots.map(async (bot) => {
+        const { error } = await bot.client.auth.signOut();
+        if (error) throw error;
+      }),
+    );
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    const result = await Promise.race([logouts, timeout]);
+    if (timer) clearTimeout(timer);
+    if (result === "timeout") {
+      console.warn(`[bot] ボットのログアウトが${timeoutMs}msで完了しませんでした（終了処理は続行）`);
+      return;
+    }
+    const failed = result.filter((r) => r.status === "rejected").length;
+    if (failed > 0) console.warn(`[bot] ボット${failed}体のログアウトに失敗しました`);
   },
 }));

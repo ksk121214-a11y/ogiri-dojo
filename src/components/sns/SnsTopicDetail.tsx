@@ -150,11 +150,11 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
         className="w-fit font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
       />
 
-      <div className={`${stadiumStyles.grainPaper} relative p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
+      <div className={`${stadiumStyles.surfaceLight} relative p-5 text-[var(--ink)] shadow-[0_10px_24px_rgba(23,21,19,0.22)] sm:p-6`}>
         <div className="flex items-center justify-between gap-2">
           <SnsAuthorBadge authorId={topic.authorId} hideReportButton />
           <div className="flex shrink-0 flex-col items-end gap-1 pr-5">
-            <span className={`${stadiumStyles.grainAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
+            <span className={`${stadiumStyles.surfaceAccent} rounded-full px-3 py-1 font-sans text-[10px] font-bold text-[var(--paper)]`}>
               お題
             </span>
             <span className="font-sans text-[10px] text-[var(--ink)]/60">
@@ -185,14 +185,14 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
 
       {isGuest ? (
         <p
-          className={`${stadiumStyles.grainPaper} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
+          className={`${stadiumStyles.surfaceLight} p-4 text-center font-sans text-xs font-bold text-[var(--accent)]`}
         >
           ゲストは回答できません。Xでログインしてください。
         </p>
       ) : (
         <form
           onSubmit={handleSubmit}
-          className={`${stadiumStyles.grainPaper} flex flex-col gap-2 p-4 text-[var(--ink)]`}
+          className={`${stadiumStyles.surfaceLight} flex flex-col gap-2 p-4 text-[var(--ink)]`}
         >
           <textarea
             value={body}
@@ -223,7 +223,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             <button
               type="submit"
               disabled={!body.trim() || overLimit || noTicket || submitting}
-              className={`${stadiumStyles.pressable} ${stadiumStyles.grainAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
+              className={`${stadiumStyles.pressable} ${stadiumStyles.surfaceAccent} shrink-0 rounded-full px-5 py-2 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40`}
             >
               {/* 2026-09-07:「押すと寄合券を使うことがボタンを見ただけで分かるように」の
                   要望で、お題投稿（sns/new/page.tsx）と同じ言い回しに揃えた。 */}
@@ -241,7 +241,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           <p className="font-sans text-[11px] font-bold text-[var(--accent)]">{likeError}</p>
         )}
         {topicAnswers.length === 0 && (
-          <p className={`${stadiumStyles.grainPaper} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
+          <p className={`${stadiumStyles.surfaceLight} p-6 text-center font-sans text-xs text-[var(--ink)]/70`}>
             まだ回答がありません。最初の回答を投稿してみましょう。
           </p>
         )}
@@ -251,7 +251,7 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
           return (
             <div
               key={answer.id}
-              className={`${stadiumStyles.grainPaper} relative flex items-start justify-between gap-3 py-3 pl-4 pr-9 text-[var(--ink)]`}
+              className={`${stadiumStyles.surfaceLight} relative flex items-start justify-between gap-3 py-3 pl-4 pr-9 text-[var(--ink)]`}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">

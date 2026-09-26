@@ -550,8 +550,14 @@ let turnDerivedRequestId = 0;
 // finalResultがBの結果を上書きできてしまう。「購読世代」と「同一世代内の
 // requestId」の両方を見るownsRequestを作り、refreshTurnDerived内部の全確認・
 // refreshFinalResultへ渡すガードの両方をこれに統一する。
-export async function refreshTurnDerived(stillCurrent: () => boolean = () => true): Promise<boolean> {
-  if (!stillCurrent()) return false; // 関数開始時：呼び出し時点で既に古い世代なら何もしない
+export type TurnDerivedOutcome = "ok" | "superseded" | "failed";
+
+// 結果を3種に分ける：ok＝反映完了、superseded＝より新しい呼び出し・購読世代に追い越された
+// （正常な世代交代。エラーではない）、failed＝取得エラー（本当の失敗）。
+export async function refreshTurnDerivedDetailed(
+  stillCurrent: () => boolean = () => true,
+): Promise<TurnDerivedOutcome> {
+  if (!stillCurrent()) return "superseded"; // 関数開始時：呼び出し時点で既に古い世代なら何もしない
   const requestId = ++turnDerivedRequestId;
   const ownsRequest = () => requestId === turnDerivedRequestId && stillCurrent();
   const {
@@ -563,7 +569,7 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
     currentTurn: prevTurn,
   } = useLiveFollowerStore.getState();
   if (!live?.current_turn_id) {
-    if (!ownsRequest()) return false; // より新しい呼び出しに追い越された
+    if (!ownsRequest()) return "superseded"; // より新しい呼び出しに追い越された
     // ライブが無い・current_turn_idが無い（interlude/opening等）状態は、revisionの
     // 大小に関わらず確定的にpendingCueを消してよい（次にcurrent_turn_idが
     // 立った時、pendingCueがnullなのでresolveAnsweringCueは新しい値を必ず採用する）。
@@ -578,7 +584,7 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
       myAnswerCount: 0,
       groupResult: null,
     });
-    return true; // 「現在進行中のターンが無い」という正常に確定した状態（interlude/opening等）
+    return "ok"; // 「現在進行中のターンが無い」という正常に確定した状態（interlude/opening等）
   }
   // 2026-09-08（P1-8/9再レビュー対応）：以前はturn/topic→answers/scores→cueの順に
   // 1つずつawaitし、それぞれの直後にrequestIdを確認していた。しかし最後のcue取得の
@@ -596,9 +602,9 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
     fetchAnswersAndScoreForTurn(live.current_turn_id, myParticipant?.id),
     fetchAnsweringCue(live.id),
   ]);
-  if (!ownsRequest()) return false; // より新しい呼び出しに追い越された
-  if (!turnResult.ok) return false; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
-  if (!answersResult.ok) return false; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
+  if (!ownsRequest()) return "superseded"; // より新しい呼び出しに追い越された
+  if (!turnResult.ok) return "failed"; // 取得エラー：既存のcurrentTurn/currentTopicはそのまま保つ
+  if (!answersResult.ok) return "failed"; // 取得エラー：既存のturnAnswers/activeAnswerScores等はそのまま保つ
   const { turn, topic } = turnResult;
   const { answers, activeAnswer, myScore, myAnswerCount, activeAnswerScores } = answersResult;
   // pendingCueだけは演出の補助情報のため、取得に失敗しても他の値の反映は止めない
@@ -639,7 +645,7 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
   // 「前回のターンが実際にあり、かつ今回と違う」場合だけを本当の切り替えとする。
   const turnChanged = prevTurn !== null && prevTurn.id !== (turn?.id ?? null);
 
-  if (!ownsRequest()) return false; // setState直前の再確認
+  if (!ownsRequest()) return "superseded"; // setState直前の再確認
   useLiveFollowerStore.setState((s) => ({
     currentTurn: turn,
     currentTopic: topic,
@@ -666,9 +672,13 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
     // refreshTurnDerived呼び出し自体も「最終的に自分の仕事を最後まで反映できた
     // わけではない」ため、falseを返す（呼び出し元がより新しい結果に基づいて
     // 再試行しても、既に確定済みの表示を後退させることはない＝上記コメント参照）。
-    if (!ownsRequest()) return false;
+    if (!ownsRequest()) return "superseded";
   }
-  return true;
+  return "ok";
+}
+
+export async function refreshTurnDerived(stillCurrent: () => boolean = () => true): Promise<boolean> {
+  return (await refreshTurnDerivedDetailed(stillCurrent)) === "ok";
 }
 
 export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
@@ -699,6 +709,7 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   },
 
   subscribe: () => {
+   const startSession = (): (() => void) => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -851,10 +862,22 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // 判定材料が出揃うため、これが成功するまではloadingをfalseにしない。
       // isMyGenCurrentを渡し、refreshTurnDerived（と、その中で呼ばれる
       // refreshFinalResult）が古い購読世代のままstateを書き換えないようにする。
-      const turnOk = await refreshTurnDerived(isMyGenCurrent);
-      if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
-      if (!turnOk) {
+      // 追い越された（superseded）のは、Realtime・補助tick等のより新しい取得が
+      // 走っている正常な世代交代であり、通信失敗ではない。警告・syncError・失敗扱いの
+      // 再試行は出さず、最新の取得結果を確定させるためその場でもう一度だけ取り直す
+      // （数回続いても確定しない場合だけ、警告なしの再試行を予約する）。本当の取得
+      // エラー（failed）は従来どおりsyncErrorを立てて再試行する。
+      let turnOutcome: TurnDerivedOutcome = "superseded";
+      for (let attempt = 0; attempt < 3 && turnOutcome === "superseded"; attempt += 1) {
+        turnOutcome = await refreshTurnDerivedDetailed(isMyGenCurrent);
+        if (cancelled || requestId !== refetchRequestId || !isMyGenCurrent()) return;
+      }
+      if (turnOutcome === "failed") {
         failStage("進行状況の取得に失敗しました");
+        return;
+      }
+      if (turnOutcome === "superseded") {
+        scheduleRetry();
         return;
       }
       set({ loading: false, syncError: null });
@@ -1080,19 +1103,8 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("online", handleOnline);
 
-    // 2026-09-03: リロード直後、Supabaseのセッション復元（useAuthStore.loading）が
-    // 完了する前にrefetchAll()が実行されると、その時点でuser?.idがまだnullのため
-    // myParticipantがnullのまま確定してしまい、以降DBに何も変化が起きない限り
-    // 再取得されず「回答者のはずが観客画面のまま」になっていた（実機ライブで発覚）。
-    // useAuthStoreのuser idの変化（ログイン確定・別ユーザーへの切替）を購読し、
-    // 変化するたびに必ず取り直す。
-    let lastAuthUserId = useAuthStore.getState().user?.id ?? null;
-    const unsubscribeAuth = useAuthStore.subscribe((state) => {
-      const nextUserId = state.user?.id ?? null;
-      if (nextUserId === lastAuthUserId) return;
-      lastAuthUserId = nextUserId;
-      if (isMyGenCurrent()) refetchAll();
-    });
+    // 認証状態の変化（ログイン確定・利用者切替・ログアウト）は、上位のsubscribe()が
+    // このセッションを停止して新しい世代で開始し直すことで扱う。
 
     return () => {
       cancelled = true;
@@ -1101,7 +1113,6 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       if (currentRefetchAllRef === refetchAll) currentRefetchAllRef = null;
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("online", handleOnline);
-      unsubscribeAuth();
       // 所有権付きクリーンアップ：この subscribe の世代のチャンネルだけを除去する。
       // 既に新しい subscribe に追い越されていたら、最新世代の channels/gen には触らない。
       channelSwapResult.dispose();
@@ -1110,6 +1121,62 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // されるため二重にはなるが、ページ自体を離脱してsubscribe()が呼ばれ
       // 直さないケースでも古いキューを残さないための保険）。
       resetTsukkomiReactionQueue();
+    };
+   };
+
+    // 未認証（Xログイン前・ゲスト認証前・ログアウト後）は、参加者情報の取得
+    // （participants_for_live はanonへ権限を与えない）・Realtime購読・補助tick・
+    // 再試行タイマーのいずれも開始しない。認証が確定した時点で初めて内部セッション
+    // （startSession）を開始し、ログアウト・利用者切替では必ず停止して状態を破棄する
+    // （利用者切替は「停止→新しい世代で開始」。startSession内のchannelSwap世代と
+    // cancelledフラグにより、停止済みセッションの遅延結果は新しい状態へ反映されない）。
+    let stopSession: (() => void) | null = null;
+    let sessionUserId: string | null = null;
+    let disposed = false;
+    const applyAuth = () => {
+      if (disposed) return;
+      const state = useAuthStore.getState();
+      const userId = state.user?.id ?? null;
+      if (userId === sessionUserId && (userId === null) === (stopSession === null)) return;
+      if (stopSession) {
+        stopSession();
+        stopSession = null;
+        // 前の利用者の live/participants/myParticipant 等を残さない。
+        set({
+          live: null,
+          myParticipant: null,
+          participants: [],
+          groups: [],
+          participantNames: {},
+          participantAvatars: {},
+          currentTurn: null,
+          currentTopic: null,
+          activeAnswer: null,
+          turnAnswers: [],
+          pendingCue: null,
+          activeAnswerScores: [],
+          myAnswerCount: 0,
+          myScore: null,
+          groupResult: null,
+          finalResult: null,
+          tsukkomiQueue: [],
+          loading: true,
+          syncError: null,
+          error: null,
+        });
+      }
+      sessionUserId = userId;
+      if (userId !== null) stopSession = startSession();
+    };
+    applyAuth();
+    const unsubscribeGate = useAuthStore.subscribe(applyAuth);
+    return () => {
+      disposed = true;
+      unsubscribeGate();
+      if (stopSession) {
+        stopSession();
+        stopSession = null;
+      }
     };
   },
 

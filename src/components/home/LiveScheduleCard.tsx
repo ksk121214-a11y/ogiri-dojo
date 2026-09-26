@@ -20,7 +20,7 @@ import styles from "./StadiumHome.module.css";
 // 「今回」「次回」は本券＋半券に、境界線（連続した丸い切り欠き＝.scallopDivider）と
 // バーコード＋OGIRI LIVEのスタンプ風グラフィックを添える。
 // 背景がホーム（黒）ではなく明るいコンクリートのため、切り欠きの質感は
-// .scallopConcreteを使い、ページの背景色と馴染むようにしている。
+// .scallopLightを使い、ページの背景色と馴染むようにしている。
 // ホームのNextLiveTicketとは見た目の要件が違う（インラインのアクションボタンを
 // チケット内に置く、タグ文言・色が3種類で異なる等）ため、既存コンポーネントを
 // 分岐だらけにするのではなく専用コンポーネントとして分離した。
@@ -134,11 +134,11 @@ export function PreviousLiveCard({ date }: { date: LiveScheduleDate | null }) {
   return (
     <div className={styles.tornTicketRow}>
       <div
-        className={`${styles.tornTicketMain} ${styles.grainPaper} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}
+        className={`${styles.tornTicketMain} ${styles.surfaceLight} flex items-center gap-2.5 px-5 py-4 text-[var(--ink)]`}
       >
-        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} aria-hidden />
-        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} aria-hidden />
-        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} aria-hidden />
+        <div className={`${styles.scallopDivider} ${styles.scallopLight}`} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopLight}`} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopLight}`} aria-hidden />
 
         <span className="flex shrink-0 items-center justify-center rounded-full bg-[var(--ink)]/8 p-2 text-[var(--ink)]/70">
           <HistoryClockGlyph />
@@ -213,15 +213,15 @@ export function CurrentLiveCard({
   return (
     <div className="relative">
       <span
-        className={`${styles.grainAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}
+        className={`${styles.surfaceAccent} absolute -top-2.5 left-4 z-10 rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)] shadow-none`}
       >
         今回のライブ
       </span>
 
-      <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
-        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
-        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+      <div className={`${styles.ticket} ${styles.surfaceLight}`}>
+        <div className={`${styles.scallopDivider} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
 
         {live && reception ? (
           <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
@@ -245,7 +245,7 @@ export function CurrentLiveCard({
             <div className="mt-2 flex flex-nowrap items-center gap-2">
               <Link
                 href="/"
-                className={`${styles.pressable} ${styles.grainAccent} w-fit shrink-0 px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
+                className={`${styles.pressable} ${styles.surfaceAccent} w-fit shrink-0 px-4 py-1.5 font-sans text-sm font-bold text-[var(--paper)] transition hover:opacity-90`}
               >
                 参加する
               </Link>
@@ -265,7 +265,7 @@ export function CurrentLiveCard({
         )}
         {/* 2026-08-30: 準備中（liveが未割当）でも、チケットの型（赤い半券部分）は
             常に表示したままにする。番号欄だけ空にする。 */}
-        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.grainAccent} />
+        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.surfaceAccent} />
       </div>
     </div>
   );
@@ -278,10 +278,10 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
         次回のライブ
       </span>
 
-      <div className={`${styles.ticket} ${styles.grainPaper}`}>
-        <div className={`${styles.scallopDivider} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
-        <div className={`${styles.scallopCapTop} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
-        <div className={`${styles.scallopCapBottom} ${styles.scallopConcrete}`} style={SCALLOP_STYLE} aria-hidden />
+      <div className={`${styles.ticket} ${styles.surfaceLight}`}>
+        <div className={`${styles.scallopDivider} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapTop} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
+        <div className={`${styles.scallopCapBottom} ${styles.scallopLight}`} style={SCALLOP_STYLE} aria-hidden />
 
         {live ? (
           <div className="flex flex-col gap-0.5 px-5 pt-4 pb-3">
@@ -299,7 +299,7 @@ export function UpcomingLiveCard({ live }: { live: LiveTicketInfo | null }) {
         )}
         {/* 2026-08-30: 準備中（liveが未割当）でも、チケットの型（黒い半券部分）は
             常に表示したままにする。番号欄だけ空にする。 */}
-        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.grainDarkGray} />
+        <TicketStub ticketNo={live?.ticketNo ?? null} stubClass={styles.surfaceDarkGray} />
       </div>
     </div>
   );

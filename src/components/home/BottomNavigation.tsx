@@ -93,7 +93,7 @@ export default function BottomNavigation() {
 
   return (
     <nav
-      className={`${styles.pressable} ${styles.grainDark} fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-dark)]`}
+      className={`${styles.pressable} ${styles.surfaceDark} fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-dark)]`}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       aria-label="下部ナビゲーション"
     >
@@ -102,7 +102,7 @@ export default function BottomNavigation() {
           href="/"
           data-sfx="home"
           aria-current={isHome ? "page" : undefined}
-          className={`${itemClass} ${isHome ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+          className={`${itemClass} ${isHome ? "text-[var(--accent-on-dark)]" : "text-[var(--text-on-dark)]"}`}
         >
           <HomeIcon active={isHome} />
           ホーム
@@ -111,7 +111,7 @@ export default function BottomNavigation() {
           href="/live-schedule"
           data-sfx="home"
           aria-current={isLiveSchedule ? "page" : undefined}
-          className={`${itemClass} ${isLiveSchedule ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+          className={`${itemClass} ${isLiveSchedule ? "text-[var(--accent-on-dark)]" : "text-[var(--text-on-dark)]"}`}
         >
           <CalendarIcon active={isLiveSchedule} />
           ライブ
@@ -120,7 +120,7 @@ export default function BottomNavigation() {
           href="/how-to-play"
           data-sfx="home"
           aria-current={isHowToPlay ? "page" : undefined}
-          className={`${itemClass} ${isHowToPlay ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+          className={`${itemClass} ${isHowToPlay ? "text-[var(--accent-on-dark)]" : "text-[var(--text-on-dark)]"}`}
         >
           <BookIcon active={isHowToPlay} />
           遊び方
@@ -129,7 +129,7 @@ export default function BottomNavigation() {
           href="/mypage"
           data-sfx="home"
           aria-current={isMyPage ? "page" : undefined}
-          className={`${itemClass} ${isMyPage ? "text-[var(--accent)]" : "text-[var(--text-on-dark)]"}`}
+          className={`${itemClass} ${isMyPage ? "text-[var(--accent-on-dark)]" : "text-[var(--text-on-dark)]"}`}
         >
           <PersonIcon active={isMyPage} />
           マイページ

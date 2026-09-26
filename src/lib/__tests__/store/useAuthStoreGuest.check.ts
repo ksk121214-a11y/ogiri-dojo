@@ -22,12 +22,14 @@ function makeDeferred() {
 }
 
 (
-  supabase.auth as unknown as { signInAnonymously: () => Promise<{ error: unknown }> }
+  supabase.auth as unknown as { signInAnonymously: () => Promise<{ data?: { user?: { id: string } | null }; error: unknown }> }
 ).signInAnonymously = async () => {
   callCount += 1;
   if (deferred) await deferred.promise;
-  return { error: nextError };
+  return { data: nextUserId ? { user: { id: nextUserId } } : undefined, error: nextError };
 };
+
+let nextUserId: string | null = null;
 
 async function main() {
   // ---- テスト1: 成功時はok:trueを返し、signInAnonymouslyをちょうど1回呼ぶ。 ----
@@ -35,7 +37,13 @@ async function main() {
   nextError = null;
   deferred = null;
   const r1 = await useAuthStore.getState().signInAsGuest();
-  assert.deepEqual(r1, { ok: true });
+  assert.deepEqual(r1, { ok: true, userId: null });
+  // signInAnonymouslyの結果に含まれる確定済みuserIdを返す（useAuthStoreへの反映より先に使える）。
+  nextUserId = "guest-confirmed";
+  const rWithId = await useAuthStore.getState().signInAsGuest();
+  assert.deepEqual(rWithId, { ok: true, userId: "guest-confirmed" });
+  nextUserId = null;
+  callCount = 1;
   assert.equal(callCount, 1, "成功時にsignInAnonymouslyが1回呼ばれていない");
   assert.equal(useAuthStore.getState().guestSigningIn, false, "成功後もguestSigningInがfalseに戻っていない");
   console.log("PASS: signInAsGuestは成功時にok:trueを返し、signInAnonymouslyを1回だけ呼ぶ");

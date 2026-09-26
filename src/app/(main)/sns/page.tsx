@@ -25,7 +25,7 @@ export default function SnsPage() {
   return (
     <StadiumPageShell contentTheme="kraft">
       <div className="text-center">
-        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent)]">SNS</p>
+        <p className="font-sans text-xs font-bold tracking-widest text-[var(--accent-on-light)]">SNS</p>
         <h1 className="mt-1 font-sans text-3xl font-black text-[var(--ink)] sm:text-4xl">
           寄合帳
         </h1>

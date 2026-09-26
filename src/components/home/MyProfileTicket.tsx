@@ -97,10 +97,10 @@ export default function MyProfileTicket({
           （さもないと右側に92px分の空白が残ってしまう）。 */}
       <div className={isMember ? styles.profileCardRow : "relative"}>
         {/* 本体：独立した紙（左のみ角丸、右は半券との境目でシャープな直角）。 */}
-        <div className={`${styles.profileCardMain} ${styles.grainPaper}`}>
-          <div className={`${styles.scallopDivider} ${styles.scallopKraft}`} aria-hidden />
-          <div className={`${styles.scallopCapTop} ${styles.scallopKraft}`} aria-hidden />
-          <div className={`${styles.scallopCapBottom} ${styles.scallopKraft}`} aria-hidden />
+        <div className={`${styles.profileCardMain} ${styles.surfaceLight}`}>
+          <div className={`${styles.scallopDivider} ${styles.scallopDeep}`} aria-hidden />
+          <div className={`${styles.scallopCapTop} ${styles.scallopDeep}`} aria-hidden />
+          <div className={`${styles.scallopCapBottom} ${styles.scallopDeep}`} aria-hidden />
 
           <div className="flex flex-col gap-3 px-5 py-5">
             <div className="flex items-start gap-3">
@@ -119,7 +119,7 @@ export default function MyProfileTicket({
                     profile取得中には一切表示しない（確定会員isMemberの場合のみ）。 */}
                 {isMember && (
                   <span
-                    className={`${styles.grainAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
+                    className={`${styles.surfaceAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
                   >
                     段位：{rank.label}
                   </span>
@@ -190,7 +190,7 @@ export default function MyProfileTicket({
                     const result = await signInWithX({ isGuestSwitch: isGuest });
                     if (!result.ok && result.reason) setXLoginError(result.reason);
                   }}
-                  className={`${styles.pressable} ${styles.grainAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
+                  className={`${styles.pressable} ${styles.surfaceAccent} w-full whitespace-nowrap rounded-xl px-2 py-2.5 font-sans text-xs font-bold text-[var(--paper)] transition hover:opacity-90`}
                 >
                   Xでログイン
                 </button>
@@ -235,7 +235,7 @@ export default function MyProfileTicket({
 
 // 半券側：寄合券の残り枚数を表す、切り取り線4本で5分割したスタンプ欄。
 // 「寄合券を使うとスタンプが消えるのではなく、そのチケットの部分ごと消えるように」の要望で、
-// 消費済みのセルには紙（.grainPaper）を敷かず背景なしにする＝ページ本体の背景（クラフト紙）が
+// 消費済みのセルには紙（.surfaceLight）を敷かず背景なしにする＝ページ本体の背景（クラフト紙）が
 // そのまま透けて見える（.profileCardStub自体は背景を持たないコンテナで、overflow:hiddenと
 // border-radiusだけを担う。角の丸みは一番上／一番下のセルが有効なときだけ自然に効く）。
 // 「一番上から順に切られていく」の要望どおり、上からMAX_TICKETS-count個を空欄にし、
@@ -246,22 +246,22 @@ export default function MyProfileTicket({
 function TicketStubColumn({ count }: { count: number }) {
   return (
     <div className={styles.profileCardStub}>
-      <div className={`${styles.scallopDividerLeft} ${styles.scallopKraft}`} aria-hidden />
+      <div className={`${styles.scallopDividerLeft} ${styles.scallopDeep}`} aria-hidden />
       {/* 本体側（.scallopCapTop/.scallopCapBottom）と同じ丸い切り欠きを、半券（5分割の
           スタンプ欄）の左上・左下にも重ねる。1枚目セルの上角・5枚目セルの下角が
           本体側の右側の角と同じ丸みに揃う。 */}
-      <div className={`${styles.scallopCapTopLeft} ${styles.scallopKraft}`} aria-hidden />
-      <div className={`${styles.scallopCapBottomLeft} ${styles.scallopKraft}`} aria-hidden />
+      <div className={`${styles.scallopCapTopLeft} ${styles.scallopDeep}`} aria-hidden />
+      <div className={`${styles.scallopCapBottomLeft} ${styles.scallopDeep}`} aria-hidden />
       {Array.from({ length: MAX_TICKETS }).map((_, i) => {
         const filled = i >= MAX_TICKETS - count;
         return (
           <div key={i} className="relative flex items-center justify-center">
             {i > 0 && (
-              <div className={`${styles.scallopDividerHorizontal} ${styles.scallopKraft}`} aria-hidden />
+              <div className={`${styles.scallopDividerHorizontal} ${styles.scallopDeep}`} aria-hidden />
             )}
             {filled && (
               <>
-                <div className={`${styles.grainPaper} absolute inset-0`} aria-hidden />
+                <div className={`${styles.surfaceLight} absolute inset-0`} aria-hidden />
                 <div className="relative z-[1]">
                   {/* 2026-09-03: 5分割セルは.profileCardMainの高さ（bio欄が無いと
                       約200px程度）を必ず均等5等分した高さしか無く、実測で

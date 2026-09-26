@@ -16,7 +16,7 @@ import styles from "./StadiumHome.module.css";
 // 専用ページ（/how-to-play）へ遷移する方式に変更した。
 export default function DarkIndieHero() {
   return (
-    <section className={`${styles.heroPanel} ${styles.grainDark} relative px-5 py-4`}>
+    <section className={`${styles.heroPanel} ${styles.surfaceDark} relative px-5 py-4`}>
       <div className={styles.halftone} aria-hidden />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-0 w-[40%]">
         <Image
@@ -29,7 +29,7 @@ export default function DarkIndieHero() {
       </div>
 
       <div className="relative z-10 flex flex-col items-start gap-2">
-        <span className={`${styles.grainAccent} rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)]`}>
+        <span className={`${styles.surfaceAccent} rounded-sm px-2 py-0.5 text-sm font-bold tracking-widest text-[var(--paper)]`}>
           ONLINE OGIRI LIVE
         </span>
         {/*

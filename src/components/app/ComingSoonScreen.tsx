@@ -23,19 +23,19 @@ export default function ComingSoonScreen({
         {emoji}
       </span>
       <div>
-        <p className="font-sans text-xs tracking-widest text-dojo-dark-brown">
+        <p className="font-sans text-xs tracking-widest text-dojo-ink-soft">
           COMING SOON
         </p>
-        <h1 className="mt-1 font-brush text-3xl text-dojo-dark-brown sm:text-4xl">
+        <h1 className="mt-1 font-sans font-bold text-3xl text-dojo-ink-soft sm:text-4xl">
           {title}
         </h1>
       </div>
-      <p className="max-w-sm font-sans text-sm text-dojo-dark-brown">
+      <p className="max-w-sm font-sans text-sm text-dojo-ink-soft">
         {description}
       </p>
       <Link
         href="/"
-        className="rounded-full bg-dojo-curtain-red px-6 py-2.5 font-sans text-sm font-bold text-dojo-washi-white shadow-[0_0_20px_rgba(192,38,63,0.35)] transition hover:bg-dojo-deep-crimson"
+        className="rounded-full bg-dojo-curtain-red px-6 py-2.5 font-sans text-sm font-bold text-dojo-on-dark shadow-[0_0_20px_rgba(192,38,63,0.35)] transition hover:bg-dojo-deep-crimson"
       >
         ホームに戻る
       </Link>
