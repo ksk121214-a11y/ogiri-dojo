@@ -8,6 +8,7 @@ import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ReportButton, { type ReportTargetType } from "@/components/app/ReportButton";
 import { getDummySnsAuthor } from "@/data/snsAuthors";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { getLimitedIconSrc } from "@/lib/limitedIcons";
 import { useSnsStore } from "@/store/useSnsStore";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -92,6 +93,7 @@ export default function SnsAuthorBadge({
               silhouetteSrc={getAvatarSilhouetteSrc(realAuthor.avatarIcon)}
               color={realAuthor.avatarColor}
               size={size}
+              fullColorSrc={getLimitedIconSrc(realAuthor.equippedLimitedIconSlug)}
             />
           ) : (
             "🎭"

@@ -46,6 +46,12 @@ export interface DojoProfile {
   // 直接updateする手段は無く、join_live（SECURITY DEFINER）が最初の1回だけ書く。
   referralSource: string | null;
   referralSourceAnsweredAt: string | null;
+  // 2026-09-27（称号・初回ライブ限定特典）：装備中の称号(titles.slug)・限定アイコン
+  // (現状'first-witness'のみ)。どちらも直接updateはできない列（set_equipped_title/
+  // set_equipped_limited_iconというSECURITY DEFINER RPC経由のみ、supabase/migrations/
+  // 0081参照）。未選択はnull。
+  equippedTitleSlug: string | null;
+  equippedLimitedIconSlug: string | null;
 }
 
 interface ProfileState {
@@ -67,6 +73,11 @@ interface ProfileState {
   // 追加UPDATEなしでローカルprofileへ即座に反映する。refreshProfileの完了を
   // 待たずに「回答済み」表示へ切り替えられるようにするための専用アクション。
   applyReferralAnswerFromJoin: (userId: string, referralSource: string) => void;
+  // 2026-09-27（称号・初回ライブ限定特典）：装備の変更はset_equipped_title/
+  // set_equipped_limited_icon（SECURITY DEFINER、所有権をDB内で検証）経由のみ。
+  // nullを渡すと解除する。
+  setEquippedTitle: (titleSlug: string | null) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  setEquippedLimitedIcon: (iconSlug: string | null) => Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 function toDojoProfile(row: {
@@ -92,6 +103,8 @@ function toDojoProfile(row: {
   is_guest: boolean;
   referral_source: string | null;
   referral_source_answered_at: string | null;
+  equipped_title_slug: string | null;
+  equipped_limited_icon_slug: string | null;
 }): DojoProfile {
   return {
     id: row.id,
@@ -120,6 +133,8 @@ function toDojoProfile(row: {
     isGuest: row.is_guest,
     referralSource: row.referral_source,
     referralSourceAnsweredAt: row.referral_source_answered_at,
+    equippedTitleSlug: row.equipped_title_slug,
+    equippedLimitedIconSlug: row.equipped_limited_icon_slug,
   };
 }
 
@@ -170,7 +185,7 @@ async function fetchProfile(userId: string): Promise<DojoProfile | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at, is_guest, referral_source, referral_source_answered_at",
+      "id, display_name, display_name_set, x_username, avatar_url, role, avatar_icon, avatar_color, bio, mastery_meter, total_points, points_balance, live_count, award_count_first, award_count_second, award_count_third, best_answer_count, tickets_count, tickets_next_recovery_at, is_guest, referral_source, referral_source_answered_at, equipped_title_slug, equipped_limited_icon_slug",
     )
     .eq("id", userId)
     .single();
@@ -296,6 +311,47 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
         : s,
     );
   },
+
+  setEquippedTitle: async (titleSlug) => {
+    const guard = guardOwnProfileUpdate();
+    if (!guard.ok) return guard;
+
+    const { error } = await supabase.rpc("set_equipped_title", { p_title_slug: titleSlug });
+    if (error) {
+      if (error.message.includes("TITLE_NOT_OWNED") || error.message.includes("TITLE_NOT_FOUND") || error.message.includes("TITLE_NOT_ACTIVE")) {
+        return { ok: false, reason: "この称号は選択できません" };
+      }
+      if (error.message.includes("NOT_X_LOGIN")) {
+        return { ok: false, reason: "この操作はXログイン会員のみご利用いただけます" };
+      }
+      return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+    }
+    if (!isStillSameOwner(guard.userId)) return { ok: false, reason: PROFILE_UPDATE_STALE_ACCOUNT_ERROR };
+
+    set((s) => (s.profile ? { profile: { ...s.profile, equippedTitleSlug: titleSlug } } : s));
+    return { ok: true };
+  },
+
+  setEquippedLimitedIcon: async (iconSlug) => {
+    const guard = guardOwnProfileUpdate();
+    if (!guard.ok) return guard;
+
+    const { error } = await supabase.rpc("set_equipped_limited_icon", { p_icon_slug: iconSlug });
+    if (error) {
+      if (error.message.includes("ICON_NOT_OWNED")) {
+        return { ok: false, reason: "この限定アイコンは選択できません" };
+      }
+      if (error.message.includes("NOT_X_LOGIN")) {
+        return { ok: false, reason: "この操作はXログイン会員のみご利用いただけます" };
+      }
+      return { ok: false, reason: PROFILE_UPDATE_GENERIC_ERROR };
+    }
+    if (!isStillSameOwner(guard.userId)) return { ok: false, reason: PROFILE_UPDATE_STALE_ACCOUNT_ERROR };
+
+    set((s) => (s.profile ? { profile: { ...s.profile, equippedLimitedIconSlug: iconSlug } } : s));
+    useUserStore.setState((s) => ({ user: { ...s.user, equippedLimitedIconSlug: iconSlug } }));
+    return { ok: true };
+  },
 }));
 
 if (typeof window !== "undefined") {
@@ -315,7 +371,9 @@ if (typeof window !== "undefined") {
       if (useAuthStore.getState().user?.id !== userId) return;
       useProfileStore.setState({ profile, loading: false });
       if (!profile) return;
-      useUserStore.setState((s) => ({ user: { ...s.user, displayName: profile.displayName } }));
+      useUserStore.setState((s) => ({
+        user: { ...s.user, displayName: profile.displayName, equippedLimitedIconSlug: profile.equippedLimitedIconSlug },
+      }));
 
       // 2026-08-29: avatar_icon/avatar_colorをprofilesに追加する前から、この端末の
       // useUserStore（localStorage）に既にアイコン設定を持っているユーザーがいる。

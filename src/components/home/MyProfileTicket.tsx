@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
+import TitleSelectModal from "@/components/app/TitleSelectModal";
 import { getRankByMeter } from "@/data/collectionData";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
+import { supabase } from "@/lib/supabase";
 import { formatMinutesUntil } from "@/lib/ticketFormat";
 import { MAX_TICKETS, computeDisplayedTickets } from "@/lib/ticketRecovery";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -63,6 +65,37 @@ export default function MyProfileTicket({
   // 読み込み中の表示に留める（既定値を実データのように見せない）。
   const isLoadingMember = isLoggedIn && !isGuest && !isMember;
   const rank = getRankByMeter(isMember ? (profile?.masteryMeter ?? 0) : 0);
+  const [titleModalOpen, setTitleModalOpen] = useState(false);
+  // 2026-09-27（称号・初回ライブ限定特典）：equipped_title_slugは称号の内部ID
+  // （slug）だけなので、表示名はtitlesテーブルから引く。称号は数が少なく頻繁に
+  // 変わらないため、装備中のslugが変わった時だけ取得し直す簡易実装にしている。
+  const equippedTitleSlug = isMember ? (profile?.equippedTitleSlug ?? null) : null;
+  const [equippedTitleName, setEquippedTitleName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!equippedTitleSlug) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEquippedTitleName(null);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("titles")
+      .select("display_name")
+      .eq("slug", equippedTitleSlug)
+      // 2026-09-28（レビュー対応）：非公開化はDB側(admin_update_title)で
+      // equipped_title_slugをnullへ解除する設計だが、表示側でも多層防御として
+      // is_active=trueだけを対象にする（プロフィール反映のわずかな遅延等でも、
+      // 非公開にした称号を表示し続けないようにする）。
+      .eq("is_active", true)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setEquippedTitleName(data?.display_name ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [equippedTitleSlug]);
   const followingAuthorIds = useSnsStore((s) => s.followingAuthorIds);
   const followerCount = useSnsStore((s) => s.myFollowerCount);
   const displayName = isGuest
@@ -118,11 +151,20 @@ export default function MyProfileTicket({
                 {/* 2026-09-13（0070ゲスト参加レビュー対応）：段位はゲスト・未ログイン・
                     profile取得中には一切表示しない（確定会員isMemberの場合のみ）。 */}
                 {isMember && (
-                  <span
-                    className={`${styles.surfaceAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
-                  >
-                    段位：{rank.label}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span
+                      className={`${styles.surfaceAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
+                    >
+                      段位：{rank.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTitleModalOpen(true)}
+                      className={`${styles.pressable} w-fit rounded-full border border-[var(--ink)]/30 px-3 py-1 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5`}
+                    >
+                      {equippedTitleName ? `［${equippedTitleName}］` : "称号を選ぶ"}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -229,6 +271,8 @@ export default function MyProfileTicket({
           )}
         </div>
       )}
+
+      {titleModalOpen && <TitleSelectModal onClose={() => setTitleModalOpen(false)} />}
     </div>
   );
 }

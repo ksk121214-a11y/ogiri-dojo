@@ -1,6 +1,7 @@
 "use client";
 
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { getLimitedIconSrc } from "@/lib/limitedIcons";
 import { useUserStore } from "@/store/useUserStore";
 
 import AvatarGlyph from "./AvatarGlyph";
@@ -22,11 +23,21 @@ export default function MyIconAvatar({
 }) {
   const avatarColor = useUserStore((s) => s.user.avatarColor);
   const avatarIcon = useUserStore((s) => s.user.avatarIcon);
+  const equippedLimitedIconSlug = useUserStore((s) => s.user.equippedLimitedIconSlug);
   const iconSrc = getAvatarIconSrc(avatarIcon);
   const silhouetteSrc = getAvatarSilhouetteSrc(avatarIcon);
+  const fullColorSrc = getLimitedIconSrc(equippedLimitedIconSlug);
 
   const glyphSize = bare ? size : size * 0.8;
-  const glyph = <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={avatarColor} size={glyphSize} />;
+  const glyph = (
+    <AvatarGlyph
+      iconSrc={iconSrc}
+      silhouetteSrc={silhouetteSrc}
+      color={avatarColor}
+      size={glyphSize}
+      fullColorSrc={fullColorSrc}
+    />
+  );
 
   if (bare) {
     return (

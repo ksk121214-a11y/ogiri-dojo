@@ -15,6 +15,7 @@ import AudienceEnteringScreen from "@/components/live-room/AudienceEnteringScree
 import AudienceJoinPanel from "@/components/live-room/AudienceJoinPanel";
 import AudienceJoinPrompt from "@/components/live-room/AudienceJoinPrompt";
 import FinalResultView from "@/components/live-room/FinalResultView";
+import FirstLiveRewardAnnouncement from "@/components/live-room/FirstLiveRewardAnnouncement";
 import GroupResultView from "@/components/live-room/GroupResultView";
 import LaughEffectOverlay from "@/components/live-room/LaughEffectOverlay";
 import OpeningView from "@/components/live-room/OpeningView";
@@ -281,6 +282,16 @@ export default function LivePage() {
           Xでログイン
         </button>
         {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
+        {/* 2026-09-27（初回ライブ限定特典）：公式#0001（初回本番ライブ）のときだけ、
+            案内を表示する。ゲスト観戦自体は妨げず、対象外であることだけを伝える
+            （supabase/migrations/0081参照）。テストライブ・#0002以降では出さない。
+            文言・表示条件はOpeningView（Xログイン済みの参加受付画面）と共通化する。 */}
+        <FirstLiveRewardAnnouncement
+          liveMode={live?.live_mode}
+          officialSequenceNumber={live?.official_sequence_number}
+          emergencyClosed={live?.emergency_closed}
+          className="mt-4 font-sans text-xs text-[#ffcf4a]"
+        />
         <p className="mt-4 mb-2 font-sans text-xs text-white/70">
           ゲストは観客としてライブを視聴できます。回答・採点・ポイント記録はできません。
           爆笑・ツッコミ・拍手は利用できます。
@@ -446,6 +457,9 @@ export default function LivePage() {
                   myParticipantId={myParticipant?.id ?? null}
                   participantAvatars={participantAvatars}
                   liveMode={live.live_mode}
+                  liveId={live.id}
+                  officialSequenceNumber={live.official_sequence_number}
+                  emergencyClosed={live.emergency_closed}
                 />
               ) : (
                 <p className="font-sans text-sm text-white/70">結果を集計中…</p>
@@ -599,6 +613,9 @@ export default function LivePage() {
               myParticipantId={myParticipant?.id ?? null}
               participantAvatars={participantAvatars}
               liveMode={live.live_mode}
+              liveId={live.id}
+              officialSequenceNumber={live.official_sequence_number}
+              emergencyClosed={live.emergency_closed}
             />
           )}
 

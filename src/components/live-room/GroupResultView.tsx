@@ -65,6 +65,7 @@ export default function GroupResultView({
                     participantId={entry.participantId}
                     avatarIcon={participantAvatars[entry.participantId]?.icon}
                     avatarColor={participantAvatars[entry.participantId]?.color}
+                    equippedLimitedIconSlug={participantAvatars[entry.participantId]?.equippedLimitedIconSlug}
                     size={28}
                     bare
                   />

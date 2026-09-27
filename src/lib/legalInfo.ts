@@ -9,11 +9,21 @@ export const OPERATOR_NAME = "爆笑スタジアム運営";
 export const CONTACT_EMAIL = "bakushostadium.contact@gmail.com";
 export const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}`;
 
-// 制定日（施行日）。本規約・本ポリシーが最初に効力を生じた日で、以後変わらない。
+// 制定日（施行日）。本規約・本ポリシーが最初に効力を生じた日で、以後変わらない
+// （利用規約・プライバシーポリシーは同じ日に制定されたため共通の値を使う）。
 export const ENACTED_ON = "2026年9月25日";
 // 最終改定日。制定後に内容を変更した場合にのみ設定する（未改定の間はnullのまま
 // にし、「制定日と同じ」等の紛らわしい表示を出さない）。
-export const LAST_REVISED_ON: string | null = null;
+// 2026-09-28（レビュー対応）：利用規約とプライバシーポリシーは改定のタイミングが
+// 別々になり得るため、共通の1つの値ではなく文書ごとに分ける（一方だけを改定した
+// 時に、改定していない方まで改定表示になってしまうことを防ぐ）。
+export const TERMS_LAST_REVISED_ON: string | null = null;
+// 2026-09-28：プロフィール公開情報の説明に「選択中の称号」「限定アイコン」を
+// 追加したため改定（本サイトは既に本番公開済みでterms_consentsに実際の同意記録が
+// あるため、改定なし扱いにはしない。PRIVACY_VERSIONも同時に更新しConsentRequiredGate
+// が既存利用者へ再同意を促す、supabase/migrations/0081のcurrent_legal_document_versions
+// 参照）。
+export const PRIVACY_LAST_REVISED_ON: string | null = "2026年9月28日";
 
 // mailtoリンクに件名を付ける場合、日本語件名は必ずencodeURIComponentで
 // パーセントエンコードしてからクエリに載せる（生の日本語文字列をURLへ
@@ -35,4 +45,7 @@ export const ACCOUNT_DELETION_MAIL_SUBJECT = "爆笑スタジアム アカウン
 // このバージョン文字列を更新する（terms_consentsテーブルへ記録し、既存ユーザーの
 // 再同意が必要かどうかの判定に使う。src/store/useConsentGateStore.ts参照）。
 export const TERMS_VERSION = "2026-09-25-v1";
-export const PRIVACY_VERSION = "2026-09-25-v1";
+// 2026-09-28：プロフィール公開情報の説明（称号・限定アイコンの追加）の改定に伴い
+// 更新。supabase/migrations/0081のcurrent_legal_document_versions()と必ず同じ値に
+// する（src/lib/__tests__/legalPagesWiring.check.tsが一致を検査する）。
+export const PRIVACY_VERSION = "2026-09-28-v2";

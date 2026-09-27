@@ -82,6 +82,8 @@ function makeProfile(overrides: Partial<ReturnType<typeof useProfileStore.getSta
     ticketsNextRecoveryAt: null,
     referralSource: null,
     referralSourceAnsweredAt: null,
+    equippedTitleSlug: null,
+    equippedLimitedIconSlug: null,
     ...overrides,
   };
 }

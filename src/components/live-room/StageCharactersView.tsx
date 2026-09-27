@@ -6,6 +6,7 @@ import Image from "next/image";
 import AvatarGlyph from "@/components/app/AvatarGlyph";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { BASE_PATH } from "@/lib/basePath";
+import { getLimitedIconSrc } from "@/lib/limitedIcons";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import {
   getParticipantAvatarColor,
@@ -61,6 +62,7 @@ export default function StageCharactersView({
 }) {
   const myAvatarColor = useUserStore((s) => s.user.avatarColor);
   const myAvatarIcon = useUserStore((s) => s.user.avatarIcon);
+  const myEquippedLimitedIconSlug = useUserStore((s) => s.user.equippedLimitedIconSlug);
   const myIconSrc = getAvatarIconSrc(myAvatarIcon);
   const mySilhouetteSrc = getAvatarSilhouetteSrc(myAvatarIcon);
 
@@ -92,6 +94,9 @@ export default function StageCharactersView({
         const iconColor = isMe
           ? myAvatarColor
           : (otherAvatar?.color ?? getParticipantAvatarColor(member.id));
+        const fullColorSrc = getLimitedIconSrc(
+          isMe ? myEquippedLimitedIconSlug : (otherAvatar?.equippedLimitedIconSlug ?? null),
+        );
         return (
           <motion.div
             key={member.id}
@@ -110,7 +115,7 @@ export default function StageCharactersView({
           >
             {compact ? (
               <div className="relative z-10 h-8 w-8 sm:h-10 sm:w-10">
-                <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fill />
+                <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fullColorSrc={fullColorSrc} fill />
               </div>
             ) : (
               <>
@@ -188,7 +193,7 @@ export default function StageCharactersView({
                         : undefined
                     }
                   >
-                    <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fill />
+                    <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={iconColor} fullColorSrc={fullColorSrc} fill />
                   </div>
                 </div>
               </>

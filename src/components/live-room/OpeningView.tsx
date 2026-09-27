@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import CurtainOverlay from "@/components/live-demo/CurtainOverlay";
 import ScreenShell from "@/components/live-demo/ScreenShell";
+import FirstLiveRewardAnnouncement from "@/components/live-room/FirstLiveRewardAnnouncement";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { isGuestUser } from "@/lib/guestStatus";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
@@ -115,6 +116,16 @@ export default function OpeningView() {
       <p className="mt-2 font-sans text-sm text-white/80">
         まもなく組分けが発表されます。参加方法を選んでください。
       </p>
+      {/* 2026-09-27（レビュー対応）：以前は未ログインの参加入口(src/app/live/page.tsx)
+          にしか案内が出ておらず、Xログイン済みでこの参加受付画面を見る人には
+          見えていなかった。文言・表示条件はFirstLiveRewardAnnouncementに一本化する
+          （supabase/migrations/0081参照）。 */}
+      <FirstLiveRewardAnnouncement
+        liveMode={live.live_mode}
+        officialSequenceNumber={live.official_sequence_number}
+        emergencyClosed={live.emergency_closed}
+        className="mt-2 max-w-xs text-center font-sans text-[11px] text-[#ffcf4a]"
+      />
 
       {!myParticipant ? (
         <div className="mt-6 flex flex-col items-center gap-2">

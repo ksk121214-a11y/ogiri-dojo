@@ -27,7 +27,25 @@ create table if not exists auth.users (
   -- 0070（ゲスト参加）：実際のSupabaseのauth.usersに実在する列。Supabaseの匿名
   -- サインイン(signInAnonymously)で作られる行はtrueになる。テストでは
   -- `insert into auth.users (id, is_anonymous) values (..., true)` で模す。
-  is_anonymous boolean not null default false
+  is_anonymous boolean not null default false,
+  -- 0081（称号・初回ライブ限定特典）：実際のSupabaseのauth.usersに実在する列。
+  -- signInWithOAuth({provider:"x"})でのXログインは{"provider":"x","providers":["x"]}、
+  -- signInWithPassword（ボット）は{"provider":"email",...}、signInAnonymously（ゲスト）は
+  -- {"provider":"anonymous",...}になる（GoTrueの標準挙動）。テストでは
+  -- `insert into auth.users (id, raw_app_meta_data) values (..., '{"provider":"x"}')` で模す。
+  raw_app_meta_data jsonb not null default '{}'::jsonb
+);
+
+-- 0081追加（Xプロバイダ判定の多層化）：実際のSupabaseのauth.identitiesに実在する
+-- テーブル（1ユーザーが複数プロバイダのアイデンティティを持ちうる）。Xログインなら
+-- provider='x'の行が入る（GoTrueの標準挙動）。テストでは
+-- `insert into auth.identities (user_id, provider) values (..., 'x')` で模す。
+create table if not exists auth.identities (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  provider text not null,
+  identity_data jsonb not null default '{}'::jsonb,
+  provider_id text not null default ''
 );
 
 do $$

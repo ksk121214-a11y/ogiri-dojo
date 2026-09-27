@@ -47,6 +47,10 @@ export interface DojoUser {
   bio: string; // 一言コメント（プロフィールの自己紹介、§寄合帳プロフィール）
   avatarColor: string; // マイページ・寄合帳アイコン（大喜利ライブの舞台アイコンと共通の線画）を塗る色
   avatarIcon: string; // アイコンの絵柄（AvatarIconId、@/lib/avatarIcons参照）。旧データ互換のため未設定でも動くようMyIconAvatar側でフォールバックする
+  // 2026-09-27（称号・初回ライブ限定特典）：装備中の限定アイコン（現状'first-witness'のみ）。
+  // useProfileStore（Supabase側の正の情報源）からのみ同期され、ここに直接書き込む手段は無い。
+  // 未装備はnull（この場合はavatarIcon/avatarColorの通常アイコンをそのまま表示する）。
+  equippedLimitedIconSlug: string | null;
   rank: RankKey;
   masteryMeter: number; // 熟練度メーター（減らない経験値、§6.1）
   points: number; // 消費用ポイント残高（§5.2）

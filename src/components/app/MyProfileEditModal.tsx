@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { AVATAR_COLOR_PRESETS } from "@/lib/avatarColors";
 import { AVATAR_ICON_PRESETS, getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
 import { isConfirmedMember, isGuestUser } from "@/lib/guestStatus";
+import { LIMITED_ICON_PRESETS } from "@/lib/limitedIcons";
+import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { DISPLAY_NAME_MAX_LENGTH, useProfileStore, type DojoProfile } from "@/store/useProfileStore";
 import { useUserStore } from "@/store/useUserStore";
@@ -124,6 +126,7 @@ function MyProfileEditForm({
   const updateDisplayName = useProfileStore((s) => s.updateDisplayName);
   const updateAvatar = useProfileStore((s) => s.updateAvatar);
   const updateBio = useProfileStore((s) => s.updateBio);
+  const setEquippedLimitedIcon = useProfileStore((s) => s.setEquippedLimitedIcon);
   const updateAvatarColor = useUserStore((s) => s.updateAvatarColor);
   const updateAvatarIcon = useUserStore((s) => s.updateAvatarIcon);
   const updateLocalBio = useUserStore((s) => s.updateBio);
@@ -134,6 +137,27 @@ function MyProfileEditForm({
   const [bio, setBio] = useState(profile.bio);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // 2026-09-27（初回ライブ限定アイコン）：所有している限定アイコンのslug一覧
+  // （通常は空、所有していれば'first-witness'を含む）。限定アイコンを選んでも
+  // 通常アイコンのicon/colorはこのフォーム内では一切変更しない（保存時に両方とも
+  // 送るため、通常アイコンへ戻した時に元の色がそのまま復元される）。
+  const [ownedLimitedIconSlugs, setOwnedLimitedIconSlugs] = useState<string[]>([]);
+  const [limitedIconSlug, setLimitedIconSlug] = useState<string | null>(profile.equippedLimitedIconSlug);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("user_limited_icons")
+      .select("icon_slug")
+      .eq("user_id", openedForUserId ?? "")
+      .then(({ data }) => {
+        if (cancelled) return;
+        setOwnedLimitedIconSlugs((data ?? []).map((r) => r.icon_slug as string));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openedForUserId]);
 
   const trimmedName = name.trim();
 
@@ -172,6 +196,17 @@ function MyProfileEditForm({
       setError(avatarResult.reason);
       return;
     }
+    // 2026-09-27（初回ライブ限定アイコン）：装備の変更は所有権をDB内で検証する
+    // 専用RPC経由（set_equipped_limited_icon）。通常アイコン(icon/color)は上で
+    // 既に保存済みなので、限定アイコンを解除しても通常アイコンの色は消えない。
+    if (limitedIconSlug !== profile.equippedLimitedIconSlug) {
+      const limitedIconResult = await setEquippedLimitedIcon(limitedIconSlug);
+      if (!limitedIconResult.ok) {
+        setSubmitting(false);
+        setError(limitedIconResult.reason);
+        return;
+      }
+    }
     const result = await updateDisplayName(trimmedName);
     if (!result.ok) {
       setSubmitting(false);
@@ -209,7 +244,17 @@ function MyProfileEditForm({
               アイコンのすぐ右に詰め、余った右側を色の縦一列に充てる。 */}
           <div className="flex items-start gap-3">
             <span className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--ink)]/20 bg-white">
-              <AvatarGlyph iconSrc={getAvatarIconSrc(icon)} silhouetteSrc={getAvatarSilhouetteSrc(icon)} color={color} size={64} />
+              <AvatarGlyph
+                iconSrc={getAvatarIconSrc(icon)}
+                silhouetteSrc={getAvatarSilhouetteSrc(icon)}
+                color={color}
+                size={64}
+                fullColorSrc={
+                  limitedIconSlug
+                    ? (LIMITED_ICON_PRESETS.find((p) => p.slug === limitedIconSlug)?.src ?? null)
+                    : null
+                }
+              />
             </span>
 
             <div className="shrink-0">
@@ -219,11 +264,14 @@ function MyProfileEditForm({
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => setIcon(preset.id)}
+                    onClick={() => {
+                      setIcon(preset.id);
+                      setLimitedIconSlug(null);
+                    }}
                     aria-label={preset.label}
-                    aria-pressed={icon === preset.id}
+                    aria-pressed={icon === preset.id && !limitedIconSlug}
                     className={`${styles.pressable} flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border bg-white transition ${
-                      icon === preset.id
+                      icon === preset.id && !limitedIconSlug
                         ? "border-[var(--ink)] ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--paper)]"
                         : "border-[var(--ink)]/15 hover:border-[var(--ink)]/40"
                     }`}
@@ -231,6 +279,35 @@ function MyProfileEditForm({
                     <AvatarGlyph iconSrc={preset.src} silhouetteSrc={preset.silhouetteSrc} color={color} size={36} />
                   </button>
                 ))}
+                {/* 2026-09-27（初回ライブ限定アイコン）：所有している場合だけ、通常アイコンの
+                    並びに追加する。全色付きPNGのためCSS maskで単色化せずそのまま表示する。 */}
+                {ownedLimitedIconSlugs.map((slug) => {
+                  const preset = LIMITED_ICON_PRESETS.find((p) => p.slug === slug);
+                  if (!preset) return null;
+                  return (
+                    <button
+                      key={slug}
+                      type="button"
+                      onClick={() => setLimitedIconSlug(slug)}
+                      aria-label={preset.label}
+                      aria-pressed={limitedIconSlug === slug}
+                      title={preset.label}
+                      className={`${styles.pressable} flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border bg-white transition ${
+                        limitedIconSlug === slug
+                          ? "border-[var(--ink)] ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--paper)]"
+                          : "border-[var(--ink)]/15 hover:border-[var(--ink)]/40"
+                      }`}
+                    >
+                      <AvatarGlyph
+                        iconSrc={getAvatarIconSrc(icon)}
+                        silhouetteSrc={getAvatarSilhouetteSrc(icon)}
+                        color={color}
+                        size={36}
+                        fullColorSrc={preset.src}
+                      />
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

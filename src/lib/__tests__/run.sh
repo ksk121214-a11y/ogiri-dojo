@@ -545,4 +545,25 @@ else
 fi
 rm -rf "$CONSENT_GATE_DIR" "$AUDIENCE_JOIN_DIR"
 
+# useFirstLiveRewardStore.ts（初回本番ライブ#0001の限定特典、supabase/migrations/0081）も
+# 同じ理由で専用tsconfig経由にする。
+FIRST_LIVE_REWARD_DIR="$(mktemp -d)"
+FIRST_LIVE_REWARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.firstLiveReward.json"
+FIRST_LIVE_REWARD_ENTRY="$FIRST_LIVE_REWARD_DIR/src/lib/__tests__/store/useFirstLiveRewardStore.check.js"
+
+echo "--- useFirstLiveRewardStore.check.ts ---"
+if npx tsc -p "$FIRST_LIVE_REWARD_TSCONFIG" --outDir "$FIRST_LIVE_REWARD_DIR" && [ -f "$FIRST_LIVE_REWARD_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$FIRST_LIVE_REWARD_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FIRST_LIVE_REWARD_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useFirstLiveRewardStore.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FIRST_LIVE_REWARD_DIR"
+
 exit $FAILED

@@ -20,6 +20,7 @@ const INITIAL_USER: DojoUser = {
   bio: "高座に立つのが夢の見習いです。よろしくお願いします！",
   avatarColor: "#c8320c",
   avatarIcon: "default",
+  equippedLimitedIconSlug: null,
   rank: "zenza",
   masteryMeter: 260, // 「前座」到達済み・「二ツ目」まであと少し、という体験しやすい初期値
   points: 5000, // ガチャ・ショップを試しやすいよう多めに設定

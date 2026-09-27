@@ -6,8 +6,8 @@ import {
   CONTACT_EMAIL,
   CONTACT_MAILTO,
   ENACTED_ON,
-  LAST_REVISED_ON,
   OPERATOR_NAME,
+  PRIVACY_LAST_REVISED_ON,
   contactMailtoWithSubject,
 } from "@/lib/legalInfo";
 
@@ -96,7 +96,7 @@ export default function PrivacyPage() {
       updatedLabel={
         <>
           制定日：{ENACTED_ON}
-          {LAST_REVISED_ON && <>　最終改定日：{LAST_REVISED_ON}</>}
+          {PRIVACY_LAST_REVISED_ON && <>　最終改定日：{PRIVACY_LAST_REVISED_ON}</>}
         </>
       }
     >
@@ -118,7 +118,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <span className="font-bold">プロフィール情報</span
-            >：表示名（演者名）、アイコン（種類・色の組み合わせ）、一言コメント
+            >：表示名（演者名）、アイコン（種類・色の組み合わせ、又は初回ライブ参加記念の限定アイコン）、一言コメント、選択中の称号
           </li>
           <li>
             <span className="font-bold">ライブ参加・成績情報</span
@@ -486,8 +486,9 @@ export default function PrivacyPage() {
         <p>
           これとは別に、端末のローカルストレージには、音量・ミュート設定、ライブへの入場状況の一時的な記録、
           利用規約及びプライバシーポリシーへの同意確認状況（同意済みのバージョンの控え）が保存されます。
-          加えて、表示名、アイコンの種類・色、一言コメント、段位（習熟度）・ポイント・ライブ参加回数・
-          表彰回数・ベストアンサー回数の仮の記録、及び所持しているアイテム・装備情報が、ガチャ・楽屋等、
+          加えて、表示名、アイコンの種類・色（装備中の限定アイコンの種類を含む）、一言コメント、
+          段位（習熟度）・ポイント・ライブ参加回数・表彰回数・ベストアンサー回数の仮の記録、
+          及び所持しているアイテム・装備情報が、ガチャ・楽屋等、
           今後の正式な提供に向けて試験的に組み込まれている一部機能の表示・動作のため、端末に保存される
           場合があります。これらは上記のSupabase側の正式な記録とは別の、端末内だけの仮の記録であり、
           運営のサーバーへ自動的に送信されるものではなく、機種変更やブラウザの変更を行うと引き継がれません。
@@ -525,7 +526,7 @@ export default function PrivacyPage() {
         </p>
         <p>
           制定日（施行日）：{ENACTED_ON}
-          {LAST_REVISED_ON && <>（最終改定日：{LAST_REVISED_ON}）</>}
+          {PRIVACY_LAST_REVISED_ON && <>（最終改定日：{PRIVACY_LAST_REVISED_ON}）</>}
         </p>
         <p>
           個人情報の保護に関する法律に基づき、運営を行う者の氏名又は名称及び住所（法人の場合は代表者の氏名を

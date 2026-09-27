@@ -77,6 +77,10 @@ interface QueuedTsukkomiEvent extends TsukkomiEvent {
 export interface ParticipantAvatarInfo {
   icon: string;
   color: string;
+  // 2026-09-27（初回ライブ限定アイコン）：所有者が装備している場合のみ非null
+  // （'first-witness'等、supabase/migrations/0081）。非nullならicon/colorより
+  // 優先してフルカラー表示する（ParticipantIconAvatar参照）。
+  equippedLimitedIconSlug: string | null;
 }
 
 interface LiveFollowerState {
@@ -309,9 +313,14 @@ async function fetchParticipantProfiles(liveId: string): Promise<{
     display_name: string;
     avatar_icon: string;
     avatar_color: string;
+    equipped_limited_icon_slug: string | null;
   }[]) {
     names[row.participant_id] = row.display_name;
-    avatars[row.participant_id] = { icon: row.avatar_icon, color: row.avatar_color };
+    avatars[row.participant_id] = {
+      icon: row.avatar_icon,
+      color: row.avatar_color,
+      equippedLimitedIconSlug: row.equipped_limited_icon_slug,
+    };
   }
   return { ok: true, names, avatars };
 }

@@ -12,6 +12,7 @@ import SnsBackButton from "@/components/sns/SnsBackButton";
 import SnsFollowButton from "@/components/sns/SnsFollowButton";
 import { getRankByMeter } from "@/data/collectionData";
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { getLimitedIconSrc } from "@/lib/limitedIcons";
 import { supabase } from "@/lib/supabase";
 import { useAuthorLookup } from "@/lib/useAuthorLookup";
 import { isUuid } from "@/lib/uuid";
@@ -37,6 +38,7 @@ type ProfileAuthor =
       displayName: string;
       avatarIcon: string;
       avatarColor: string;
+      equippedLimitedIconSlug: string | null;
       rankLabel: string;
       bio: string;
     };
@@ -101,6 +103,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           displayName: realAuthor.displayName,
           avatarIcon: realAuthor.avatarIcon,
           avatarColor: realAuthor.avatarColor,
+          equippedLimitedIconSlug: realAuthor.equippedLimitedIconSlug,
           rankLabel: getRankByMeter(realAuthor.masteryMeter).label,
           bio: realAuthor.bio,
         }
@@ -146,6 +149,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
               silhouetteSrc={getAvatarSilhouetteSrc(author.avatarIcon)}
               color={author.avatarColor}
               size={56}
+              fullColorSrc={getLimitedIconSrc(author.equippedLimitedIconSlug)}
             />
           </span>
         )}

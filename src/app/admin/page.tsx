@@ -175,6 +175,11 @@ export default function AdminHomePage() {
       description: "終了ライブの1〜3位代表・満点回答・運営ベストを設定し、寄合帳へ公開します。",
       href: "/admin/live-results",
     },
+    {
+      label: "称号管理",
+      description: "称号の表示名・説明文・並び順・公開状態、初回ライブ限定特典の付与状況を管理します。",
+      href: "/admin/titles",
+    },
   ];
 
   return (

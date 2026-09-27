@@ -1,4 +1,5 @@
 import { getAvatarIconSrc, getAvatarSilhouetteSrc } from "@/lib/avatarIcons";
+import { getLimitedIconSrc } from "@/lib/limitedIcons";
 import {
   getParticipantAvatarColor,
   getParticipantAvatarIconSrc,
@@ -19,12 +20,17 @@ export default function ParticipantIconAvatar({
   participantId,
   avatarIcon,
   avatarColor: avatarColorOverride,
+  equippedLimitedIconSlug,
   size = 32,
   bare = false,
 }: {
   participantId: string;
   avatarIcon?: string;
   avatarColor?: string;
+  // 2026-09-27（初回ライブ限定アイコン）：participant_display_names/sns_author_names
+  // RPCが返すequipped_limited_icon_slugをそのまま渡す。指定されていれば通常アイコンより
+  // 優先してフルカラー表示する（呼び出し元がこの値を取得していない場合は従来どおり）。
+  equippedLimitedIconSlug?: string | null;
   size?: number;
   bare?: boolean;
 }) {
@@ -33,9 +39,18 @@ export default function ParticipantIconAvatar({
   const silhouetteSrc = avatarIcon
     ? getAvatarSilhouetteSrc(avatarIcon)
     : getParticipantAvatarSilhouetteSrc(participantId);
+  const fullColorSrc = getLimitedIconSrc(equippedLimitedIconSlug);
 
   const glyphSize = bare ? size : size * 0.8;
-  const glyph = <AvatarGlyph iconSrc={iconSrc} silhouetteSrc={silhouetteSrc} color={avatarColor} size={glyphSize} />;
+  const glyph = (
+    <AvatarGlyph
+      iconSrc={iconSrc}
+      silhouetteSrc={silhouetteSrc}
+      color={avatarColor}
+      size={glyphSize}
+      fullColorSrc={fullColorSrc}
+    />
+  );
 
   if (bare) {
     return (

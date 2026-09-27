@@ -848,22 +848,57 @@ console.log("PASS: 利用規約第1条・LegalConsentNoteのいずれからも�
 
 // 41（0076の同意バージョンをクライアントから任意指定できないようにした対応の
 //    整合性確認）：record_terms_consent()がDB側で決定する現在のバージョン
-//    （current_legal_document_versions()のハードコード値）と、フロントエンドの
+//    （current_legal_document_versions()の値）と、フロントエンドの
 //    TERMS_VERSION/PRIVACY_VERSION（src/lib/legalInfo.ts）が一致している。
 //    ここが食い違うと、フロントの「現在バージョンに一致する行を検索する」判定が
 //    record_terms_consent()の記録と永久にすれ違い、同意ループに陥る。
+//    2026-09-28（プライバシーポリシー改定対応）：current_legal_document_versions()は
+//    0076で定義された後、0081でcreate or replaceされ現在の値（プライバシーポリシー
+//    改定でprivacy_versionだけが更新された値）を返す。本番未適用のため0081を
+//    直接書き換えており0082は作っていない。0076自体は編集禁止のため、0076は
+//    「制定時点の元の値」のまま変わっていないことも併せて確認する。
 {
   const migration0076 = read("supabase", "migrations", "0076_terms_consent.sql");
+  const migration0081 = read("supabase", "migrations", "0081_titles_and_first_live_rewards.sql");
   assert.ok(
-    migration0076.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
-    `supabase/migrations/0076_terms_consent.sqlのcurrent_legal_document_versions()が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
+    migration0076.includes("select '2026-09-25-v1'::text, '2026-09-25-v1'::text;"),
+    "supabase/migrations/0076_terms_consent.sqlのcurrent_legal_document_versions()の元の定義が変更されている（0076は編集禁止）",
   );
   assert.ok(
     !migration0076.includes("p_terms_version") && !migration0076.includes("p_privacy_version"),
     "record_terms_consent()がまだ引数（p_terms_version/p_privacy_version）を受け取る旧実装のままになっている",
   );
+  assert.ok(
+    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0081),
+    "0081がcurrent_legal_document_versions()をcreate or replaceしていない（プライバシーポリシー改定がDB側の現在バージョン判定に反映されていない）",
+  );
+  assert.ok(
+    migration0081.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
+    `supabase/migrations/0081のcurrent_legal_document_versions()（最終定義）が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}/${PRIVACY_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
+  );
 }
-console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している");
+console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値（0081の最終定義）はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している。0076自体は編集されていない");
+
+// 41b（利用規約とプライバシーポリシーの最終改定日の分離）：今回プライバシーポリシー
+//    だけを改定し利用規約は改定していないため、共通の1つのLAST_REVISED_ONではなく
+//    文書ごとに独立した定数を使っており、利用規約側は据え置き・プライバシー
+//    ポリシー側だけが更新されていることを確認する。
+{
+  const legalInfoSrc = read("src", "lib", "legalInfo.ts");
+  assert.ok(
+    /export const TERMS_LAST_REVISED_ON: string \| null = null;/.test(legalInfoSrc),
+    "利用規約は今回改定していないのに、TERMS_LAST_REVISED_ONがnull（未改定）以外になっている",
+  );
+  assert.ok(
+    /export const PRIVACY_LAST_REVISED_ON: string \| null = "2026年9月28日";/.test(legalInfoSrc),
+    "プライバシーポリシーの最終改定日(PRIVACY_LAST_REVISED_ON)が今回の改定日になっていない",
+  );
+  assert.ok(termsPage.includes("TERMS_LAST_REVISED_ON"), "利用規約ページがTERMS_LAST_REVISED_ONを表示していない（共通のLAST_REVISED_ONを使い続けている可能性）");
+  assert.ok(!termsPage.includes("PRIVACY_LAST_REVISED_ON"), "利用規約ページがプライバシーポリシー側の最終改定日を参照してしまっている");
+  assert.ok(privacyPage.includes("PRIVACY_LAST_REVISED_ON"), "プライバシーポリシーページがPRIVACY_LAST_REVISED_ONを表示していない");
+  assert.ok(!privacyPage.includes("TERMS_LAST_REVISED_ON"), "プライバシーポリシーページが利用規約側の最終改定日を参照してしまっている");
+}
+console.log("PASS: 利用規約・プライバシーポリシーの最終改定日は文書ごとに分離されており、今回はプライバシーポリシーのみが改定表示になっている");
 
 // 42（アカウント削除時の説明を実装と一致させる）：プライバシーポリシーに、
 //    本人投稿の本文がモデレーション等のため運営内部に非表示で保持される場合が

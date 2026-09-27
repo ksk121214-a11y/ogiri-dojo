@@ -69,6 +69,8 @@ async function main() {
       ticketsNextRecoveryAt: null,
       referralSource: null,
       referralSourceAnsweredAt: null,
+      equippedTitleSlug: null,
+      equippedLimitedIconSlug: null,
     },
     loading: false,
   });

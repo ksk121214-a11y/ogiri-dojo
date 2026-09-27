@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import LegalPageLayout, { LegalSection, LegalTableOfContents } from "@/components/legal/LegalPageLayout";
-import { CONTACT_EMAIL, CONTACT_MAILTO, ENACTED_ON, LAST_REVISED_ON, OPERATOR_NAME } from "@/lib/legalInfo";
+import { CONTACT_EMAIL, CONTACT_MAILTO, ENACTED_ON, OPERATOR_NAME, TERMS_LAST_REVISED_ON } from "@/lib/legalInfo";
 
 export const metadata: Metadata = {
   title: "利用規約｜爆笑スタジアム",
@@ -48,7 +48,7 @@ export default function TermsPage() {
       updatedLabel={
         <>
           制定日：{ENACTED_ON}
-          {LAST_REVISED_ON && <>　最終改定日：{LAST_REVISED_ON}</>}
+          {TERMS_LAST_REVISED_ON && <>　最終改定日：{TERMS_LAST_REVISED_ON}</>}
         </>
       }
     >
@@ -330,7 +330,7 @@ export default function TermsPage() {
         </p>
         <p>
           制定日（施行日）：{ENACTED_ON}
-          {LAST_REVISED_ON && <>（最終改定日：{LAST_REVISED_ON}）</>}
+          {TERMS_LAST_REVISED_ON && <>（最終改定日：{TERMS_LAST_REVISED_ON}）</>}
         </p>
       </LegalSection>
     </LegalPageLayout>

@@ -128,6 +128,8 @@ export interface RealAuthorInfo {
   // 段位・一言コメントを表示するため、sns_author_names RPCの戻り値に追加した2列。
   masteryMeter: number;
   bio: string;
+  // 2026-09-27（初回ライブ限定アイコン）：所有者が装備している場合のみ非null。
+  equippedLimitedIconSlug: string | null;
 }
 
 export type ActionResult = { ok: true } | { ok: false; message?: string };
@@ -301,6 +303,7 @@ async function resolveRealAuthorNames(authorIds: string[]): Promise<boolean> {
     avatar_color: string;
     mastery_meter: number;
     bio: string | null;
+    equipped_limited_icon_slug: string | null;
   }[]) {
     map[row.id] = {
       displayName: row.display_name,
@@ -308,6 +311,7 @@ async function resolveRealAuthorNames(authorIds: string[]): Promise<boolean> {
       avatarColor: row.avatar_color,
       masteryMeter: row.mastery_meter,
       bio: row.bio ?? "",
+      equippedLimitedIconSlug: row.equipped_limited_icon_slug,
     };
   }
   useSnsStore.setState((s) => ({ realAuthorNames: { ...s.realAuthorNames, ...map } }));
