@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP, Orbitron } from "next/font/google";
 
 import AmbientBgmController from "@/components/app/AmbientBgmController";
+import AudienceJoinIntentPathGuard from "@/components/app/AudienceJoinIntentPathGuard";
 import AudioProvider from "@/components/app/AudioProvider";
 import ConsentRequiredGate from "@/components/app/ConsentRequiredGate";
 import HostProgressController from "@/components/app/HostProgressController";
@@ -54,6 +55,7 @@ export default function RootLayout({
           <HostProgressController />
           <ConsentRequiredGate>{children}</ConsentRequiredGate>
           <ConsentGateModal />
+          <AudienceJoinIntentPathGuard />
         </AudioProvider>
       </body>
     </html>

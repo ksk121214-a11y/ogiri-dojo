@@ -82,5 +82,9 @@ assert.ok(/joinLiveFlight/.test(follower) && /\.finally\(\(\) => \{\s*if \(joinL
 const intentStore = read("src", "store", "useAudienceJoinIntentStore.ts");
 const noComments = (t: string) => t.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
 assert.ok(!/localStorage|sessionStorage/.test(noComments(intentStore + read("src", "lib", "audienceJoinIntent.ts"))), "意図が永続化されている");
-assert.ok(/return \(\) => \{\s*useAudienceJoinIntentStore\.getState\(\)\.discard\(\);[\s\S]*?gate\.cancel\(\)/.test(page), "ページ離脱で意図の破棄・ゲスト同意モーダルのキャンセルをしていない");
+const guardSrc = read("src", "components", "app", "AudienceJoinIntentPathGuard.tsx");
+assert.ok(
+  /useAudienceJoinIntentStore\.getState\(\)\.discard\(\)/.test(guardSrc) && /gate\.cancel\(\)/.test(guardSrc),
+  "ページ離脱時の意図の破棄・ゲスト同意モーダルのキャンセルがAudienceJoinIntentPathGuardに実装されていない",
+);
 console.log("PASS: 爆笑発生表示・未参加者の画面出し分け・中央の参加ボタン・single-flight");

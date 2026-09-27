@@ -67,6 +67,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../audienceJoinDrive.ts"
   "$SCRIPT_DIR/../audienceGuestButton.ts"
   "$SCRIPT_DIR/../audienceJoinUiPlan.ts"
+  "$SCRIPT_DIR/../liveParticipantPath.ts"
   "$SCRIPT_DIR/../authorLookupStatus.ts"
   "$SCRIPT_DIR/../calendarInitialMonth.ts"
 )

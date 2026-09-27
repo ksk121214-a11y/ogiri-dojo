@@ -233,15 +233,10 @@ export default function LivePage() {
     );
   }, [authUserId, authIsAnonymous, liveLoading, liveId, livePhase, hasParticipant, kicked, intentState]);
 
-  // ページを離れたら古い意図を破棄する（あとから別の画面・別のライブで発火させない）。
-  useEffect(() => {
-    return () => {
-      useAudienceJoinIntentStore.getState().discard();
-      // 開いたままのゲスト用同意モーダルも閉じる（ページ離脱後に匿名認証を始めさせない）。
-      const gate = useConsentGateStore.getState();
-      if (gate.pendingModal?.kind === "guest") gate.cancel();
-    };
-  }, []);
+  // 「ページを離れたら古い意図を破棄する」処理は、ConsentRequiredGateが同意確認中にこの
+  // ページ自体を一時的にアンマウントするため、ここ（このコンポーネントのアンマウント時）では
+  // 行わない。実際のページ離脱検知はAudienceJoinIntentPathGuard（layout.tsx、常時マウント）
+  // 側でpathnameの変化を見て行う。
   const audienceEntering = isAudienceIntentEntering(intentState) && !myParticipant;
 
   const remaining = live ? phaseRemainingSeconds(live, clock) : { sec: null, syncing: false };
