@@ -36,39 +36,50 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   // signInWithOAuthを開始すると、同じauth.uid()のまま匿名ユーザーが本アカウントへ
   // 『アップグレード』される（＝ゲストのprofiles行がそのまま本アカウント化される）
   // ことがある」という懸念から、呼び出し元を問わず常にsignOut()してから
-  // OAuthを開始していた。しかしこれだと、既にXログイン済みの利用者や
-  // 未ログイン状態からの呼び出し（＝匿名セッションが存在しないケース）にも
-  // 無意味なsignOut()が走ってしまう。
+  // OAuthを開始していた。
+  // 2026-09-27（ゲスト番号増殖バグの修正）：上記のsignOut()は、OAuth開始前
+  // （＝ログインが成功するかどうかまだ分からない時点）で匿名セッションを消していた。
+  // X側でログインをキャンセルする・callbackでエラーになる・ブラウザで戻る、
+  // いずれの場合もこのsignOut()は既に実行済みのため、元の匿名ユーザー（ゲスト01）の
+  // セッションが失われ、次にゲスト参加すると新しい匿名ユーザー（ゲスト02…）が
+  // 作られてしまっていた。
+  // このプロジェクトのsupabase-js（src/lib/supabase.ts）はflowTypeを指定しておらず、
+  // 使用中のバージョン(2.110.2)の既定であるimplicitフローを使っている（PKCEではない）。
+  // signInWithOAuthによるリダイレクトが成功してcallbackへ戻ってきた場合、
+  // supabase-jsのdetectSessionInUrlがURLのフラグメントに含まれるaccess_token/
+  // refresh_tokenを検出し、それを新しいセッション（Xアカウント）としてそのまま
+  // 保存する。この保存によって、既存のセッション（匿名であっても）は自動的に
+  // 新しいセッションへ置き換わる。つまりOAuthが実際に成功した場合は、明示的な
+  // signOut()を挟まなくても匿名セッションは結果的に非匿名セッションへ置き換わる
+  // （「成功した場合にだけゲスト参加状態を終了する」を、事前のsignOut()ではなく
+  // OAuth自体の結果に委ねる形にする）。逆にOAuthをキャンセル・失敗した場合や、
+  // callbackへ到達する前にブラウザで戻った場合は、URLにトークンが含まれないため
+  // 新しいセッションは保存されず、元の匿名セッションがそのまま残る。そのため、
+  // OAuth開始前のsignOut()は廃止する。
   // isGuestSwitch（呼び出し元が「現在ゲストからXログインへ切り替えようとしている」
-  // ことを分かっている場合だけtrue）が指定された時だけ、切り替え前に確認ダイアログを
-  // 挟んだ上でsignOut()する。ゲストでない呼び出し（通常のXログイン・admin/host
-  // ログイン等）ではsignOut()を呼ばない。
+  // ことを分かっている場合だけtrue）が指定された時、または現在のセッションが実際に
+  // 匿名の場合だけ、切り替え前に確認ダイアログを挟む（signOut()は行わない）。
   signInWithX: async (options) => {
     if (get().xSigningIn) return { ok: false, reason: "処理中です" };
     // 2026-09-13（再レビュー対応）：呼び出し元が渡すisGuestSwitchだけを信用しない。
     // ストア自身が持つ現在のセッション（get().user?.is_anonymous）が実際に匿名なら、
     // 呼び出し元がisGuestSwitchを渡し忘れていても（例：ゲスト対応を意識していない
-    // 素の「Xでログイン」ボタンから呼ばれた場合）確認ダイアログ→signOutを行う。
+    // 素の「Xでログイン」ボタンから呼ばれた場合）確認ダイアログを出す。
     // 通常のXログイン利用者・未ログイン利用者（is_anonymousがfalse/undefined）では
-    // 従来どおり不要なsignOutを行わない。
+    // 従来どおり確認ダイアログを出さない。
     const isGuestSwitch = get().user?.is_anonymous === true || (options?.isGuestSwitch ?? false);
 
     if (isGuestSwitch) {
       const confirmed = window.confirm(
-        "ゲスト参加状態は終了し、今回の記録は引き継がれません。Xログインを開始しますか？",
+        "Xログインに成功した場合、ゲスト参加状態は終了し、今回のゲスト記録は引き継がれません。Xログインを開始しますか？",
       );
       if (!confirmed) return { ok: false };
     }
 
     set({ xSigningIn: true });
     try {
-      if (isGuestSwitch) {
-        const { error: signOutError } = await supabase.auth.signOut();
-        if (signOutError) {
-          return { ok: false, reason: "ログインの切り替えに失敗しました。時間をおいて再度お試しください。" };
-        }
-      }
-
+      // 2026-09-27：ここでsupabase.auth.signOut()は呼ばない（上のコメント参照）。
+      // OAuthが実際に成功した場合だけ、新しいセッションの保存により自然にゲスト状態が終わる。
       const redirectTo = `${window.location.origin}${BASE_PATH}/auth/callback/`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "x",
@@ -89,6 +100,46 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (get().guestSigningIn) return { ok: false, reason: "処理中です" };
     set({ guestSigningIn: true });
     try {
+      // 既に有効な匿名セッションがあれば、それを再利用する（signInAnonymously()を
+      // 再実行せず、新しい匿名アカウント＝新しいゲスト番号を作らない）。ボタンの
+      // 無効化（guestSigningIn）だけに頼らず、ここでも二重作成を防ぐ。まずストアの
+      // キャッシュ（同期・高速）を見て、無ければ実際のセッション
+      // （supabase.auth.getSession()）を確認する。
+      const cachedUser = get().user;
+      if (cachedUser) {
+        if (cachedUser.is_anonymous === true) {
+          return { ok: true, userId: cachedUser.id };
+        }
+        // 2026-09-27（レビュー対応）：Xログイン済みのセッションがあるのに、
+        // UIの想定外の経路や競合でsignInAsGuestが呼ばれてしまった場合、新しい
+        // 匿名アカウントを作ってXセッションを上書きしてはならない。何もせず、
+        // 現在のXセッションを維持したまま失敗を返す。
+        return { ok: false, reason: "すでにXでログインしています。" };
+      }
+
+      let sessionData: { session: { user: { id: string; is_anonymous?: boolean } } | null };
+      try {
+        const result = await supabase.auth.getSession();
+        if (result.error) {
+          // getSession自体が失敗した場合、既存セッションの有無を判断できない。
+          // 「セッションが無い」と決めつけて匿名認証へ進むと、実際には残っていた
+          // 匿名セッションを見失わせる恐れがあるため、新規匿名認証へは進まない。
+          return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };
+        }
+        sessionData = result.data;
+      } catch {
+        // getSession自体が例外を投げた場合も同様に、新規匿名認証へは進まない。
+        return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };
+      }
+
+      const existingUser = sessionData.session?.user;
+      if (existingUser) {
+        if (existingUser.is_anonymous === true) {
+          return { ok: true, userId: existingUser.id };
+        }
+        return { ok: false, reason: "すでにXでログインしています。" };
+      }
+
       const { data, error } = await supabase.auth.signInAnonymously();
       if (error) {
         return { ok: false, reason: "ゲスト参加に失敗しました。時間をおいて再度お試しください。" };

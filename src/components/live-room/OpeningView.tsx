@@ -8,6 +8,7 @@ import ScreenShell from "@/components/live-demo/ScreenShell";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { isGuestUser } from "@/lib/guestStatus";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
+import { splitParticipantsByPreferredRole } from "@/lib/participantRoleSplit";
 import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -212,33 +213,56 @@ export default function OpeningView() {
         <p className="mt-2 font-sans text-xs text-[#ff3b5b]">{followerError}</p>
       )}
 
-      <div className="mt-10 w-full max-w-xl">
-        <p className="font-sans text-xs tracking-widest text-white/60">
-          現在の参加者：{participants.length}人
-        </p>
-        <div className="mt-3 max-h-64 space-y-1.5 overflow-y-auto">
-          {participants.map((p, idx) => {
-            const isMe = p.id === myParticipant?.id;
-            return (
-              <motion.div
-                key={p.id}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: Math.min(idx, 20) * 0.03 }}
-                className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                  isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
-                }`}
-              >
-                <span className="truncate font-sans text-white/90">
-                  {truncateLiveDisplayName(participantNames[p.id] ?? "（名前未設定）")}
-                </span>
-                <span className="shrink-0 font-sans text-xs text-white/60">
-                  {ROLE_LABEL[p.preferred_role]}
-                </span>
-              </motion.div>
-            );
-          })}
-        </div>
+      <div className="mt-10 w-full max-w-xl min-w-0">
+        {/* 運営が設定する最大参加人数はプレイヤーだけに適用され、観客には上限が無い
+            （src/lib/participantRoleSplit.ts splitParticipantsByPreferredRole・
+            supabase/migrations/0074_referral_source_survey.sql join_live参照）ため、
+            「3/8」のような最大人数との比率は出さず、現在の人数だけを表示する。 */}
+        {(() => {
+          const { players, audience } = splitParticipantsByPreferredRole(participants);
+          const groups: { label: string; list: typeof players }[] = [
+            { label: "現在のプレイヤー", list: players },
+            { label: "現在の観客", list: audience },
+          ];
+          return (
+            <div className="flex flex-col gap-5">
+              {groups.map((g) => (
+                <div key={g.label} className="min-w-0">
+                  <p className="font-sans text-xs tracking-widest text-white/60">
+                    {g.label}：{g.list.length}人
+                  </p>
+                  {g.list.length === 0 ? (
+                    <p className="mt-3 font-sans text-xs text-white/40">まだいません</p>
+                  ) : (
+                    <div className="mt-3 max-h-64 space-y-1.5 overflow-y-auto">
+                      {g.list.map((p, idx) => {
+                        const isMe = p.id === myParticipant?.id;
+                        return (
+                          <motion.div
+                            key={p.id}
+                            initial={{ opacity: 0, x: -12 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: Math.min(idx, 20) * 0.03 }}
+                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
+                              isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
+                            }`}
+                          >
+                            <span className="min-w-0 truncate font-sans text-white/90">
+                              {truncateLiveDisplayName(participantNames[p.id] ?? "（名前未設定）")}
+                            </span>
+                            <span className="shrink-0 font-sans text-xs text-white/60">
+                              {ROLE_LABEL[p.preferred_role]}
+                            </span>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </ScreenShell>
   );

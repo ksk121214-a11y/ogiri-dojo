@@ -3,12 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { isSignedInWithX } from "@/lib/authCallbackGuard";
 import { supabase } from "@/lib/supabase";
 
 // 静的エクスポート(output: "export")のためサーバー側Route Handlerが使えず、
 // X OAuthのリダイレクト先はこのクライアントページにしている。
-// supabase-jsのdetectSessionInUrlがURL中の認可コードを自動検出してセッション交換するので、
-// ここではその完了(SIGNED_IN)を待ってトップへ戻すだけでよい。
+// このプロジェクトはflowType未指定＝既定のimplicitフローのため、Xログイン成功時は
+// access_token/refresh_tokenがURLのフラグメントにそのまま含まれて戻ってくる
+// （認可コードの交換ではない）。supabase-jsのdetectSessionInUrlがこれを自動検出して
+// セッションとして保存するので、ここではその完了(SIGNED_IN)を待ってトップへ戻すだけでよい。
 function readOAuthError(): string | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -23,14 +26,14 @@ export default function AuthCallbackPage() {
     if (errorMessage) return;
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session) {
+      if (event === "SIGNED_IN" && isSignedInWithX(session)) {
         router.replace("/");
       }
     });
 
     // すでにセッション交換が完了済みの場合に備えて即時チェックもしておく
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
+      if (isSignedInWithX(data.session)) {
         router.replace("/");
       }
     });

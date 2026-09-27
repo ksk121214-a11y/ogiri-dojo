@@ -40,6 +40,7 @@ cd "$REPO_ROOT"
 SOURCE_FILES=(
   "$SCRIPT_DIR/../answeringCue.ts"
   "$SCRIPT_DIR/../liveHostSnapshots.ts"
+  "$SCRIPT_DIR/../participantRoleSplit.ts"
   "$SCRIPT_DIR/../snsLiveResultPreview.ts"
   "$SCRIPT_DIR/../liveGuestAccess.ts"
   "$SCRIPT_DIR/../guestStatus.ts"
@@ -68,6 +69,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../audienceGuestButton.ts"
   "$SCRIPT_DIR/../audienceJoinUiPlan.ts"
   "$SCRIPT_DIR/../liveParticipantPath.ts"
+  "$SCRIPT_DIR/../authCallbackGuard.ts"
   "$SCRIPT_DIR/../authorLookupStatus.ts"
   "$SCRIPT_DIR/../calendarInitialMonth.ts"
 )

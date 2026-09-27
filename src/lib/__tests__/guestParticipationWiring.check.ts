@@ -94,9 +94,9 @@ const snsLiveResultsStore = readFileSync(
 }
 
 // 4: useAuthStore.signInWithXは、isGuestSwitch:trueの場合だけ（＝ゲストからの
-//    切り替えだと呼び出し元が分かっている場合だけ）確認ダイアログを挟んだ上で
-//    signOut()してからsignInWithOAuthを呼ぶ。通常のXログイン利用者・未ログインからの
-//    呼び出しには無意味なsignOut()を走らせない（2026-09-13レビュー対応で変更）。
+//    切り替えだと呼び出し元が分かっている場合だけ）確認ダイアログを出す。
+//    2026-09-27（ゲスト番号増殖バグの修正）：OAuth開始前のsignOut()は廃止した
+//    （OAuthが実際に成功した場合だけ、セッション交換で自然にゲスト状態が終わる）。
 //    実際の呼び出し回数・xSigningInの状態遷移はuseAuthStoreXSwitch.check.ts側で検証する。
 {
   const storeBodyIdx = authStore.indexOf("export const useAuthStore = create");
@@ -106,29 +106,30 @@ const snsLiveResultsStore = readFileSync(
   const fnBlock = authStore.slice(fnIdx, fnIdx + 1600);
   const isGuestSwitchIfIdx = fnBlock.indexOf("if (isGuestSwitch) {");
   const confirmIdx = fnBlock.indexOf("window.confirm(");
-  const signOutIdx = fnBlock.indexOf("supabase.auth.signOut()");
   const oauthIdx = fnBlock.indexOf("supabase.auth.signInWithOAuth(");
   assert.ok(isGuestSwitchIfIdx >= 0, "signInWithXにisGuestSwitchによる分岐が無い");
   assert.ok(
-    confirmIdx >= 0 && confirmIdx < signOutIdx,
-    "signInWithXがisGuestSwitch時にsignOutより前で確認ダイアログ(window.confirm)を出していない",
+    confirmIdx >= 0 && confirmIdx < oauthIdx,
+    "signInWithXがisGuestSwitch時にOAuthより前で確認ダイアログ(window.confirm)を出していない",
+  );
+  const fnBlockNoComments = fnBlock
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+  assert.ok(
+    !/supabase\.auth\.signOut\(\)/.test(fnBlockNoComments),
+    "signInWithXがOAuth開始前にsignOut()を呼んでいる（ゲスト番号増殖バグの原因）",
   );
   assert.ok(
-    signOutIdx >= 0 && signOutIdx < oauthIdx,
-    "signInWithXがsignInWithOAuthより前にsignOut()を呼んでいない",
-  );
-  // signOut()の呼び出しがisGuestSwitchのifブロック内（xSigningInガードの中）に
-  // あることを確認する（=常には呼ばれない）。
-  assert.ok(
-    isGuestSwitchIfIdx < signOutIdx,
-    "signOut()がisGuestSwitch分岐の外で呼ばれている（常にsignOutしてしまう可能性）",
+    /成功した場合、ゲスト参加状態は終了し/.test(fnBlock),
+    "確認ダイアログの文言が「成功した場合」に処理の実態を反映していない",
   );
   assert.ok(
     /xSigningIn: false,/.test(authStore) && /if \(get\(\)\.xSigningIn\) return/.test(fnBlock),
     "signInWithXの先頭にxSigningInによる連打防止ガードが無い",
   );
   console.log(
-    "PASS: useAuthStore.signInWithXはisGuestSwitch:trueの場合だけ確認ダイアログ+signOutを挟んでからOAuthを開始する",
+    "PASS: useAuthStore.signInWithXはisGuestSwitch:trueの場合だけ確認ダイアログを出し、signOutを挟まずOAuthを開始する",
   );
 }
 
