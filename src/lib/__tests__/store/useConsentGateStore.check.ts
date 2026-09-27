@@ -253,7 +253,10 @@ async function main() {
     null,
     "同意の記録に失敗したのに、端末の同意済みフラグが記録されてしまった（同意済み扱いになってしまう）",
   );
-  assert.equal(useConsentGateStore.getState().pendingModal, null, "ゲスト参加自体は成功しているのにモーダルが閉じていない");
+  // 同意の記録に成功するまで「開始成功」にしない：モーダルは開いたまま、日本語エラーを表示して再試行できる。
+  assert.ok(useConsentGateStore.getState().pendingModal, "同意記録に失敗したのにモーダルが閉じた（再試行できない）");
+  assert.match(useConsentGateStore.getState().errorReason ?? "", /同意の記録に失敗/);
+  useConsentGateStore.getState().cancel();
   rpcResponse = { error: null };
   console.log("PASS: ゲスト参加自体は成功しても、同意の記録(record_terms_consent)に失敗した場合は端末の同意済みフラグを記録しない（同意済み扱いにしない）");
 

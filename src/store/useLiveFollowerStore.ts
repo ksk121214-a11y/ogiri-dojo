@@ -681,6 +681,8 @@ export async function refreshTurnDerived(stillCurrent: () => boolean = () => tru
   return (await refreshTurnDerivedDetailed(stillCurrent)) === "ok";
 }
 
+let joinLiveFlight: { key: string; promise: Promise<void> } | null = null;
+
 export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
   live: null,
   myParticipant: null,
@@ -1180,7 +1182,15 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
     };
   },
 
-  joinLive: async (preferredRole, referralSource) => {
+  joinLive: (preferredRole, referralSource) => {
+    // 同じ利用者・同じライブ・同じ役割へのjoin_liveは同時に1本だけ（連打・Strict Mode・
+    // 自動参加と手動ボタンの競合は同じ処理へ合流する）。完了（成功・失敗・例外）で必ず解除する。
+    const flightLive = get().live;
+    const flightUserId = useAuthStore.getState().user?.id;
+    if (!flightLive || !flightUserId) return Promise.resolve();
+    const flightKey = `${flightUserId}|${flightLive.id}|${preferredRole}`;
+    if (joinLiveFlight && joinLiveFlight.key === flightKey) return joinLiveFlight.promise;
+    const runInner = async () => {
     const { live } = get();
     const userId = useAuthStore.getState().user?.id;
     if (!live || !userId) return;
@@ -1284,6 +1294,24 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       // 影響させない。
       void useProfileStore.getState().refreshProfile().catch(() => {});
     }
+    };
+    // 通信自体の例外（rpcがrejectする等）でも未処理エラーにせず、共通の日本語エラーにする。
+    // 呼び出し元のjoining等のロックは、この関数が例外を投げないため必ず解除される。
+    const run = async () => {
+      try {
+        await runInner();
+      } catch (e) {
+        console.warn("[live] join_liveが例外で失敗", e);
+        if (useAuthStore.getState().user?.id === flightUserId && get().live?.id === flightLive.id) {
+          set({ error: "参加できませんでした。時間をおいて再度お試しください。" });
+        }
+      }
+    };
+    const promise = run().finally(() => {
+      if (joinLiveFlight?.promise === promise) joinLiveFlight = null;
+    });
+    joinLiveFlight = { key: flightKey, promise };
+    return promise;
   },
 
   submitMyAnswer: async (body: string) => {

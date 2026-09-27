@@ -46,7 +46,7 @@ const snsLiveResultsStore = readFileSync(
 {
   const guardIdx = livePage.indexOf('if (screenGate === "not-authenticated") {');
   assert.ok(guardIdx >= 0, "/live に screenGate===\"not-authenticated\"の未ログイン分岐が見つからない");
-  const block = livePage.slice(guardIdx, guardIdx + 2000);
+  const block = livePage.slice(guardIdx, guardIdx + 4000);
 
   assert.ok(
     !/isTestLive/.test(block),
@@ -74,9 +74,9 @@ const snsLiveResultsStore = readFileSync(
 {
   const guardIdx = livePage.indexOf('if (screenGate === "not-authenticated") {');
   assert.ok(guardIdx >= 0, "/live に screenGate===\"not-authenticated\"の未ログイン分岐が見つからない");
-  const block = livePage.slice(guardIdx, guardIdx + 2000);
-  assert.ok(/disabled=\{guestSigningIn\}/.test(block), "ゲスト観客ボタンがguestSigningIn中disabledになっていない");
-  assert.ok(/signInAsGuest\(\)/.test(block), "ゲスト観客ボタンがuseAuthStore.signInAsGuest()を呼んでいない");
+  const block = livePage.slice(guardIdx, guardIdx + 4000);
+  assert.ok(/disabled=\{guestSigningIn \|\| intentState\.status === "starting"\}/.test(block), "ゲスト観客ボタンがguestSigningIn/意図開始中disabledになっていない");
+  assert.ok(/requestGuestStart: signInAsGuest/.test(block), "ゲスト観客ボタンがsignInAsGuest（同意ゲート経由）を呼んでいない");
   console.log("PASS: ゲスト観客ボタンの連打防止（disabled=guestSigningIn）とsignInAsGuest呼び出しを確認");
 }
 

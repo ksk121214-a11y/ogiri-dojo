@@ -63,6 +63,10 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../snsAccess.ts"
   "$SCRIPT_DIR/../uuid.ts"
   "$SCRIPT_DIR/../reportSubmit.ts"
+  "$SCRIPT_DIR/../audienceJoinIntent.ts"
+  "$SCRIPT_DIR/../audienceJoinDrive.ts"
+  "$SCRIPT_DIR/../audienceGuestButton.ts"
+  "$SCRIPT_DIR/../audienceJoinUiPlan.ts"
   "$SCRIPT_DIR/../authorLookupStatus.ts"
   "$SCRIPT_DIR/../calendarInitialMonth.ts"
 )
@@ -518,6 +522,24 @@ else
   echo "FAIL: useConsentGateStore.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
   FAILED=1
 fi
-rm -rf "$CONSENT_GATE_DIR"
+
+AUDIENCE_JOIN_DIR="$(mktemp -d)"
+AUDIENCE_JOIN_TSCONFIG="$SCRIPT_DIR/store/tsconfig.audienceJoin.json"
+AUDIENCE_JOIN_ENTRY="$AUDIENCE_JOIN_DIR/src/lib/__tests__/store/audienceJoinFlow.check.js"
+
+echo "--- audienceJoinFlow.check.ts ---"
+if npx tsc -p "$AUDIENCE_JOIN_TSCONFIG" --outDir "$AUDIENCE_JOIN_DIR" && [ -f "$AUDIENCE_JOIN_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$AUDIENCE_JOIN_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$AUDIENCE_JOIN_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: audienceJoinFlow.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$CONSENT_GATE_DIR" "$AUDIENCE_JOIN_DIR"
 
 exit $FAILED

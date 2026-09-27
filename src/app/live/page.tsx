@@ -11,7 +11,8 @@ import SoundToggle from "@/components/live-demo/SoundToggle";
 import AnnouncementBanner from "@/components/live-room/AnnouncementBanner";
 import AudienceAnsweringView from "@/components/live-room/AudienceAnsweringView";
 import AudienceHomeButton from "@/components/live-room/AudienceHomeButton";
-import AudienceJoinButton from "@/components/live-room/AudienceJoinButton";
+import AudienceEnteringScreen from "@/components/live-room/AudienceEnteringScreen";
+import AudienceJoinPanel from "@/components/live-room/AudienceJoinPanel";
 import AudienceJoinPrompt from "@/components/live-room/AudienceJoinPrompt";
 import FinalResultView from "@/components/live-room/FinalResultView";
 import GroupResultView from "@/components/live-room/GroupResultView";
@@ -29,9 +30,13 @@ import { createBgmSyncPlanner } from "@/lib/bgmSync";
 import { phaseRemainingSeconds } from "@/lib/liveRemaining";
 import { serverClock } from "@/lib/serverClockInstance";
 import { useServerClockState } from "@/lib/useServerNow";
+import { planAudienceJoinUi } from "@/lib/audienceJoinUiPlan";
+import { pressGuestAudienceButton, resolveLiveIdWithTimeout } from "@/lib/audienceGuestButton";
+import { driveAudienceJoin } from "@/lib/audienceJoinDrive";
 import { useAuthStore } from "@/store/useAuthStore";
+import { isAudienceIntentEntering, useAudienceJoinIntentStore } from "@/store/useAudienceJoinIntentStore";
 import { useConsentGateStore } from "@/store/useConsentGateStore";
-import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { fetchActiveLive, useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 import { useProfileStore } from "@/store/useProfileStore";
 
 const PHASE_LABEL: Record<string, string> = {
@@ -75,6 +80,7 @@ export default function LivePage() {
   const joinLive = useLiveFollowerStore((s) => s.joinLive);
 
   const [joining, setJoining] = useState(false);
+  const intentState = useAudienceJoinIntentStore((s) => s.state);
 
   // 2026-08-29:「お題発表・回答・審査で使う必須素材が、表示される瞬間に読み込み待ち
   // にならないようにする」対応。ページに滞在している間ずっと（フェーズがどう変わっても
@@ -199,6 +205,45 @@ export default function LivePage() {
     return () => document.removeEventListener("pointerdown", retry);
   }, []);
 
+  // 観客参加の意図（「ログインせず観客として見る」を押した）を、条件が揃った時に1回だけ実行する。
+  // /liveを開いただけ・Xログイン・キャンセル・認証失敗では意図が成立しないため実行されない。
+  // 状態遷移はsrc/lib/audienceJoinIntent.ts（joinと判定した時点でjoiningへ遷移＝1回だけ）。
+  const authUserId = authUser?.id ?? null;
+  const authIsAnonymous = authUser?.is_anonymous === true;
+  const liveId = live?.id ?? null;
+  const livePhase = live?.current_phase ?? null;
+  const hasParticipant = !!myParticipant;
+  const kicked = !!myParticipant?.kicked_at;
+  useEffect(() => {
+    const store = useAudienceJoinIntentStore.getState();
+    void driveAudienceJoin(
+      {
+        authUserId,
+        authIsAnonymous,
+        liveLoading,
+        live: liveId && livePhase ? { id: liveId, phase: livePhase } : null,
+        alreadyParticipant: hasParticipant,
+        kicked,
+      },
+      {
+        evaluate: store.evaluate,
+        finishJoin: store.finishJoin,
+        joinAudience: () => useLiveFollowerStore.getState().joinLive("audience"),
+      },
+    );
+  }, [authUserId, authIsAnonymous, liveLoading, liveId, livePhase, hasParticipant, kicked, intentState]);
+
+  // ページを離れたら古い意図を破棄する（あとから別の画面・別のライブで発火させない）。
+  useEffect(() => {
+    return () => {
+      useAudienceJoinIntentStore.getState().discard();
+      // 開いたままのゲスト用同意モーダルも閉じる（ページ離脱後に匿名認証を始めさせない）。
+      const gate = useConsentGateStore.getState();
+      if (gate.pendingModal?.kind === "guest") gate.cancel();
+    };
+  }, []);
+  const audienceEntering = isAudienceIntentEntering(intentState) && !myParticipant;
+
   const remaining = live ? phaseRemainingSeconds(live, clock) : { sec: null, syncing: false };
   const remainingSec = remaining.sec;
 
@@ -247,15 +292,26 @@ export default function LivePage() {
         </p>
         <button
           type="button"
-          disabled={guestSigningIn}
+          disabled={guestSigningIn || intentState.status === "starting"}
           onClick={async () => {
             setGuestSignInError(null);
-            const result = await signInAsGuest();
-            if (!result.ok) setGuestSignInError(result.reason ?? null);
+            // 明確な観客参加の操作：意図を開始し、同意/匿名認証が成功した時だけ観客登録へ進む。
+            const store = useAudienceJoinIntentStore.getState();
+            const pressed = await pressGuestAudienceButton({
+              begin: store.begin,
+              bindLive: store.bindLive,
+              // 通信が遅くても同意・認証を待たせない（3秒で諦めたら自動参加意図だけ成立させない）。
+              isCurrent: store.isCurrent,
+              resolveLiveId: () =>
+                resolveLiveIdWithTimeout(async () => (await fetchActiveLive())?.id ?? null, 3_000),
+              settle: store.settle,
+              requestGuestStart: signInAsGuest,
+            });
+            if (pressed.pressed && !pressed.result.ok) setGuestSignInError(pressed.result.reason ?? null);
           }}
           className="rounded-full border border-white/40 px-5 py-2.5 font-sans text-sm font-bold text-white/85 transition hover:bg-white/10 disabled:opacity-50"
         >
-          {guestSigningIn ? "準備中…" : "ログインせず観客として見る"}
+          {guestSigningIn || intentState.status === "starting" ? "準備中…" : "ログインせず観客として見る"}
         </button>
         {guestSignInError && (
           <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{guestSignInError}</p>
@@ -341,8 +397,12 @@ export default function LivePage() {
     // 没入画面に入ってからも観客はいつでも出入りできる方針を維持する。opening
     // フェーズはOpeningView自体に参加登録UIがあるため二重に出さない
     // （interludeはまだ参加受付が始まっていないので出さない）。
-    const showJoinButton =
-      !myParticipant && live.current_phase !== "interlude" && live.current_phase !== "opening";
+    const joinUi = planAudienceJoinUi({
+      phase: live.current_phase,
+      hasParticipant: !!myParticipant,
+      entering: audienceEntering,
+    });
+    const showJoinPanel = joinUi.panel;
     return (
       // 2026-08-31: position:fixed化 + JSでのvisualViewport高さ反映を試したが、
       // viewportのinteractive-widget=resizes-content指定と競合し、実機でキーボード
@@ -357,14 +417,16 @@ export default function LivePage() {
           {live.current_phase === "interlude" ? (
             <InterludeScreen key="interlude" />
           ) : live.current_phase === "opening" ? (
-            <OpeningView key="opening" />
+            joinUi.view === "entering" ? <AudienceEnteringScreen key="entering" /> : <OpeningView key="opening" />
           ) : live.current_phase === "topic_reveal" ? (
-            <TopicRevealView key="topic_reveal" />
+            joinUi.view === "join-prompt" ? <AudienceJoinPrompt key="join-prompt-reveal" /> : <TopicRevealView key="topic_reveal" />
           ) : live.current_phase === "answering" ? (
             isMyGroupOnStage ? (
               <StageAnsweringView key="stage" />
             ) : myParticipant ? (
               <AudienceAnsweringView key="audience" />
+            ) : joinUi.view === "entering" ? (
+              <AudienceEnteringScreen key="entering" />
             ) : (
               <AudienceJoinPrompt key="join-prompt" />
             )
@@ -379,6 +441,7 @@ export default function LivePage() {
               ) : (
                 <p className="font-sans text-sm text-white/70">結果を集計中…</p>
               )}
+              {showJoinPanel && <div className="mt-6 flex w-full justify-center"><AudienceJoinPanel /></div>}
             </ScreenShell>
           ) : live.current_phase === "final_result" ? (
             <ScreenShell key="final-result">
@@ -392,10 +455,10 @@ export default function LivePage() {
               ) : (
                 <p className="font-sans text-sm text-white/70">結果を集計中…</p>
               )}
+              {showJoinPanel && <div className="mt-6 flex w-full justify-center"><AudienceJoinPanel /></div>}
             </ScreenShell>
           ) : null}
         </AnimatePresence>
-        {showJoinButton && <AudienceJoinButton />}
         <LaughEffectOverlay />
         <SoundToggle />
       </main>
@@ -481,8 +544,11 @@ export default function LivePage() {
                 disabled={joining}
                 onClick={async () => {
                   setJoining(true);
-                  await joinLive("audience");
-                  setJoining(false);
+                  try {
+                    await joinLive("audience");
+                  } finally {
+                    setJoining(false);
+                  }
                 }}
                 className="rounded-full border border-white/40 px-5 py-3 font-sans text-sm font-bold text-white/85 disabled:opacity-50"
               >

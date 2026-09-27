@@ -1,5 +1,6 @@
 "use client";
 
+import { laughCountLabel } from "@/lib/audienceJoinUiPlan";
 import { motion } from "framer-motion";
 
 import type { GroupResultData } from "@/store/useLiveFollowerStore";
@@ -72,9 +73,9 @@ export default function GroupResultViewPreview2({
         })}
       </div>
 
-      {data.laughCount > 0 && (
+      {laughCountLabel(data.laughCount) && (
         <p className="mt-4 text-center font-sans text-xs font-bold text-[#ff3b5b]">
-          笑いエフェクト発生：{data.laughCount}件
+          {laughCountLabel(data.laughCount)}
         </p>
       )}
     </div>

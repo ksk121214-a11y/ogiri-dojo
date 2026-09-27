@@ -1,5 +1,6 @@
 "use client";
 
+import { laughCountLabel } from "@/lib/audienceJoinUiPlan";
 import { motion } from "framer-motion";
 import { useEffect, useRef } from "react";
 
@@ -81,9 +82,9 @@ export default function GroupResultScreen() {
           })}
         </div>
 
-        {laughAnswers.length > 0 && (
+        {laughCountLabel(laughAnswers.length) && (
           <p className="mt-4 text-center font-sans text-xs font-bold text-[#ff3b5b]">
-            笑いエフェクト発生：{laughAnswers.length}件
+            {laughCountLabel(laughAnswers.length)}
           </p>
         )}
       </div>

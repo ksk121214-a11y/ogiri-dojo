@@ -23,9 +23,14 @@ type PendingRpc = { resolve: (r: RpcResponse) => void };
 
 const pendingRpcs: PendingRpc[] = [];
 let rpcCallCount = 0;
+let rejectNextRpc = false;
 (supabase as unknown as { rpc: (name: string, args: unknown) => Promise<RpcResponse> }).rpc = (name) => {
   assert.equal(name, "join_live");
   rpcCallCount += 1;
+  if (rejectNextRpc) {
+    rejectNextRpc = false;
+    return Promise.reject(new TypeError("Failed to fetch"));
+  }
   return new Promise<RpcResponse>((resolve) => {
     pendingRpcs.push({ resolve });
   });
@@ -290,6 +295,39 @@ async function main() {
   assert.equal(useLiveFollowerStore.getState().error, null, "異常応答でerrorが変化した");
   assert.equal(spy8.count(), 0, "異常応答なのにrefreshProfileが呼ばれた");
   console.log("PASS: RPCが開始時と異なるuser_id/live_idのparticipantを返した場合、ローカル状態へ反映しない");
+
+  // ============================================================
+  // テスト9: join_liveの通信が例外（reject）になっても、joinLiveは例外を投げず日本語エラーを
+  //          設定し、ロックを残さない。連打は1本のRPCに合流し、失敗後の再試行で正常に参加でき、
+  //          二重登録（RPCの重複）にならない。
+  // ============================================================
+  setAuthUser("user-9", true);
+  useProfileStore.setState({ profile: makeProfile({ id: "user-9", isGuest: true }) });
+  useLiveFollowerStore.setState({ live: makeLive("live-9"), myParticipant: null, error: null });
+  const spy9 = installCountingRefreshProfileSpy();
+  const rpcBefore9 = rpcCallCount;
+
+  rejectNextRpc = true;
+  await Promise.all([
+    useLiveFollowerStore.getState().joinLive("audience"),
+    useLiveFollowerStore.getState().joinLive("audience"),
+    useLiveFollowerStore.getState().joinLive("audience"),
+  ]); // 例外を投げない（投げるとここでテストが失敗する）
+  assert.equal(rpcCallCount - rpcBefore9, 1, "連打がjoin_liveの1本のRPCに合流していない");
+  assert.equal(useLiveFollowerStore.getState().myParticipant, null);
+  assert.ok(
+    /参加できませんでした/.test(useLiveFollowerStore.getState().error ?? ""),
+    "通信例外で日本語の共通エラーが設定されていない",
+  );
+
+  const p9 = useLiveFollowerStore.getState().joinLive("audience");
+  resolvePendingRpc({ data: makeParticipant({ id: "participant-9", live_id: "live-9", user_id: "user-9", is_guest: true }), error: null });
+  await p9;
+  assert.equal(rpcCallCount - rpcBefore9, 2, "再試行が実行されない（ロックが残っている）");
+  assert.equal(useLiveFollowerStore.getState().myParticipant?.id, "participant-9", "再試行で参加できていない");
+  assert.equal(useLiveFollowerStore.getState().error, null, "成功後にエラーが残っている");
+  assert.equal(spy9.count(), 0, "ゲスト参加でrefreshProfileが呼ばれた");
+  console.log("PASS: join_liveの通信例外でも例外を投げず日本語エラー・ロック解除され、連打は1本に合流し、再試行で二重登録なく参加できる");
 
   assert.ok(rpcCallCount >= 8, "join_liveのRPCモック自体が呼ばれていない");
   assert.equal(pendingRpcs.length, 0, "解決し忘れたjoin_live呼び出しが残っている（テストの前提が崩れている）");

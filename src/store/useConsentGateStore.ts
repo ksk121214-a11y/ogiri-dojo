@@ -34,6 +34,7 @@ import { create } from "zustand";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legalInfo";
 import { beginGuestConsentWindow, recordTermsConsentOnce } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
+import { useAudienceJoinIntentStore } from "@/store/useAudienceJoinIntentStore";
 import { useAuthStore } from "@/store/useAuthStore";
 
 export const CONSENT_ACK_STORAGE_KEY = "dojo-consent-ack-version";
@@ -135,15 +136,48 @@ export function clearPendingConsentFlag(): void {
   }
 }
 
+// ゲスト開始の結果通知（観客参加の意図の開始・完了・キャンセルを呼び出し元へ返す）。
+export type GuestStartSettled =
+  | { status: "started"; userId: string | null }
+  | { status: "cancelled" }
+  | { status: "failed" };
+export interface GuestStartOptions {
+  onSettled?: (result: GuestStartSettled) => void;
+  // この開始要求が現在も有効か（ページ離脱・Xログイン等で無効になっていれば、以後の状態更新をしない）。
+  isCurrent?: () => boolean;
+}
+
 type PendingAction =
   | { kind: "x-login"; options?: { isGuestSwitch?: boolean } }
-  | { kind: "guest" };
+  // onSettledは1回だけ呼ぶ（settledで二重通知を防ぐ）。
+  | {
+      kind: "guest";
+      onSettled?: (result: GuestStartSettled) => void;
+      isCurrent?: () => boolean;
+      settled?: boolean;
+    };
+
+const GUEST_BUSY_MESSAGE = "ゲスト参加の処理中です。完了してからもう一度お試しください。";
+const X_BUSY_MESSAGE = "Xログインの処理中です。完了してからもう一度お試しください。";
+
+function guestPendingFrom(options: GuestStartOptions | undefined): PendingAction {
+  const p: PendingAction = { kind: "guest" };
+  if (options?.onSettled) p.onSettled = options.onSettled;
+  if (options?.isCurrent) p.isCurrent = options.isCurrent;
+  return p;
+}
+
+function settleGuestPending(p: PendingAction | null, result: GuestStartSettled): void {
+  if (!p || p.kind !== "guest" || p.settled) return;
+  p.settled = true;
+  p.onSettled?.(result);
+}
 
 interface ConsentGateState {
   pendingModal: PendingAction | null;
   errorReason: string | null;
   requestXLogin: (options?: { isGuestSwitch?: boolean }) => Promise<{ ok: true } | { ok: false; reason?: string }>;
-  requestGuestStart: () => Promise<{ ok: true } | { ok: false; reason?: string }>;
+  requestGuestStart: (options?: GuestStartOptions) => Promise<{ ok: true } | { ok: false; reason?: string }>;
   confirm: () => Promise<void>;
   cancel: () => void;
 }
@@ -159,7 +193,34 @@ async function runXLogin(options?: { isGuestSwitch?: boolean }): Promise<AuthAct
 }
 
 type GuestStartResult = { ok: true; userId: string | null } | { ok: false; reason?: string };
-let guestConsentFlight: Promise<{ ok: true } | { ok: false; reason: string }> | null = null;
+const GUEST_FLOW_FAILED_MESSAGE = "処理に失敗しました。時間をおいて再度お試しください。";
+const CONSENT_RECORD_FAILED_MESSAGE =
+  "利用規約への同意の記録に失敗しました。通信状況を確認して、もう一度お試しください。";
+
+// stage：auth＝匿名認証まで進めなかった／consent＝認証は済んだが同意の記録に失敗（再試行は同じ
+// 認証済みユーザーで同意記録だけを行う）。
+type GuestFlightOutcome =
+  | { ok: true; userId: string }
+  | { ok: false; stage: "auth" | "consent"; reason: string };
+let guestFlight: Promise<GuestFlightOutcome> | null = null;
+// このフローで匿名認証に成功したユーザー。同意記録だけ失敗した後の再試行で、新しい匿名
+// アカウントを作らず同じユーザーを使うために保持する（成功・キャンセルで破棄）。
+let guestAuthAttempt: { userId: string | null } | null = null;
+
+// ゲスト開始（匿名認証＋同意記録）全体をsingle-flight化する。同時の呼び出しは同じ処理へ合流し、
+// 匿名認証も記録RPCも1回だけ実行する。窓（beginGuestConsentWindow）は全期間を覆い、必ず解除される。
+function runGuestFlight(): Promise<GuestFlightOutcome> {
+  if (!guestFlight) {
+    const endGuestWindow = beginGuestConsentWindow();
+    guestFlight = guestStartAndRecord()
+      .catch((): GuestFlightOutcome => ({ ok: false, stage: "auth", reason: GUEST_FLOW_FAILED_MESSAGE }))
+      .finally(() => {
+        guestFlight = null;
+        endGuestWindow();
+      });
+  }
+  return guestFlight;
+}
 
 async function runGuestStart(): Promise<GuestStartResult> {
   const result = await useAuthStore.getState().signInAsGuest();
@@ -193,6 +254,13 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
   errorReason: null,
 
   requestXLogin: async (options) => {
+    // ゲスト観客の意図（ライブID取得待ちを含む）を先に無効化する。遅れて完了する古いゲスト処理は
+    // tokenが無効なので、以後ゲスト開始・同意モーダル・認証を行わない。
+    useAudienceJoinIntentStore.getState().discard();
+    // 保留中のゲスト同意モーダルは、Xログインの同意に置き換わる時点で破棄する。
+    settleGuestPending(get().pendingModal, { status: "cancelled" });
+    // 匿名認証の実行中にXログインを並行させない（両方がセッションを書き換えるのを防ぐ）。
+    if (guestFlight || useAuthStore.getState().guestSigningIn) return { ok: false, reason: GUEST_BUSY_MESSAGE };
     if (hasAckedCurrentVersion()) {
       return runXLogin(options);
     }
@@ -200,11 +268,40 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
     return { ok: false };
   },
 
-  requestGuestStart: async () => {
-    if (hasAckedCurrentVersion()) {
-      return runGuestStart();
+  requestGuestStart: async (options) => {
+    // 無効な（破棄済みの）要求は何もしない：モーダルを開かない・認証しない。
+    if (options?.isCurrent && !options.isCurrent()) return { ok: false };
+    // Xログイン処理中に匿名認証を並行させない。
+    if (useAuthStore.getState().xSigningIn) {
+      options?.onSettled?.({ status: "failed" });
+      return { ok: false, reason: X_BUSY_MESSAGE };
     }
-    set({ pendingModal: { kind: "guest" }, errorReason: null });
+    if (hasAckedCurrentVersion()) {
+      // 同意済みの端末でも、この匿名ユーザーの同意記録が成功するまで「開始成功」にしない。
+      let outcome: GuestFlightOutcome;
+      try {
+        outcome = await runGuestFlight();
+      } catch {
+        outcome = { ok: false, stage: "auth", reason: GUEST_FLOW_FAILED_MESSAGE };
+      }
+      // 完了までにページ離脱・Xログイン等で無効になっていたら、通知もモーダル操作もしない。
+      if (options?.isCurrent && !options.isCurrent()) return { ok: false };
+      if (outcome.ok) {
+        options?.onSettled?.({ status: "started", userId: outcome.userId });
+        return { ok: true };
+      }
+      if (outcome.stage === "consent") {
+        // 認証は済んでいるが同意の記録に失敗：同意画面を開いて再試行できるようにする
+        // （意図は保留のまま。閉じれば破棄）。新しい匿名アカウントは作らない。
+        settleGuestPending(get().pendingModal, { status: "cancelled" });
+        set({ pendingModal: guestPendingFrom(options), errorReason: outcome.reason });
+        return { ok: false, reason: outcome.reason };
+      }
+      options?.onSettled?.({ status: "failed" });
+      return { ok: false, reason: outcome.reason };
+    }
+    settleGuestPending(get().pendingModal, { status: "cancelled" });
+    set({ pendingModal: guestPendingFrom(options), errorReason: null });
     return { ok: false };
   },
 
@@ -229,6 +326,10 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
     set({ errorReason: null });
     try {
       if (pending.kind === "x-login") {
+        if (guestFlight || useAuthStore.getState().guestSigningIn) {
+          set({ errorReason: GUEST_BUSY_MESSAGE });
+          return;
+        }
         const result = await runXLogin(pending.options);
         if (!result.ok) {
           set({ errorReason: result.reason ?? "処理に失敗しました。時間をおいて再度お試しください。" });
@@ -240,67 +341,100 @@ export const useConsentGateStore = create<ConsentGateState>()((set, get) => ({
         return;
       }
 
-      // ゲスト同意処理全体をsingle-flight化する：同時のconfirm（モーダルの再マウント・二重実行・
-      // ストア関数の直接呼び出し）は同じ処理へ合流し、匿名認証も記録RPCも1回だけ実行する。
-      // UIのsubmittingには依存しない。窓（beginGuestConsentWindow）は処理の全期間を覆い、
-      // 成功・失敗・例外のいずれでも必ず解除される。
-      if (!guestConsentFlight) {
-        const endGuestWindow = beginGuestConsentWindow();
-        guestConsentFlight = guestStartAndRecord()
-          .catch(
-            (): { ok: false; reason: string } => ({
-              ok: false,
-              reason: "処理に失敗しました。時間をおいて再度お試しください。",
-            }),
-          )
-          .finally(() => {
-            guestConsentFlight = null;
-            endGuestWindow();
-          });
+      // ゲスト同意処理全体はsingle-flight（runGuestFlight）。同時のconfirmは同じ処理へ合流し、
+      // 匿名認証も記録RPCも1回だけ実行する。
+      // 無効になった（ページ離脱・Xログイン等で破棄済みの）ゲスト要求は実行せず閉じる。
+      if (pending.isCurrent && !pending.isCurrent()) {
+        if (get().pendingModal === pending) set({ pendingModal: null, errorReason: null });
+        return;
       }
-      const outcome = await guestConsentFlight;
+      if (useAuthStore.getState().xSigningIn) {
+        set({ errorReason: X_BUSY_MESSAGE });
+        return;
+      }
+      const outcome = await runGuestFlight();
+      // 待機中に別のモーダル（Xログイン用等）へ置き換わっていたら、古い処理は何も更新しない。
+      if (get().pendingModal !== pending) return;
       if (!outcome.ok) {
+        // モーダルは開いたまま（再試行できる）。意図は保留のまま、キャンセルされた時に破棄される。
         set({ errorReason: outcome.reason });
         return;
       }
+      if (!pending.isCurrent || pending.isCurrent()) {
+        settleGuestPending(pending, { status: "started", userId: outcome.userId });
+      }
       set({ pendingModal: null, errorReason: null });
     } catch {
-      set({ errorReason: "処理に失敗しました。時間をおいて再度お試しください。" });
+      if (get().pendingModal === pending) set({ errorReason: "処理に失敗しました。時間をおいて再度お試しください。" });
     }
   },
 
-  cancel: () => set({ pendingModal: null, errorReason: null }),
+  cancel: () => {
+    settleGuestPending(get().pendingModal, { status: "cancelled" });
+    guestAuthAttempt = null;
+    set({ pendingModal: null, errorReason: null });
+  },
 }));
 
-// ゲスト参加を開始し、確定したuserIdで同意を記録する。ゲスト参加自体が失敗した場合だけ
-// {ok:false}。同意の記録に失敗しても参加は取り消せないため{ok:true}を返すが、その場合は
-// markDeviceConsentAckを呼ばない（同意済み扱いにしない）。この直後にConsentRequiredGateが
-// 未同意状態を検知し、あらためて同意画面を表示する。
-async function guestStartAndRecord(): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const result = await runGuestStart();
-  if (!result.ok) {
-    return { ok: false, reason: result.reason ?? "処理に失敗しました。時間をおいて再度お試しください。" };
+// ゲスト参加を開始し、確定したuserIdで同意を記録する。DBへの記録（record_terms_consent）が
+// 正常終了した場合だけ成功（{ok:true}）を返す。記録に失敗した場合・userIdを確定できない場合は
+// 成功扱いにせず（観客参加の意図も成立させない）、端末の「同意済み」フラグも付けない。
+// 匿名認証済みの状態で記録だけ失敗した場合の再試行では、新しい匿名アカウントを作らず、同じ
+// 認証済みユーザーで記録だけを再試行する。
+async function guestStartAndRecord(): Promise<GuestFlightOutcome> {
+  let startedUserId: string | null = null;
+
+  if (guestAuthAttempt) {
+    const existingId = useAuthStore.getState().user?.id ?? (await waitForAuthUserId(3_000));
+    const existing = useAuthStore.getState().user;
+    if (existingId && existing?.is_anonymous === true && (guestAuthAttempt.userId === null || guestAuthAttempt.userId === existingId)) {
+      startedUserId = existingId;
+    } else {
+      guestAuthAttempt = null;
+    }
   }
-  // 記録に使うuserIdは、signInAnonymouslyの結果から確定したものを使う（認証ストアへの
-  // 反映が遅れていても、userId=nullのままRPCを呼んでゲート側の記録と二重にならない）。
-  // 確定できなければRPCは呼ばず、記録はConsentRequiredGateの同意画面に任せる。
-  const startedUserId = result.userId ?? (await waitForAuthUserId(3_000));
-  if (!startedUserId) return { ok: true };
-  const { error } = await recordTermsConsentOnce({
-    userId: startedUserId,
-    termsVersion: TERMS_VERSION,
-    privacyVersion: PRIVACY_VERSION,
-    rpc: async () => {
-      const { error: rpcError } = await supabase.rpc("record_terms_consent");
-      return { error: rpcError };
-    },
-  });
-  // 完了までに別の利用者へ切り替わっていた場合、前の利用者の結果を反映しない
-  // （認証ストアへの反映が未了のnullは「まだ切り替わっていない」として扱う）。
+
+  if (!startedUserId) {
+    const result = await runGuestStart();
+    if (!result.ok) {
+      return { ok: false, stage: "auth", reason: result.reason ?? GUEST_FLOW_FAILED_MESSAGE };
+    }
+    guestAuthAttempt = { userId: result.userId ?? null };
+    // 記録に使うuserIdは、signInAnonymouslyの結果から確定したものを使う（認証ストアへの反映が
+    // 遅れていても、userId=nullのままRPCを呼ばない）。
+    startedUserId = result.userId ?? (await waitForAuthUserId(3_000));
+    if (startedUserId) guestAuthAttempt = { userId: startedUserId };
+  }
+  if (!startedUserId) {
+    return { ok: false, stage: "consent", reason: CONSENT_RECORD_FAILED_MESSAGE };
+  }
+
+  let recordError: unknown;
+  try {
+    const { error } = await recordTermsConsentOnce({
+      userId: startedUserId,
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      rpc: async () => {
+        const { error: rpcError } = await supabase.rpc("record_terms_consent");
+        return { error: rpcError };
+      },
+    });
+    recordError = error;
+  } catch (e) {
+    recordError = e ?? new Error("record_terms_consent failed");
+  }
+  if (recordError) {
+    return { ok: false, stage: "consent", reason: CONSENT_RECORD_FAILED_MESSAGE };
+  }
+  // 完了までに別の利用者へ切り替わっていた場合、前の利用者の結果を反映しない。
   const currentUserId = useAuthStore.getState().user?.id ?? null;
-  if ((currentUserId === null || currentUserId === startedUserId) && !error) {
-    clearPendingConsentFlag();
-    markDeviceConsentAck();
+  if (currentUserId !== null && currentUserId !== startedUserId) {
+    guestAuthAttempt = null;
+    return { ok: false, stage: "auth", reason: GUEST_FLOW_FAILED_MESSAGE };
   }
-  return { ok: true };
+  guestAuthAttempt = null;
+  clearPendingConsentFlag();
+  markDeviceConsentAck();
+  return { ok: true, userId: startedUserId };
 }

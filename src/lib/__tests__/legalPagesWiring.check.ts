@@ -774,13 +774,13 @@ console.log("PASS: 同意モーダル・既存ユーザー向け同意画面の�
   const confirmBodyMatch = consentGateStore.match(/confirm:\s*async \(\)\s*=>\s*\{([\s\S]*?)\n  \},/);
   assert.ok(confirmBodyMatch, "useConsentGateStoreのconfirm関数本体が見つからない");
   const confirmBody = confirmBodyMatch![1];
-  const guestBranchStart = confirmBody.indexOf("beginGuestConsentWindow()");
+  const guestBranchStart = confirmBody.indexOf("runGuestFlight()");
   assert.ok(guestBranchStart >= 0, "useConsentGateStore.confirmにゲスト枝（ゲスト同意の窓）が見当たらない");
   const xLoginPart = confirmBody.slice(0, guestBranchStart);
   // ゲスト枝の実処理は guestStartAndRecord（同ファイル内の関数）に切り出している。
   const guestFnMatch = consentGateStore.match(/async function guestStartAndRecord\(\)[\s\S]*$/);
   assert.ok(guestFnMatch, "guestStartAndRecord関数が見つからない");
-  assert.ok(/guestConsentFlight = guestStartAndRecord\(\)/.test(confirmBody) && confirmBody.includes("await guestConsentFlight"), "confirmのゲスト枝が、single-flight化したguestStartAndRecordを経由していない（多重実行で窓・認証が重複する）");
+  assert.ok(/guestFlight = guestStartAndRecord\(\)/.test(consentGateStore) && /beginGuestConsentWindow\(\)/.test(consentGateStore) && confirmBody.includes("await runGuestFlight()"), "confirmのゲスト枝が、single-flight化したguestStartAndRecordを経由していない（多重実行で窓・認証が重複する）");
   const guestPart = guestFnMatch![0];
 
   const xRunIdx = xLoginPart.search(/await runXLogin/);
@@ -796,8 +796,8 @@ console.log("PASS: 同意モーダル・既存ユーザー向け同意画面の�
   const gRunIdx = guestPart.search(/await runGuestStart/);
   const gCheckIdx = guestPart.indexOf("if (!result.ok)");
   const gRpcIdx = guestPart.indexOf('supabase.rpc("record_terms_consent")');
-  assert.ok(guestPart.includes("result.userId") && guestPart.includes("if (!startedUserId) return"), "ゲスト枝が、確定したuserIdが無いままrecord_terms_consentを呼ぶ余地がある");
-  const gErrorCheckIdx = guestPart.indexOf("&& !error)");
+  assert.ok(guestPart.includes("result.userId") && guestPart.includes("if (!startedUserId) {"), "ゲスト枝が、確定したuserIdが無いままrecord_terms_consentを呼ぶ余地がある");
+  const gErrorCheckIdx = guestPart.indexOf("if (recordError)");
   const gMarkIdx = guestPart.indexOf("markDeviceConsentAck()");
   assert.ok(gRunIdx >= 0, "useConsentGateStore.confirmのゲスト枝が実処理(runGuestStart)を呼んでいない");
   assert.ok(gCheckIdx > gRunIdx, "useConsentGateStore.confirmのゲスト枝がsignInAsGuestの戻り値を確認していない");

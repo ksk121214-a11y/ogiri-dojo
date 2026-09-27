@@ -92,8 +92,11 @@ export default function OpeningView() {
     if (!confirmed) return;
     if (role === "player") playSfx("joinAsPlayer");
     setJoining(true);
-    await joinLive(role, referralSource || null);
-    setJoining(false);
+    try {
+      await joinLive(role, referralSource || null);
+    } finally {
+      setJoining(false);
+    }
   };
 
   return (
