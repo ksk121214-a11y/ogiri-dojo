@@ -39,6 +39,10 @@ type ProfileAuthor =
       avatarIcon: string;
       avatarColor: string;
       equippedLimitedIconSlug: string | null;
+      // 2026-09-28（寄合帳の他ユーザープロフィールへの称号表示）：装備中かつ
+      // 運営が公開中(is_active=true)の称号のtitles.display_name。未装備・
+      // 非公開の場合はnull（sns_author_names、supabase/migrations/0082参照）。
+      equippedTitleName: string | null;
       rankLabel: string;
       bio: string;
     };
@@ -104,6 +108,7 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
           avatarIcon: realAuthor.avatarIcon,
           avatarColor: realAuthor.avatarColor,
           equippedLimitedIconSlug: realAuthor.equippedLimitedIconSlug,
+          equippedTitleName: realAuthor.equippedTitleName,
           rankLabel: getRankByMeter(realAuthor.masteryMeter).label,
           bio: realAuthor.bio,
         }
@@ -153,11 +158,19 @@ export default function SnsAuthorProfile({ authorId }: { authorId: string }) {
             />
           </span>
         )}
-        <div>
+        <div className="w-full min-w-0">
           <p className="font-sans text-2xl font-black text-[var(--ink)]">{author.displayName}</p>
-          <p className="mt-1 font-sans text-xs font-bold text-[var(--ink)]">
-            段位：{author.rankLabel}
-          </p>
+          {/* 2026-09-28（レビュー対応）：段位と称号は320px幅でも折り返らず常に
+              同じ行に表示する（flex-nowrap）。段位ラベルは省略しない(shrink-0)。
+              称号名は運営が変更可能なため、通常はそのまま全文表示されるが、
+              極端に長い表示名に変更された場合だけレイアウト保護のため
+              min-w-0+truncateで省略してよい。装飾の鉤括弧・角括弧は付けない。 */}
+          <div className="mt-1 flex w-full flex-nowrap items-center justify-center gap-1.5 font-sans text-xs font-bold text-[var(--ink)]">
+            <span className="shrink-0 whitespace-nowrap">段位：{author.rankLabel}</span>
+            {author.kind === "real" && author.equippedTitleName && (
+              <span className="min-w-0 truncate">{author.equippedTitleName}</span>
+            )}
+          </div>
           {author.kind === "real" && author.bio && (
             <p className="mt-1 font-sans text-xs text-[var(--ink)]/70">{author.bio}</p>
           )}

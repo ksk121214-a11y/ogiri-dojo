@@ -77,9 +77,23 @@ export default function Home() {
           <br />
           利用者本人のXアカウントからの自動投稿・DM送信、タイムラインの取得・保存は行いません。
           <br />
-          なお、投稿内容・演者名・得点・順位等を運営が公式Xで紹介する場合があります。
+          なお、投稿内容・演者名・得点・順位等を運営が公式SNSや動画配信サービスで紹介する場合があります。
         </p>
       )}
+
+      {/* 公式Xへの導線。単純な外部リンクのみで、Xログイン・シェア・切り抜き掲載等の
+          既存処理には一切触れない。未ログイン・ゲスト・Xログイン会員問わず常時表示する。 */}
+      <p className="text-center font-sans text-[11px] text-[var(--muted-on-dark)]">
+        <a
+          href="https://x.com/bakusho_stadium"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-current/40 underline-offset-2"
+          aria-label="爆笑スタジアム公式X（@bakusho_stadium）を新しいタブで開く"
+        >
+          公式X：@bakusho_stadium
+        </a>
+      </p>
 
       {/* 画面下部の利用規約・プライバシーポリシー導線。ログイン状態によらず常に表示する
           （既存のAccountSummary・ログイン導線とは独立しており、ログイン/ゲスト参加の

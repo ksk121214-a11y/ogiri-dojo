@@ -122,5 +122,5 @@ assert.ok(/error && calendarMarks\.length === 0/.test(sched) && /reload/.test(sc
 
 // 7) 案内文の「（利用規約第8条）」は画面の案内から外れている（規約本文は別）
 assert.ok(!read("src", "app", "(main)", "page.tsx").includes("（利用規約第8条）"), "ホームの案内に条番号が残っている");
-assert.ok(read("src", "app", "(main)", "page.tsx").includes("運営が公式Xで紹介する場合があります。"), "案内文本体がない");
+assert.ok(read("src", "app", "(main)", "page.tsx").includes("運営が公式SNSや動画配信サービスで紹介する場合があります。"), "案内文本体がない");
 console.log("PASS: 寄合帳の権限分離・通報ボタン・演者取得状態・不正ID・開発画面404・ライブ予定");

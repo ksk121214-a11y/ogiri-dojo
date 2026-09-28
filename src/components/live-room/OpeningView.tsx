@@ -10,7 +10,6 @@ import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { isGuestUser } from "@/lib/guestStatus";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
 import { splitParticipantsByPreferredRole } from "@/lib/participantRoleSplit";
-import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
@@ -258,8 +257,10 @@ export default function OpeningView() {
                               isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
                             }`}
                           >
-                            <span className="min-w-0 truncate font-sans text-white/90">
-                              {truncateLiveDisplayName(participantNames[p.id] ?? "（名前未設定）")}
+                            {/* 2026-09-28（レビュー対応）：参加登録受付画面は横幅に
+                                余裕があるため5文字で切らず全文表示する。 */}
+                            <span className="min-w-0 break-words font-sans text-white/90">
+                              {participantNames[p.id] ?? "（名前未設定）"}
                             </span>
                             <span className="shrink-0 font-sans text-xs text-white/60">
                               {ROLE_LABEL[p.preferred_role]}

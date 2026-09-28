@@ -6,7 +6,6 @@ import { useEffect, useRef } from "react";
 
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
-import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
 import { playSfx } from "@/lib/sfx";
 import type { GroupResultData, ParticipantAvatarInfo } from "@/store/useLiveFollowerStore";
 
@@ -70,7 +69,10 @@ export default function GroupResultView({
                     bare
                   />
                 )}
-                <span className="truncate">{truncateLiveDisplayName(entry.name)}</span>
+                {/* 2026-09-28（レビュー対応）：組結果画面は横幅に余裕があるため
+                    5文字で切らず全文表示する。極端に長い名前でも横スクロールを
+                    起こさないよう、切り捨てではなく自然な折り返しを許可する。 */}
+                <span className="min-w-0 break-words">{entry.name}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="font-sans font-bold tabular-nums text-[#ff8f00]">

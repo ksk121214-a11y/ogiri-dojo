@@ -17,12 +17,16 @@ export const ENACTED_ON = "2026年9月25日";
 // 2026-09-28（レビュー対応）：利用規約とプライバシーポリシーは改定のタイミングが
 // 別々になり得るため、共通の1つの値ではなく文書ごとに分ける（一方だけを改定した
 // 時に、改定していない方まで改定表示になってしまうことを防ぐ）。
-export const TERMS_LAST_REVISED_ON: string | null = null;
-// 2026-09-28：プロフィール公開情報の説明に「選択中の称号」「限定アイコン」を
-// 追加したため改定（本サイトは既に本番公開済みでterms_consentsに実際の同意記録が
-// あるため、改定なし扱いにはしない。PRIVACY_VERSIONも同時に更新しConsentRequiredGate
-// が既存利用者へ再同意を促す、supabase/migrations/0081のcurrent_legal_document_versions
-// 参照）。
+// 2026-09-28：第8条（投稿内容の権利及び公式SNS等への掲載）を、公式Xアカウントのみ
+// から、公式SNS・動画配信サービスへの短尺動画・切り抜き動画掲載まで広げる実質的な
+// 改定を行ったため、利用規約もこの回から改定日を持つ（本サイトは既に本番公開済みで
+// terms_consentsに実際の同意記録があるため、改定なし扱いにはしない。TERMS_VERSIONも
+// 同時に更新しConsentRequiredGateが既存利用者・既存ゲストへ再同意を促す、
+// supabase/migrations/0083のcurrent_legal_document_versions参照）。
+export const TERMS_LAST_REVISED_ON: string | null = "2026年9月28日";
+// 2026-09-28（プロフィール公開情報の説明改定に続く2回目の改定）：公式SNS等への
+// 掲載対象・目的・利用態様の拡張に伴い、プライバシーポリシーも同日付であわせて
+// 改定する（利用規約と同じ改定なので同じ日付を使う）。
 export const PRIVACY_LAST_REVISED_ON: string | null = "2026年9月28日";
 
 // mailtoリンクに件名を付ける場合、日本語件名は必ずencodeURIComponentで
@@ -44,8 +48,12 @@ export const ACCOUNT_DELETION_MAIL_SUBJECT = "爆笑スタジアム アカウン
 // 利用規約・プライバシーポリシーの同意バージョン。内容を実質的に変更した場合は
 // このバージョン文字列を更新する（terms_consentsテーブルへ記録し、既存ユーザーの
 // 再同意が必要かどうかの判定に使う。src/store/useConsentGateStore.ts参照）。
-export const TERMS_VERSION = "2026-09-25-v1";
-// 2026-09-28：プロフィール公開情報の説明（称号・限定アイコンの追加）の改定に伴い
-// 更新。supabase/migrations/0081のcurrent_legal_document_versions()と必ず同じ値に
-// する（src/lib/__tests__/legalPagesWiring.check.tsが一致を検査する）。
-export const PRIVACY_VERSION = "2026-09-28-v2";
+// 2026-09-28：第8条（公式SNS等への掲載）を公式Xアカウントのみから公式SNS・動画
+// 配信サービスへの短尺動画掲載まで広げる実質改定に伴い更新。
+// supabase/migrations/0083のcurrent_legal_document_versions()と必ず同じ値にする
+// （src/lib/__tests__/legalPagesWiring.check.tsが一致を検査する）。
+export const TERMS_VERSION = "2026-09-28-v2";
+// 2026-09-28：プロフィール公開情報の説明改定（v2）に続き、公式SNS等への掲載対象・
+// 目的・利用態様の拡張に伴いさらに更新。
+// supabase/migrations/0083のcurrent_legal_document_versions()と必ず同じ値にする。
+export const PRIVACY_VERSION = "2026-09-28-v3";

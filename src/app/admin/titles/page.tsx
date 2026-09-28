@@ -184,7 +184,13 @@ export default function AdminTitlesPage() {
         {titles === null ? (
           <p className="text-sm text-gray-500">読み込み中…</p>
         ) : (
-          <ul className="flex flex-col gap-3">
+          <>
+            {/* 2026-09-28（レビュー対応）：各行の数値入力欄が「並び順」だと分かる
+                ラベルが無く、ポイントや条件の数字に見えるとの指摘対応。 */}
+            <p className="mb-2 text-xs text-gray-500">
+              「並び順」は数字が小さい称号ほど上に表示されます（ポイントや条件の数値ではありません）。
+            </p>
+            <ul className="flex flex-col gap-3">
             {titles.map((t) => {
               const draft = drafts[t.slug] ?? {
                 displayName: t.display_name,
@@ -223,14 +229,21 @@ export default function AdminTitlesPage() {
                       placeholder="説明文（省略可）"
                       className="rounded border border-gray-300 px-2 py-1 text-sm"
                     />
-                    <input
-                      type="number"
-                      value={draft.sortOrder}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({ ...prev, [t.slug]: { ...draft, sortOrder: Number(e.target.value) } }))
-                      }
-                      className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
-                    />
+                    <div className="flex flex-col gap-0.5">
+                      <label htmlFor={`sort-order-${t.slug}`} className="text-[10px] font-bold text-gray-500">
+                        並び順
+                      </label>
+                      <input
+                        id={`sort-order-${t.slug}`}
+                        type="number"
+                        value={draft.sortOrder}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({ ...prev, [t.slug]: { ...draft, sortOrder: Number(e.target.value) } }))
+                        }
+                        aria-label="並び順（数字が小さい称号ほど上に表示されます）"
+                        className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                    </div>
                     <label className="flex items-center gap-1.5 text-xs text-gray-700">
                       <input
                         type="checkbox"
@@ -249,7 +262,8 @@ export default function AdminTitlesPage() {
                 </li>
               );
             })}
-          </ul>
+            </ul>
+          </>
         )}
       </AdminCard>
 

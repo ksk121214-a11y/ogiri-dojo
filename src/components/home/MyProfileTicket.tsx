@@ -136,37 +136,53 @@ export default function MyProfileTicket({
           <div className={`${styles.scallopCapBottom} ${styles.scallopDeep}`} aria-hidden />
 
           <div className="flex flex-col gap-3 px-5 py-5">
-            <div className="flex items-start gap-3">
-              <span className="flex shrink-0 items-center justify-center">
-                <MyIconAvatar size={48} bare />
-              </span>
-              <div className="flex min-w-0 flex-col gap-1.5 pt-1">
-                {/* 2026-08-28: 「名前を10文字にしても...で切れず見れるように」の要望で、
-                    長い名前ほど自動的にフォントサイズを一段階ずつ落として省略されないようにする。 */}
-                <p
-                  className={`truncate font-sans font-black text-[var(--ink)] ${nameSizeClass(displayName)}`}
-                >
-                  {displayName}
-                </p>
-                {/* 2026-09-13（0070ゲスト参加レビュー対応）：段位はゲスト・未ログイン・
-                    profile取得中には一切表示しない（確定会員isMemberの場合のみ）。 */}
-                {isMember && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`${styles.surfaceAccent} w-fit rounded-full px-3 py-1 font-sans text-xs font-bold text-[var(--paper)]`}
-                    >
-                      段位：{rank.label}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setTitleModalOpen(true)}
-                      className={`${styles.pressable} w-fit rounded-full border border-[var(--ink)]/30 px-3 py-1 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5`}
-                    >
-                      {equippedTitleName ? `［${equippedTitleName}］` : "称号を選ぶ"}
-                    </button>
-                  </div>
-                )}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-start gap-3">
+                <span className="flex shrink-0 items-center justify-center">
+                  <MyIconAvatar size={48} bare />
+                </span>
+                <div className="min-w-0 flex-1 pt-1">
+                  {/* 2026-08-28: 「名前を10文字にしても...で切れず見れるように」の要望で、
+                      長い名前ほど自動的にフォントサイズを一段階ずつ落として省略されないようにする。 */}
+                  <p
+                    className={`truncate font-sans font-black text-[var(--ink)] ${nameSizeClass(displayName)}`}
+                  >
+                    {displayName}
+                  </p>
+                </div>
               </div>
+              {/* 2026-09-13（0070ゲスト参加レビュー対応）：段位はゲスト・未ログイン・
+                  profile取得中には一切表示しない（確定会員isMemberの場合のみ）。
+                  2026-09-28（再レビュー対応）：このカードは寄合券の半券（固定92px列）ぶん
+                  横幅が狭く、名前の隣（アイコン分オフセットした列）に置くと段位バッジ
+                  だけで幅を使い切ってしまい、既定の称号ですら全文表示できなかった。
+                  アイコンの下も含めた本券側の横幅いっぱいを使う独立した行に変更し、
+                  スマホ幅（sm未満）に限りアイコン分の字下げも外す（sm以上ではpl-[60px]で
+                  従来どおりアイコンの右に揃えた見た目を維持する）。称号を装備している間は
+                  スマホ幅でのみ「段位：」ラベルを外し値だけ（例:「見習い」）にすることで
+                  さらに幅を稼ぐ（PC幅ではラベルを維持する＝現在の見た目を極力維持）。
+                  段位バッジはshrink-0で省略しない。称号は通常は全文表示されるが、運営が
+                  極端に長い表示名へ変更した場合だけmin-w-0+truncateでレイアウト保護のため
+                  省略してよい（title属性で全文を確認できるようにする）。装飾の角括弧［］は
+                  付けない（文章中の鉤括弧とは別物のため撤去する）。 */}
+              {isMember && (
+                <div className="flex w-full min-w-0 flex-nowrap items-center gap-0.5 sm:gap-1 sm:pl-[60px]">
+                  <span
+                    className={`${styles.surfaceAccent} w-fit shrink-0 whitespace-nowrap rounded-full px-2 py-1 font-sans text-xs font-bold text-[var(--paper)] sm:px-3`}
+                  >
+                    <span className={equippedTitleName ? "hidden sm:inline" : undefined}>段位：</span>
+                    {rank.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTitleModalOpen(true)}
+                    title={equippedTitleName ?? undefined}
+                    className={`${styles.pressable} min-w-0 max-w-full truncate rounded-full border border-[var(--ink)]/30 px-2 py-1 font-sans text-xs font-bold text-[var(--ink)]/80 transition hover:bg-[var(--ink)]/5`}
+                  >
+                    {equippedTitleName ?? "称号を選ぶ"}
+                  </button>
+                </div>
+              )}
             </div>
 
             {bio && <p className="text-sm leading-snug text-[var(--ink)]/85">{bio}</p>}

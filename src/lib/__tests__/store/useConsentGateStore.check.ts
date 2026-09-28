@@ -11,6 +11,7 @@
 // （jsdom等の追加依存を増やさない、他のcheck.tsと同じ最小限のグローバル注入）。
 import assert from "node:assert/strict";
 
+import { CONSENT_VERSION_RELOAD_MESSAGE } from "@/lib/consentVersionError";
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legalInfo";
 import { recordTermsConsentOnce, resetTermsConsentRecorderForTests, waitForConsentInFlight } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
@@ -44,12 +45,15 @@ const fakeLocalStorage = new FakeLocalStorage();
 };
 
 // ---- supabase.rpc(...) の最小限のモック（ゲスト参加成功時の
-// record_terms_consent即時呼び出しを検証するために必要）。----
-let rpcCalls: { name: string }[] = [];
+// record_terms_consent_v2即時呼び出しを検証するために必要）。----
+let rpcCalls: { name: string; args?: Record<string, unknown> }[] = [];
 let rpcResponse: { error: unknown } = { error: null };
 let rpcDelayMs = 0;
-(supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc = async (name) => {
-  rpcCalls.push({ name });
+(supabase as unknown as { rpc: (name: string, args?: Record<string, unknown>) => Promise<{ error: unknown }> }).rpc = async (
+  name,
+  args,
+) => {
+  rpcCalls.push({ name, args });
   if (rpcDelayMs > 0) await new Promise((r) => setTimeout(r, rpcDelayMs));
   return rpcResponse;
 };
@@ -221,7 +225,12 @@ async function main() {
   await useConsentGateStore.getState().confirm();
   assert.equal(mocks.getGuestStartCalls(), 1, "ゲスト参加のconfirmで実際のsignInAsGuestが呼ばれていない");
   assert.equal(rpcCalls.length, 1, "ゲスト参加成功後にrecord_terms_consentがこの場で呼ばれていない");
-  assert.equal(rpcCalls[0].name, "record_terms_consent");
+  assert.equal(rpcCalls[0].name, "record_terms_consent_v2");
+  assert.deepEqual(
+    rpcCalls[0].args,
+    { p_expected_terms_version: TERMS_VERSION, p_expected_privacy_version: PRIVACY_VERSION },
+    "record_terms_consent_v2へ、画面が表示している現在のTERMS_VERSION/PRIVACY_VERSIONが期待値として渡されていない",
+  );
   assert.equal(
     fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY),
     `${TERMS_VERSION}|${PRIVACY_VERSION}`,
@@ -260,6 +269,36 @@ async function main() {
   rpcResponse = { error: null };
   console.log("PASS: ゲスト参加自体は成功しても、同意の記録(record_terms_consent)に失敗した場合は端末の同意済みフラグを記録しない（同意済み扱いにしない）");
 
+  // ---- テスト10b（2026-09-28世代付き同意RPC対応）：record_terms_consent_v2が
+  //      VERSION_MISMATCH（期待バージョンとDB現在値の不一致）、又は退役済みの旧
+  //      record_terms_consent()がCLIENT_UPDATE_REQUIREDで拒否した場合、生のDB
+  //      エラーコードではなく、再読み込みを促す専用の案内文言をerrorReasonへ
+  //      表示する（通信エラー等の汎用文言とは区別する）。端末の同意済みフラグは
+  //      いずれの場合も記録されない。 ----
+  for (const dbErrorCode of ["VERSION_MISMATCH", "CLIENT_UPDATE_REQUIRED"]) {
+    fakeLocalStorage.clear();
+    useConsentGateStore.setState({ pendingModal: null, errorReason: null });
+    rpcCalls = [];
+    rpcResponse = { error: { message: dbErrorCode } };
+    mocks = resetAuthMocks();
+    await useConsentGateStore.getState().requestGuestStart();
+    await useConsentGateStore.getState().confirm();
+    assert.equal(
+      useConsentGateStore.getState().errorReason,
+      CONSENT_VERSION_RELOAD_MESSAGE,
+      `${dbErrorCode}の場合に再読み込みを促す専用の案内文言が表示されていない（生のDBエラーが見えているか、汎用文言のままになっている）`,
+    );
+    assert.equal(
+      fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY),
+      null,
+      `${dbErrorCode}なのに端末の同意済みフラグが記録されてしまった`,
+    );
+    assert.ok(useConsentGateStore.getState().pendingModal, `${dbErrorCode}時にモーダルが閉じてしまった（再試行できない）`);
+    useConsentGateStore.getState().cancel();
+  }
+  rpcResponse = { error: null };
+  console.log("PASS: record_terms_consent_v2のVERSION_MISMATCH・旧RPCのCLIENT_UPDATE_REQUIREDのいずれも、再読み込みを促す専用の案内文言になり、同意済みフラグは記録されずモーダルも維持される");
+
   // ---- テスト11（二重送信の防止）：利用者が確定している状態で、同意操作の連打・
   //      複数経路（ConsentRequiredGate側の記録）・Strict Mode相当の二重実行が
   //      重なっても、record_terms_consentのRPCは論理的に1回だけ。 ----
@@ -277,7 +316,7 @@ async function main() {
     termsVersion: TERMS_VERSION,
     privacyVersion: PRIVACY_VERSION,
     rpc: async () => {
-      const { error } = await supabase.rpc("record_terms_consent");
+      const { error } = await supabase.rpc("record_terms_consent_v2");
       return { error };
     },
   });
@@ -286,7 +325,7 @@ async function main() {
     useConsentGateStore.getState().confirm(), // 連打・Strict Mode相当の二重実行
     gateSideRecord, // ConsentRequiredGate側の記録経路
   ]);
-  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "同意のRPCが1回ではない（二重送信）");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent_v2").length, 1, "同意のRPCが1回ではない（二重送信）");
   assert.equal(
     fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY),
     `${TERMS_VERSION}|${PRIVACY_VERSION}`,
@@ -312,7 +351,7 @@ async function main() {
     termsVersion: TERMS_VERSION,
     privacyVersion: PRIVACY_VERSION,
     rpc: async () => {
-      const { error } = await supabase.rpc("record_terms_consent");
+      const { error } = await supabase.rpc("record_terms_consent_v2");
       return { error };
     },
   });
@@ -364,12 +403,12 @@ async function main() {
     termsVersion: TERMS_VERSION,
     privacyVersion: PRIVACY_VERSION,
     rpc: async () => {
-      const { error } = await supabase.rpc("record_terms_consent");
+      const { error } = await supabase.rpc("record_terms_consent_v2");
       return { error };
     },
   });
   await Promise.all([early, gateSide]);
-  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "認証ストア反映前後で二重送信になった");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent_v2").length, 1, "認証ストア反映前後で二重送信になった");
   assert.equal(fakeLocalStorage.getItem(CONSENT_ACK_STORAGE_KEY), `${TERMS_VERSION}|${PRIVACY_VERSION}`, "認証ストア未反映でも記録成功後に同意済みが記録されていない");
   rpcDelayMs = 0;
   console.log("PASS: 認証結果は返ったがuseAuthStore反映前でも、確定したuserIdで1回だけ記録される（ゲート側と1本に合流）");
@@ -398,7 +437,7 @@ async function main() {
       termsVersion: TERMS_VERSION,
       privacyVersion: PRIVACY_VERSION,
       rpc: async () => {
-        const { error } = await supabase.rpc("record_terms_consent");
+        const { error } = await supabase.rpc("record_terms_consent_v2");
         return { error };
       },
     });
@@ -457,14 +496,14 @@ async function main() {
   const rpcSpy = (supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc;
   (supabase as unknown as { rpc: (name: string) => Promise<{ error: unknown }> }).rpc = async (name: string) => {
     const r = await rpcSpy(name);
-    if (name === "record_terms_consent" && !r.error) dbRow = true;
+    if (name === "record_terms_consent_v2" && !r.error) dbRow = true;
     return r;
   };
   await Promise.all([first, second]);
   const gateResult = await gateCheck;
   (supabase as unknown as { rpc: unknown }).rpc = rpcSpy;
   assert.equal(signInCalls, 1, "ゲスト認証が二重に実行された");
-  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "同意RPCが1回ではない");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent_v2").length, 1, "同意RPCが1回ではない");
   assert.equal(gateResult, "accepted", "待機解除後の同意確認がacceptedにならない（未同意画面を誤表示）");
   assert.equal(useConsentGateStore.getState().pendingModal, null);
   console.log("PASS: 先発confirmの認証・記録中に後発confirmが開始しても1つに合流し、RPCは1回、同意確認は先発の完了まで待ってacceptedになる");
@@ -498,7 +537,7 @@ async function main() {
   rpcCalls = [];
   await useConsentGateStore.getState().confirm();
   assert.equal(signInCalls, 3, "失敗・例外の後に再試行（再度のゲスト認証）ができていない");
-  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent").length, 1, "再試行で同意RPCが1回実行されていない");
+  assert.equal(rpcCalls.filter((c) => c.name === "record_terms_consent_v2").length, 1, "再試行で同意RPCが1回実行されていない");
   assert.equal(useConsentGateStore.getState().pendingModal, null);
   console.log("PASS: 失敗・例外でも窓は必ず解除され（永久待機にならない）、次のconfirmで再試行できる");
 

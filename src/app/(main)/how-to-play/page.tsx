@@ -39,7 +39,14 @@ export default function HowToPlayPage() {
       </div>
 
       <StepCard number="1" icon={<CalendarBellGlyph />} title="開催通知を確認">
-        開催日時をXなどで告知。時間になったらサイトへ集合。
+        <span
+          className={`${stadiumStyles.surfaceAccent} mb-2 inline-block rounded-sm px-2.5 py-1 font-sans text-xs font-black text-[var(--paper)]`}
+        >
+          参加無料
+        </span>
+        <p>
+          爆笑スタジアムのライブは無料で参加できます。開催日時をXなどで告知するので、時間になったらサイトへ集合してください。
+        </p>
       </StepCard>
 
       <StepCard number="2" icon={<DoorEnterGlyph />} title="ライブに参加">

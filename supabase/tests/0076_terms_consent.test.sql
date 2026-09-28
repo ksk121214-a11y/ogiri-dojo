@@ -34,65 +34,31 @@ begin
 end $$;
 
 -- ============================================================
--- テスト1: 未ログイン（auth.uid() is null）ではNOT_LOGGED_INになる。
+-- テスト1〜3（2026-09-28、0083による退役対応）：record_terms_consent()
+-- （引数なし、このマイグレーション0076で新設）は、その後0083で「クライアント
+-- から渡された版を一切信用せず記録もしない、常にCLIENT_UPDATE_REQUIREDで
+-- 拒否する」安全な互換停止状態へcreate or replaceされた。0076自体（この
+-- ファイルの上のcreate文）は編集していないが、supabase/tests/run.shは
+-- 0001〜最新までの全マイグレーションを先に適用してから全テストを実行する
+-- ため、このテストが実際に確認するのは「最終的に適用された関数の挙動」
+-- （＝0083での退役後の挙動）になる。新しい世代付きRPC
+-- record_terms_consent_v2の挙動はsupabase/tests/0083_legal_short_video_
+-- consent.test.sqlで、「0083適用前はrecord_terms_consent_v2が存在しない」
+-- という順序依存の検証はsupabase/tests/run_0083_consent_migration_test.sh
+-- （専用の使い捨てDBを使う別スクリプト）で、それぞれ検証する。
 -- ============================================================
 do $$
 begin
   set local role authenticated;
+  perform set_config('myapp.uid', 'a7600000-0000-0000-0000-00000000000a', true);
   begin
     perform public.record_terms_consent();
-    raise exception 'FAIL: 未ログインでも記録できてしまった';
+    raise exception 'FAIL: 退役済みのrecord_terms_consent()が例外を投げずに成功してしまった';
   exception
     when others then
-      if sqlerrm <> 'NOT_LOGGED_IN' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
-      raise notice 'PASS: 未ログインはNOT_LOGGED_INで拒否される';
+      if sqlerrm <> 'CLIENT_UPDATE_REQUIRED' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
   end;
 end $$;
-
--- ============================================================
--- テスト2（再監査対応）：record_terms_consent()は引数を取らず、DB側の
--- current_legal_document_versions()が返す現在のバージョンだけを記録する
--- （クライアントから任意のバージョン文字列を渡せない）。
--- ============================================================
-do $$
-begin
-  set local role authenticated;
-  perform set_config('myapp.uid', 'a7600000-0000-0000-0000-00000000000a', true);
-  perform public.record_terms_consent();
-end $$;
-
-reset role;
-
-do $$
-declare
-  v_row record;
-  v_current record;
-begin
-  select terms_version, privacy_version into v_current from public.current_legal_document_versions();
-
-  select terms_version, privacy_version into v_row from public.terms_consents
-    where user_id = 'a7600000-0000-0000-0000-00000000000a';
-  if v_row.terms_version <> v_current.terms_version or v_row.privacy_version <> v_current.privacy_version then
-    raise exception 'FAIL: 記録された同意内容がcurrent_legal_document_versions()の値と一致しない (row=%/%, current=%/%)',
-      v_row.terms_version, v_row.privacy_version, v_current.terms_version, v_current.privacy_version;
-  end if;
-  raise notice 'PASS: record_terms_consent()はDB側で確定した現在のバージョンだけを記録する（クライアントからバージョン文字列を指定できない）';
-end $$;
-
--- ============================================================
--- テスト3（一意制約・冪等性）：同じユーザー・同じバージョンの組で
--- record_terms_consent()を再度呼んでも、on conflict do nothingにより
--- 新しい行は増えない（重複記録の防止）。
--- ============================================================
-do $$
-begin
-  set local role authenticated;
-  perform set_config('myapp.uid', 'a7600000-0000-0000-0000-00000000000a', true);
-  perform public.record_terms_consent();
-  perform public.record_terms_consent();
-  perform public.record_terms_consent();
-end $$;
-
 reset role;
 
 do $$
@@ -100,10 +66,55 @@ declare
   v_count int;
 begin
   select count(*) into v_count from public.terms_consents where user_id = 'a7600000-0000-0000-0000-00000000000a';
-  if v_count <> 1 then
-    raise exception 'FAIL: 同じバージョンへの再同意で行が増えてしまった（重複記録） (count=%)', v_count;
+  if v_count <> 0 then
+    raise exception 'FAIL: 退役済みのrecord_terms_consent()が同意行を作ってしまった(count=%)', v_count;
   end if;
-  raise notice 'PASS: 同じバージョンの再記録はon conflict do nothingで冪等になり、重複しない';
+  raise notice 'PASS: 退役後のrecord_terms_consent()はCLIENT_UPDATE_REQUIREDで拒否し、同意行を一切作らない';
+end $$;
+
+-- 未ログインでも同じくCLIENT_UPDATE_REQUIRED（認証状態を確認する前に無条件で
+-- 拒否する設計のため）。「同意行を作らない」という結論は変わらない。
+do $$
+begin
+  set local role authenticated;
+  begin
+    perform public.record_terms_consent();
+    raise exception 'FAIL: 未ログインでも退役済みのrecord_terms_consent()が成功してしまった';
+  exception
+    when others then
+      if sqlerrm <> 'CLIENT_UPDATE_REQUIRED' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+      raise notice 'PASS: 未ログインでも退役後のrecord_terms_consent()はCLIENT_UPDATE_REQUIREDで拒否される（同意行は作られない）';
+  end;
+end $$;
+reset role;
+
+-- 何度呼んでも（旧アプリが再試行を繰り返しても）常に拒否され続け、同意行は
+-- 決して作られない。
+do $$
+begin
+  set local role authenticated;
+  perform set_config('myapp.uid', 'a7600000-0000-0000-0000-00000000000a', true);
+  for i in 1..3 loop
+    begin
+      perform public.record_terms_consent();
+      raise exception 'FAIL: %回目の呼び出しで退役済みのrecord_terms_consent()が成功してしまった', i;
+    exception
+      when others then
+        if sqlerrm <> 'CLIENT_UPDATE_REQUIRED' then raise exception 'FAIL: 想定外のエラー内容(%)', sqlerrm; end if;
+    end;
+  end loop;
+end $$;
+reset role;
+
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from public.terms_consents where user_id = 'a7600000-0000-0000-0000-00000000000a';
+  if v_count <> 0 then
+    raise exception 'FAIL: 繰り返し呼んだ結果、同意行が作られてしまった(count=%)', v_count;
+  end if;
+  raise notice 'PASS: 退役後のrecord_terms_consent()は何度呼んでも常に拒否され、同意行は一切作られない';
 end $$;
 
 -- ============================================================

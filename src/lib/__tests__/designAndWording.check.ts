@@ -164,13 +164,17 @@ function contrast(a: string, b: string): number {
   console.log("PASS: 残り回数は入力欄の直上へ移動、回答席は人数で幅を縮め、並び順・名前の省略は維持");
 }
 
-// 8) 利用規約の版・制定日は今回の見た目・用語変更で変わっていない。
-// 2026-09-28：プライバシーポリシーはこのファイルとは別の理由（称号・限定アイコンの
-// 追加記載）で改定されPRIVACY_VERSIONが更新された（src/lib/__tests__/
-// legalPagesWiring.check.tsが整合性を検査する）ため、ここではTERMS_VERSIONだけを
-// 対象にする。
+// 8) 利用規約の版・制定日は、このファイルが検査する見た目・用語変更それ自体では
+// 変わっていない。
+// 2026-09-28：その後、別の理由（第8条・公式SNS等への掲載の実質拡張）で利用規約・
+// プライバシーポリシーの両方が改定されTERMS_VERSION/PRIVACY_VERSIONが更新された
+// （src/lib/__tests__/legalPagesWiring.check.tsが整合性を検査する）。この検査自体は
+// 「このファイルが扱う見た目・用語変更（旧TERMS_VERSION="2026-09-25-v1"時点）に
+// 対して制定日は変わっていなかった」という過去の事実の記録であるため、TERMS_VERSIONの
+// 現在値についてこれ以上の断定はしない（現在値の断定はlegalPagesWiring.check.tsに
+// 集約する）。
 {
   const info = read("src/lib/legalInfo.ts");
-  assert.ok(/TERMS_VERSION = "2026-09-25-v1"/.test(info), "利用規約の同意バージョン(TERMS_VERSION)が変更されている");
-  console.log("PASS: 利用規約の同意バージョン（TERMS_VERSION）は変更されていない");
+  assert.ok(/export const ENACTED_ON = "2026年9月25日";/.test(info), "制定日(ENACTED_ON)が変更されている");
+  console.log("PASS: 制定日（ENACTED_ON）は変更されていない");
 }

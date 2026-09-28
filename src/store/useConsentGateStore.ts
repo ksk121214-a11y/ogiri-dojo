@@ -31,6 +31,7 @@
 // 保留フラグでの中継が引き続き必要）。
 import { create } from "zustand";
 
+import { CONSENT_VERSION_RELOAD_MESSAGE, isConsentVersionMismatchError } from "@/lib/consentVersionError";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legalInfo";
 import { beginGuestConsentWindow, recordTermsConsentOnce } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
@@ -411,21 +412,33 @@ async function guestStartAndRecord(): Promise<GuestFlightOutcome> {
 
   let recordError: unknown;
   try {
+    // 2026-09-28（世代付き同意RPCへの切替）：ここでもrecord_terms_consent_v2を
+    // 呼び、期待バージョン（TERMS_VERSION/PRIVACY_VERSION）がDBの現在値と一致
+    // しない場合はVERSION_MISMATCHで拒否させる（旧record_terms_consent()は
+    // 0083でCLIENT_UPDATE_REQUIRED固定の互換停止状態になっており、新アプリからは
+    // 呼ばない）。
     const { error } = await recordTermsConsentOnce({
       userId: startedUserId,
       termsVersion: TERMS_VERSION,
       privacyVersion: PRIVACY_VERSION,
       rpc: async () => {
-        const { error: rpcError } = await supabase.rpc("record_terms_consent");
+        const { error: rpcError } = await supabase.rpc("record_terms_consent_v2", {
+          p_expected_terms_version: TERMS_VERSION,
+          p_expected_privacy_version: PRIVACY_VERSION,
+        });
         return { error: rpcError };
       },
     });
     recordError = error;
   } catch (e) {
-    recordError = e ?? new Error("record_terms_consent failed");
+    recordError = e ?? new Error("record_terms_consent_v2 failed");
   }
   if (recordError) {
-    return { ok: false, stage: "consent", reason: CONSENT_RECORD_FAILED_MESSAGE };
+    return {
+      ok: false,
+      stage: "consent",
+      reason: isConsentVersionMismatchError(recordError) ? CONSENT_VERSION_RELOAD_MESSAGE : CONSENT_RECORD_FAILED_MESSAGE,
+    };
   }
   // 完了までに別の利用者へ切り替わっていた場合、前の利用者の結果を反映しない。
   const currentUserId = useAuthStore.getState().user?.id ?? null;

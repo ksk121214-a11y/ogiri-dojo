@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { checkConsentForUser, GenerationGuard } from "@/lib/consentCheck";
+import { CONSENT_VERSION_RELOAD_MESSAGE, isConsentVersionMismatchError } from "@/lib/consentVersionError";
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legalInfo";
 import { recordTermsConsentOnce, waitForConsentInFlight } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
@@ -58,13 +59,22 @@ async function hasCurrentConsentRow(uid: string): Promise<{ ok: true; exists: bo
   return { ok: true, exists: (data?.length ?? 0) > 0 };
 }
 
+// 2026-09-28（世代付き同意RPCへの切替）：0083適用と新フロントエンドのデプロイの
+// どちらが先になっても誤った版を同意済みとして記録しないよう、引数なしの旧
+// record_terms_consent()ではなく、期待バージョンを明示するrecord_terms_consent_v2
+// （supabase/migrations/0083）を呼ぶ。DBのcurrent_legal_document_versions()の現在値と
+// ここで渡すTERMS_VERSION/PRIVACY_VERSIONが完全一致しない場合、DB側がVERSION_MISMATCHで
+// 拒否し、同意行は一切作られない（クライアントの主張をそのまま信用しない）。
 function recordConsentOnceFor(userId: string | null) {
   return recordTermsConsentOnce({
     userId,
     termsVersion: TERMS_VERSION,
     privacyVersion: PRIVACY_VERSION,
     rpc: async () => {
-      const { error } = await supabase.rpc("record_terms_consent");
+      const { error } = await supabase.rpc("record_terms_consent_v2", {
+        p_expected_terms_version: TERMS_VERSION,
+        p_expected_privacy_version: PRIVACY_VERSION,
+      });
       return { error };
     },
   });
@@ -190,16 +200,19 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
       const { error } = await recordConsentOnceFor(startedUserId);
       if (!ownsThisAttempt()) return; // 保存完了前にログアウト・別ユーザーへ切り替わっていた
       if (error) {
-        setAgreeError("同意内容を保存できませんでした。時間をおいて再度お試しください。");
+        // VERSION_MISMATCH（新RPCが期待バージョンとDB現在値の不一致を検知）・
+        // CLIENT_UPDATE_REQUIRED（退役済みの旧RPCが呼ばれた）は、生のDBエラーを
+        // 見せず、再読み込みを促す専用の案内にする（通信エラー等とは区別する）。
+        setAgreeError(isConsentVersionMismatchError(error) ? CONSENT_VERSION_RELOAD_MESSAGE : "同意内容を保存できませんでした。時間をおいて再度お試しください。");
         return;
       }
       clearPendingConsentFlag();
       markDeviceConsentAck();
       setStatus({ kind: "accepted" });
       setChecked(false);
-    } catch {
+    } catch (e) {
       if (!ownsThisAttempt()) return;
-      setAgreeError("同意内容を保存できませんでした。時間をおいて再度お試しください。");
+      setAgreeError(isConsentVersionMismatchError(e) ? CONSENT_VERSION_RELOAD_MESSAGE : "同意内容を保存できませんでした。時間をおいて再度お試しください。");
     } finally {
       if (ownsThisAttempt()) {
         setSubmitting(false);

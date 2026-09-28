@@ -31,6 +31,35 @@ const migration0081 = readFileSync(
   join(process.cwd(), "supabase", "migrations", "0081_titles_and_first_live_rewards.sql"),
   "utf8",
 );
+const migration0082 = readFileSync(
+  join(process.cwd(), "supabase", "migrations", "0082_sns_author_equipped_title.sql"),
+  "utf8",
+);
+const snsAuthorProfile = readFileSync(
+  join(process.cwd(), "src", "components", "sns", "SnsAuthorProfile.tsx"),
+  "utf8",
+);
+const groupResultView = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "GroupResultView.tsx"),
+  "utf8",
+);
+const stageCharactersView = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "StageCharactersView.tsx"),
+  "utf8",
+);
+const stageAnsweringView = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "StageAnsweringView.tsx"),
+  "utf8",
+);
+const audienceAnsweringView = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "AudienceAnsweringView.tsx"),
+  "utf8",
+);
+const scoreRevealToast = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "ScoreRevealToast.tsx"),
+  "utf8",
+);
+const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.ts"), "utf8");
 
 // 1: TitleSelectModalは、未所有の限定称号を選択肢に出さない（kind==='normal'か、
 //    本人が所有している限定称号だけをフィルタする）。
@@ -63,11 +92,13 @@ const migration0081 = readFileSync(
 //    「称号を選ぶ」）を表示し、TitleSelectModalへの導線を持つ。
 {
   assert.ok(
-    /段位：\{rank\.label\}/.test(myProfileTicket),
-    "MyProfileTicketの段位表示が見当たらない",
+    /段位：<\/span>\s*\{rank\.label\}/.test(myProfileTicket),
+    "MyProfileTicketの段位表示が見当たらない（2026-09-28レビュー対応で「段位：」ラベルをスマホ幅だけ隠すspanに包んだため、隣接する<span>越しに段位の値が続く構成になっているはず）",
   );
+  // 2026-09-28（レビュー対応）：装飾の角括弧［］は撤去し、称号名をそのまま
+  // 表示する（未選択時は従来どおり「称号を選ぶ」）。
   assert.ok(
-    /equippedTitleName \? `［\$\{equippedTitleName\}］` : "称号を選ぶ"/.test(myProfileTicket),
+    /\{equippedTitleName \?\? "称号を選ぶ"\}/.test(myProfileTicket),
     "MyProfileTicketが称号名または「称号を選ぶ」を表示していない",
   );
   assert.ok(/<TitleSelectModal onClose=/.test(myProfileTicket), "MyProfileTicketがTitleSelectModalを開く導線を持っていない");
@@ -203,8 +234,11 @@ const migration0081 = readFileSync(
   const profileInfoIdx = privacyPage.indexOf("プロフィール情報");
   assert.ok(profileInfoIdx >= 0, "プライバシーポリシーに「プロフィール情報」の項目が見当たらない");
   const profileInfoBlock = privacyPage.slice(profileInfoIdx, profileInfoIdx + 200);
+  // 2026-09-28（レビュー対応）：「初回ライブ参加記念の限定アイコン」という
+  // 初回ライブ限定に読める表現を、将来別の限定アイコンを追加しても通用する
+  // 「限定アイコン」へ一般化した（28番で新旧文言・法務バージョン不変を確認）。
   assert.ok(
-    /表示名（演者名）、アイコン（種類・色の組み合わせ、又は初回ライブ参加記念の限定アイコン）、一言コメント、選択中の称号/.test(
+    /表示名（演者名）、アイコン（種類・色の組み合わせ、又は限定アイコン）、一言コメント、選択中の称号/.test(
       profileInfoBlock,
     ),
     "プライバシーポリシーのプロフィール情報の説明に称号が追加されていない",
@@ -535,6 +569,254 @@ const migration0081 = readFileSync(
     "admin_update_titleが非公開化(is_active=false)時に装備中の利用者を解除していない",
   );
   console.log("PASS: admin_update_titleは称号を非公開にした時、装備中の利用者のequipped_title_slugを解除する（所有記録は削除しない）");
+}
+
+// 22（0082：寄合帳の他ユーザープロフィールへの称号表示）：0082がsns_author_names
+//     を0081時点の列・ゲスト除外・SECURITY DEFINER・search_path・grant/revokeを
+//     維持したまま再定義し、装備中かつis_active=trueの称号のtitles.display_name
+//     をJOINで返していることを確認する。
+{
+  assert.ok(
+    /drop function if exists public\.sns_author_names\(uuid\[\]\);/.test(migration0082),
+    "0082がsns_author_names(uuid[])をdrop function if existsで再定義していない（returns tableの列変更にはcreate or replaceが使えないため）",
+  );
+  assert.ok(
+    /and not pr\.is_guest;/.test(migration0082),
+    "0082後もsns_author_namesがゲストを除外するnot pr.is_guest条件を維持していない",
+  );
+  assert.ok(
+    /language sql\s*\nsecurity definer set search_path = public/.test(migration0082),
+    "0082後もsns_author_namesがlanguage sql / security definer / set search_path = publicを維持していない",
+  );
+  assert.ok(
+    migration0082.includes("grant execute on function public.sns_author_names(uuid[]) to authenticated, anon;") &&
+      migration0082.includes("revoke execute on function public.sns_author_names(uuid[]) from public;"),
+    "0082後もsns_author_namesの権限(authenticated, anonへgrant・publicからrevoke)が0081と同じ形で再設定されていない",
+  );
+  assert.ok(
+    /equipped_limited_icon_slug,\s*\n\s*equipped_title_display_name text/.test(migration0082) ||
+      (migration0082.includes("equipped_limited_icon_slug text,") && migration0082.includes("equipped_title_display_name text")),
+    "0082のsns_author_namesが既存のequipped_limited_icon_slug列を維持したまま、末尾にequipped_title_display_nameを追加していない",
+  );
+  assert.ok(
+    /left join public\.titles t\s*\n\s*on t\.slug = pr\.equipped_title_slug\s*\n\s*and t\.is_active = true/.test(migration0082),
+    "0082がtitles.is_active=trueの称号だけを返すJOIN条件になっていない（クライアント側の非表示だけに依存している可能性）",
+  );
+  console.log("PASS: 0082はsns_author_namesの0081時点の列・ゲスト除外・権限を維持したまま、is_active=trueの称号の表示名だけを安全に追加している");
+}
+
+// 23（他ユーザープロフィールへの称号表示・装飾括弧の削除）：SnsAuthorProfileは
+//     装備中かつ公開中の称号（sns_author_namesのequipped_title_display_name）を
+//     段位の横に表示し、内部slugではなく表示名をそのまま使う。装飾の角括弧は
+//     付けない。
+{
+  assert.ok(
+    /equippedTitleName: string \| null;/.test(snsAuthorProfile),
+    "SnsAuthorProfileのProfileAuthor(real)がequippedTitleNameを持っていない",
+  );
+  assert.ok(
+    /equippedTitleName: realAuthor\.equippedTitleName,/.test(snsAuthorProfile),
+    "SnsAuthorProfileがrealAuthor.equippedTitleName（sns_author_namesのequipped_title_display_name由来、称号slugではなく最新表示名）を使っていない",
+  );
+  assert.ok(
+    /author\.kind === "real" && author\.equippedTitleName && \(/.test(snsAuthorProfile),
+    "SnsAuthorProfileが「称号を装備している場合だけ」表示する条件になっていない（称号なし・非公開は非表示にする必要がある）",
+  );
+  assert.ok(
+    !/［\$\{author\.equippedTitleName/.test(snsAuthorProfile) && !/｛author\.equippedTitleName/.test(snsAuthorProfile),
+    "SnsAuthorProfileの称号表示に装飾の角括弧が残っている",
+  );
+  console.log("PASS: SnsAuthorProfileは装備中かつ公開中の称号だけを、内部slugではなく最新の表示名で、装飾括弧なしに表示する");
+}
+
+// 24（段位横の称号チップから装飾括弧を削除）：マイページ本人・他ユーザー
+//     プロフィールのどちらにも角括弧［］が残っていない。
+{
+  assert.ok(
+    !/equippedTitleName \? `［\$\{equippedTitleName\}］`/.test(myProfileTicket),
+    "MyProfileTicketの称号表示に依然として角括弧［］が残っている",
+  );
+  assert.ok(
+    /\{equippedTitleName \?\? "称号を選ぶ"\}/.test(myProfileTicket),
+    "MyProfileTicketが称号名を装飾なしでそのまま表示する実装になっていない",
+  );
+  console.log("PASS: マイページ本人・他ユーザープロフィールのどちらも、称号チップから装飾の角括弧が取り除かれている");
+}
+
+// 25（320pxでも段位と称号が同じ行）：マイページ本人・他ユーザープロフィールの
+//     いずれも、段位と称号を囲む行がflex-nowrapで改行されない構成になっている
+//     （段位はshrink-0で省略しない、称号側だけmin-w-0+truncateで保護的に省略可）。
+{
+  assert.ok(
+    /flex w-full min-w-0 flex-nowrap items-center gap-0\.5 sm:gap-1\b/.test(myProfileTicket),
+    "MyProfileTicketの段位・称号の行がflex-nowrapになっていない（320pxで改行される可能性）",
+  );
+  assert.ok(
+    !/flex flex-wrap items-center gap-1\.5/.test(myProfileTicket),
+    "MyProfileTicketの段位・称号の行がまだflex-wrap（改行を許可する設定）のままになっている",
+  );
+  assert.ok(
+    /shrink-0 whitespace-nowrap rounded-full px-2 py-1 font-sans text-xs font-bold text-\[var\(--paper\)\] sm:px-3/.test(myProfileTicket),
+    "MyProfileTicketの段位バッジがshrink-0になっていない（称号が長い時に段位側が潰れる可能性）",
+  );
+  assert.ok(
+    /flex w-full flex-nowrap items-center justify-center gap-1\.5 font-sans text-xs font-bold text-\[var\(--ink\)\]/.test(
+      snsAuthorProfile,
+    ),
+    "SnsAuthorProfileの段位・称号の行がflex-nowrapになっていない（320pxで改行される可能性）",
+  );
+  console.log("PASS: マイページ本人・他ユーザープロフィールのどちらも、段位と称号が320px幅でも同じ行のまま改行されない構成になっている");
+}
+
+// 25b（再レビュー対応：320px/390pxで既定称号すら潰れていた問題）：MyProfileTicketは
+//     段位・称号の行を名前の隣（アイコン分オフセットした列）ではなく、アイコンの下も
+//     含めた本券側の横幅いっぱいを使う独立した行に変更している（sm未満では字下げなし、
+//     sm以上ではpl-[60px]でアイコンの右に揃えた従来の見た目を維持）。また、称号を
+//     装備している間はスマホ幅（sm未満）に限り「段位：」ラベルを外し値だけを表示して
+//     幅を稼ぐ（PC=sm以上ではラベルを維持し、現在の見た目を極力維持する）。称号が
+//     運営により極端に長くされた場合の保護的な省略のため、title属性で全文を確認できる
+//     ようにしている。
+{
+  assert.ok(
+    /sm:pl-\[60px\]/.test(myProfileTicket),
+    "MyProfileTicketの段位・称号の行が、PC幅でアイコンの右に揃える字下げ(sm:pl-[60px])を持っていない",
+  );
+  assert.ok(
+    /<span className=\{equippedTitleName \? "hidden sm:inline" : undefined\}>段位：<\/span>/.test(myProfileTicket),
+    "MyProfileTicketが、称号装備中にスマホ幅だけ「段位：」ラベルを外す実装になっていない",
+  );
+  assert.ok(
+    /title=\{equippedTitleName \?\? undefined\}/.test(myProfileTicket),
+    "MyProfileTicketの称号ボタンが、省略時に全文を確認できるtitle属性を持っていない",
+  );
+  console.log("PASS: MyProfileTicketは段位・称号の行を本券側の横幅いっぱいへ配置し、称号装備中はスマホ幅だけ「段位：」ラベルを外し、省略時もtitle属性で全文を確認できる");
+}
+
+// 25c（運営画面：並び順の数値欄が何を示すか分かるようにする）：/admin/titlesの
+//     数値入力欄に「並び順」という可視ラベルと、数字が小さいほど上に表示される旨の
+//     説明があり、inputにもアクセシブルな関連付け（aria-label）がある。既存の
+//     sort_order自体の仕組み・既定値は変更しない（このチェックは表示・ラベルの
+//     追加のみを確認する）。
+{
+  assert.ok(
+    /並び順/.test(adminTitlesPage),
+    "管理画面(/admin/titles)の数値入力欄に「並び順」という可視ラベルが無い",
+  );
+  assert.ok(
+    /数字が小さい称号ほど上に表示されます/.test(adminTitlesPage),
+    "管理画面(/admin/titles)に、数字が小さいほど上に表示される旨の説明が無い",
+  );
+  assert.ok(
+    /htmlFor=\{`sort-order-\$\{t\.slug\}`\}/.test(adminTitlesPage) && /id=\{`sort-order-\$\{t\.slug\}`\}/.test(adminTitlesPage),
+    "管理画面(/admin/titles)の並び順入力欄にlabelとinputのhtmlFor/id関連付けが無い",
+  );
+  assert.ok(
+    /aria-label="並び順（数字が小さい称号ほど上に表示されます）"/.test(adminTitlesPage),
+    "管理画面(/admin/titles)の並び順入力欄にaria-labelが無い",
+  );
+  console.log("PASS: 管理画面(/admin/titles)の並び順入力欄に可視ラベル・説明・アクセシブルな関連付け(label/aria-label)がある");
+}
+
+// 26（演者名の5文字制限：全文表示へ変更する画面）：参加登録受付画面・組結果画面・
+//     最終結果画面（結果一覧・表彰台の両方）は、truncateLiveDisplayName（5文字で
+//     切り捨てる関数）をもう使っておらず、登録名をそのまま表示する。
+{
+  for (const [name, src] of [
+    ["OpeningView（参加登録受付画面）", openingView],
+    ["GroupResultView（組結果画面）", groupResultView],
+    ["FinalResultView（最終結果画面）", finalResultView],
+  ] as const) {
+    assert.ok(
+      !src.includes("truncateLiveDisplayName"),
+      `${name}がまだtruncateLiveDisplayName（5文字制限）を使っている（全文表示へ変更されていない）`,
+    );
+  }
+  console.log("PASS: 参加登録受付画面・組結果画面・最終結果画面はいずれも5文字制限を使わず、演者名を全文表示する");
+}
+
+// 27（演者名の5文字制限：維持する画面）：ライブ進行中の舞台上表示
+//     （StageCharactersView・回答/採点演出のAnswerRevealCard・ScoreRevealToast）は
+//     引き続きtruncateLiveDisplayNameで5文字に丸める（変更しない）。
+{
+  for (const [name, src] of [
+    ["StageCharactersView（舞台上のキャラクター名）", stageCharactersView],
+    ["StageAnsweringView（回答演出中の名前）", stageAnsweringView],
+    ["AudienceAnsweringView（回答演出中の名前・観客側）", audienceAnsweringView],
+    ["ScoreRevealToast（採点トースト）", scoreRevealToast],
+  ] as const) {
+    assert.ok(
+      src.includes("truncateLiveDisplayName"),
+      `${name}のtruncateLiveDisplayName（5文字制限）が失われている（ライブ進行中の舞台上表示は維持する対象）`,
+    );
+  }
+  console.log("PASS: ライブ進行中の舞台上表示（StageCharactersView・回答演出・採点トースト）は引き続き5文字制限を維持する");
+}
+
+// 28（プライバシーポリシーの文言修正・当時の法務バージョン不変）：プロフィール情報の
+//     アイコンの説明が「初回ライブ参加記念の限定アイコン」から「限定アイコン」へ
+//     一般化されている。これは当時（0082リリース時点）は既存の情報区分の文言整理で
+//     あり新しい取得情報の種類を追加する変更ではなかったため、その回では法務
+//     バージョンを更新しなかった。0081が定義したバージョン値そのものは、その後の
+//     0083（第8条の実質改定）によってさらに更新されるまでは変わっていないことを、
+//     0081自体（編集禁止）が当時のままの値を保持していることで確認する
+//     （現在の最終的なTERMS_VERSION/PRIVACY_VERSIONの値そのものはチェック28bで確認する）。
+{
+  assert.ok(
+    privacyPage.includes("アイコン（種類・色の組み合わせ、又は限定アイコン）"),
+    "プライバシーポリシーのプロフィール情報の説明が「アイコン（種類・色の組み合わせ、又は限定アイコン）」になっていない",
+  );
+  assert.ok(
+    !privacyPage.includes("初回ライブ参加記念の限定アイコン"),
+    "プライバシーポリシーに旧文言「初回ライブ参加記念の限定アイコン」がまだ残っている",
+  );
+  assert.ok(
+    !migration0082.includes("current_legal_document_versions"),
+    "0082がcurrent_legal_document_versions()を再定義している（0082は称号表示機能の追加のみで、法務バージョンの再定義を行ってはいけない）",
+  );
+  assert.ok(
+    migration0081.includes("select '2026-09-25-v1'::text, '2026-09-28-v2'::text;"),
+    "0081のcurrent_legal_document_versions()の値が変わっている（0081は本番適用済みのため編集禁止、0082リリース時点の値のまま残っているはず）",
+  );
+  console.log("PASS: プライバシーポリシーの文言は「限定アイコン」へ一般化され、0082は法務バージョンに触れておらず、0081（編集禁止）は当時の値のまま残っている");
+}
+
+// 28b（第8条の実質改定：TERMS_VERSION/PRIVACY_VERSIONの最終値と0083の整合性）：
+//     0082リリース後にさらに第8条（公式SNS等への掲載範囲の拡張）を実質改定したため、
+//     今度はTERMS_VERSION・PRIVACY_VERSIONの両方を更新し、0081ではなく新規の0083が
+//     current_legal_document_versions()を再度create or replaceしていることを確認する
+//     （0081・0082のいずれもこの再定義には関与しない）。
+{
+  const migration0083 = readFileSync(
+    join(process.cwd(), "supabase", "migrations", "0083_legal_short_video_consent.sql"),
+    "utf8",
+  );
+  assert.ok(
+    /export const TERMS_VERSION = "2026-09-28-v2";/.test(legalInfoSrc),
+    "TERMS_VERSIONが第8条の実質改定後の値になっていない",
+  );
+  assert.ok(
+    /export const PRIVACY_VERSION = "2026-09-28-v3";/.test(legalInfoSrc),
+    "PRIVACY_VERSIONが第8条の実質改定後の値になっていない",
+  );
+  assert.ok(
+    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年9月28日";/.test(legalInfoSrc),
+    "TERMS_LAST_REVISED_ONが第8条の実質改定に伴う改定日になっていない",
+  );
+  assert.ok(
+    !migration0083.includes("drop function if exists public.sns_author_names") &&
+      !migration0083.includes("create table public.titles") &&
+      !/create (?:or replace )?function public\.(?:sns_author_names|admin_update_title)/.test(migration0083),
+    "0083が称号表示機能(0082)や称号関連の関数を再定義している（0083は法務バージョンの更新のみを行うべき）",
+  );
+  assert.ok(
+    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0083),
+    "0083がcurrent_legal_document_versions()をcreate or replaceしていない",
+  );
+  assert.ok(
+    migration0083.includes(`select '2026-09-28-v2'::text, '2026-09-28-v3'::text;`),
+    "0083のcurrent_legal_document_versions()の値が、legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致しない",
+  );
+  console.log("PASS: 第8条の実質改定に伴いTERMS_VERSION/PRIVACY_VERSIONが更新され、0081・0082ではなく新規の0083がcurrent_legal_document_versions()を再定義している");
 }
 
 console.log("ALL TITLES AND FIRST LIVE REWARD WIRING CHECKS PASSED");

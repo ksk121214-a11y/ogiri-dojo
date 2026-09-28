@@ -130,6 +130,11 @@ export interface RealAuthorInfo {
   bio: string;
   // 2026-09-27（初回ライブ限定アイコン）：所有者が装備している場合のみ非null。
   equippedLimitedIconSlug: string | null;
+  // 2026-09-28（寄合帳の他ユーザープロフィールへの称号表示）：装備中かつ運営が
+  // is_active=trueにしている称号のtitles.display_name（内部slugではなく最新の
+  // 表示名）。未装備・非公開の場合はnull（supabase/migrations/0082のJOIN条件で
+  // DB側が保証する。クライアント側の非表示には依存しない）。
+  equippedTitleName: string | null;
 }
 
 export type ActionResult = { ok: true } | { ok: false; message?: string };
@@ -304,6 +309,7 @@ async function resolveRealAuthorNames(authorIds: string[]): Promise<boolean> {
     mastery_meter: number;
     bio: string | null;
     equipped_limited_icon_slug: string | null;
+    equipped_title_display_name: string | null;
   }[]) {
     map[row.id] = {
       displayName: row.display_name,
@@ -312,6 +318,7 @@ async function resolveRealAuthorNames(authorIds: string[]): Promise<boolean> {
       masteryMeter: row.mastery_meter,
       bio: row.bio ?? "",
       equippedLimitedIconSlug: row.equipped_limited_icon_slug,
+      equippedTitleName: row.equipped_title_display_name,
     };
   }
   useSnsStore.setState((s) => ({ realAuthorNames: { ...s.realAuthorNames, ...map } }));

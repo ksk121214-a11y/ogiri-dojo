@@ -52,7 +52,15 @@ async function resolveAuthorNamesIntoSnsStore(profileIds: string[]): Promise<voi
   if (!data) return;
   const map: Record<
     string,
-    { displayName: string; avatarIcon: string; avatarColor: string; masteryMeter: number; bio: string; equippedLimitedIconSlug: string | null }
+    {
+      displayName: string;
+      avatarIcon: string;
+      avatarColor: string;
+      masteryMeter: number;
+      bio: string;
+      equippedLimitedIconSlug: string | null;
+      equippedTitleName: string | null;
+    }
   > = {};
   for (const row of data as {
     id: string;
@@ -62,6 +70,7 @@ async function resolveAuthorNamesIntoSnsStore(profileIds: string[]): Promise<voi
     mastery_meter: number;
     bio: string | null;
     equipped_limited_icon_slug: string | null;
+    equipped_title_display_name: string | null;
   }[]) {
     map[row.id] = {
       displayName: row.display_name,
@@ -70,6 +79,7 @@ async function resolveAuthorNamesIntoSnsStore(profileIds: string[]): Promise<voi
       masteryMeter: row.mastery_meter,
       bio: row.bio ?? "",
       equippedLimitedIconSlug: row.equipped_limited_icon_slug,
+      equippedTitleName: row.equipped_title_display_name,
     };
   }
   useSnsStore.setState((s) => ({ realAuthorNames: { ...s.realAuthorNames, ...map } }));

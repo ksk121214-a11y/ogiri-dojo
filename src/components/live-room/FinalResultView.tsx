@@ -11,7 +11,7 @@ import MasteryGauge from "@/components/live-demo/MasteryGauge";
 import { MASTERY_GAIN } from "@/data/collectionData";
 import { APP_NAME } from "@/lib/appInfo";
 import { isGuestUser } from "@/lib/guestStatus";
-import { truncateLiveDisplayName, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
+import type { RoomRankingEntry } from "@/lib/liveRoomSelectors";
 import { computePointBreakdown } from "@/lib/pointBreakdown";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -240,8 +240,8 @@ export default function FinalResultView({
                 {/* 同着（同じ順位）の人が複数いる場合、全員をまとめて表示する。 */}
                 <div className="mt-3 flex flex-col items-center gap-3">
                   {entries.map((entry) => (
-                    <div key={entry.participantId} className="flex flex-col items-center gap-1">
-                      <div className="flex items-center justify-center gap-2">
+                    <div key={entry.participantId} className="flex w-full min-w-0 flex-col items-center gap-1 px-2">
+                      <div className="flex w-full min-w-0 items-center justify-center gap-2">
                         {entry.participantId === myParticipantId ? (
                           <MyIconAvatar size={28} bare />
                         ) : (
@@ -254,8 +254,10 @@ export default function FinalResultView({
                             bare
                           />
                         )}
-                        <p className="font-sans text-lg font-bold">
-                          {truncateLiveDisplayName(entry.name)}
+                        {/* 2026-09-28（レビュー対応）：最終結果画面は横幅に余裕が
+                            あるため5文字で切らず全文表示する。 */}
+                        <p className="min-w-0 break-words font-sans text-lg font-bold">
+                          {entry.name}
                         </p>
                       </div>
                       <p className="font-sans text-sm font-bold text-[#ff8f00]">{entry.total}点</p>
@@ -305,7 +307,7 @@ export default function FinalResultView({
                             bare
                           />
                         )}
-                        <span className="truncate">{truncateLiveDisplayName(r.name)}</span>
+                        <span className="min-w-0 break-words">{r.name}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
                         <span className="tabular-nums text-[#ff8f00]">{r.total}点</span>

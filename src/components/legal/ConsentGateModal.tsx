@@ -65,8 +65,8 @@ export default function ConsentGateModal() {
         <LegalLinksRow className="font-sans text-base font-bold text-blue-800" openInNewTab />
 
         <p className="font-sans text-sm leading-relaxed text-gray-700">
-          投稿内容・演者名・得点・順位等を運営が爆笑スタジアム公式Xで紹介する場合がある点を含め、
-          利用規約第8条に定める公式Xへの掲載条件をご確認ください。
+          投稿内容・演者名・得点・順位等を運営が公式SNSや動画配信サービスで紹介する場合がある点を含め、
+          利用規約第8条に定める公式SNS等への掲載条件をご確認ください。
         </p>
 
         <label className="flex cursor-pointer items-start gap-3 font-sans text-base font-medium leading-snug text-gray-900">
