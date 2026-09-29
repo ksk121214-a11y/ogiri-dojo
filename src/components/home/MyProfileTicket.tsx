@@ -138,7 +138,15 @@ export default function MyProfileTicket({
           <div className="flex flex-col gap-3 px-5 py-5">
             <div className="flex flex-col gap-1.5">
               <div className="flex items-start gap-3">
-                <span className="flex shrink-0 items-center justify-center">
+                {/* 2026-09-30:「アイコンをもう少し大きく」の要望対応。MyIconAvatar自体の
+                    共通実装（ライブ・寄合帳・他ユーザープロフィール等でも使う）は変えず、
+                    このカードだけ見た目を拡大したいため、レイアウト上の占有領域（48px、
+                    gap-3や右の演者名カラムの位置）はそのままに、内側の描画だけを
+                    transform: scaleで約1.15倍（48px→約55px相当）に拡大する。
+                    transformは要素のボックスサイズ（フローに影響する幅・高さ）を変えず
+                    見た目だけを拡大するため、カード本体・半券の寸法や隣接要素の位置には
+                    一切影響しない。 */}
+                <span className="flex shrink-0 scale-[1.15] items-center justify-center">
                   <MyIconAvatar size={48} bare />
                 </span>
                 <div className="min-w-0 flex-1 pt-1">
