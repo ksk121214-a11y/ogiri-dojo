@@ -253,7 +253,7 @@ function TopicFeedList({
         const linkDisabled = isLocallyCreated(topic.id);
         const body = (
           <>
-            <p className="font-sans text-base font-bold leading-snug text-[var(--ink)] sm:text-lg">
+            <p className="break-words font-sans text-base font-bold leading-snug text-[var(--ink)] sm:text-lg">
               {topic.body}
             </p>
             <p className="font-sans text-xs text-[var(--ink)]/70">
@@ -277,10 +277,16 @@ function TopicFeedList({
                 </span>
               </div>
             </div>
+            {/* 2026-09-29（表示崩れ修正）：右上に絶対配置される通報/削除ボタン
+                （右端right-3・既定サイズ22px＝右端から最大34px分の領域を占有）と
+                本文の折り返し直前の文字が重なる不具合があった。本文を含むこの
+                ラッパーにボタンの占有幅より広いpr-10（40px）を確保し、本文が
+                その領域へ入り込まない構造にする（ボタンが無いカード＝
+                SnsLiveResultBodyの結果カード本体等には適用しない）。 */}
             {linkDisabled ? (
-              <div className="flex flex-col gap-2">{body}</div>
+              <div className="flex flex-col gap-2 pr-10">{body}</div>
             ) : (
-              <Link href={`/sns/${topic.id}`} className="flex flex-col gap-2">
+              <Link href={`/sns/${topic.id}`} className="flex flex-col gap-2 pr-10">
                 {body}
               </Link>
             )}
@@ -323,7 +329,7 @@ function AnswerFeedList({
         const answerLinkDisabled = isLocallyCreated(answer.id);
         const answerBody = (
           <>
-            <p className="font-sans text-sm font-bold text-[var(--ink)] sm:text-base">
+            <p className="break-words font-sans text-sm font-bold text-[var(--ink)] sm:text-base">
               {answer.body}
             </p>
             <p className="flex items-center gap-1 font-sans text-[11px] text-[var(--ink)]/70">
@@ -357,10 +363,12 @@ function AnswerFeedList({
                 </Link>
               )
             )}
+            {/* 2026-09-29（表示崩れ修正）：TopicFeedListと同じ理由で、右上の
+                通報/削除ボタン用にpr-10を確保する。 */}
             {answerLinkDisabled ? (
-              <div className="flex flex-col gap-1">{answerBody}</div>
+              <div className="flex flex-col gap-1 pr-10">{answerBody}</div>
             ) : (
-              <Link href={`/sns/answers/${answer.id}`} className="flex flex-col gap-1">
+              <Link href={`/sns/answers/${answer.id}`} className="flex flex-col gap-1 pr-10">
                 {answerBody}
               </Link>
             )}

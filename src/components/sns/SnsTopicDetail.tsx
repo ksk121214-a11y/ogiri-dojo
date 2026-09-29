@@ -164,7 +164,11 @@ export default function SnsTopicDetail({ topicId }: { topicId: string }) {
             </span>
           </div>
         </div>
-        <p className="mt-3 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
+        {/* 2026-09-29（表示崩れ修正）：右上の通報/削除ボタン（right-4・既定
+            サイズ22px＝右端から最大38px分の領域を占有）と本文の折り返し直前の
+            文字が重なる不具合があったため、本文にボタンの占有幅より広いpr-11
+            （44px）を確保する。 */}
+        <p className="mt-3 break-words pr-11 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {topic.body}
         </p>
         {topic.authorId === "me" ? (

@@ -171,7 +171,9 @@ export default function SnsAnswerDetail({ answerId }: { answerId: string }) {
             {answer.createdAtLabel}
           </span>
         </div>
-        <p className="font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
+        {/* 2026-09-29（表示崩れ修正）：SnsTopicDetailの本題本文と同じ理由で、
+            右上の通報/削除ボタン（right-4・既定サイズ22px）ぶんのpr-11を確保する。 */}
+        <p className="break-words pr-11 font-sans text-lg font-bold leading-snug text-[var(--ink)] sm:text-xl">
           {answer.body}
         </p>
         <div className="flex items-center gap-2">
