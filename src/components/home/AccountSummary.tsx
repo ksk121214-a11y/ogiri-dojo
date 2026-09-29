@@ -148,8 +148,12 @@ export default function AccountSummary() {
         「アイコンは丸で囲わずそのままの感じで」の要望のため、円形の縁取り・背景は付けず、
         bareモード（縁取りなし）のMyIconAvatarをそのまま置く
         （MyIconAvatar自体は他画面共通のコンポーネントなので変更しない）。
+        2026-09-30:「ホームのこのカードのアイコンをもう少し大きく」の要望で40→52pxへ。
+        このsectionの高さは演者名・段位の2行テキストブロックの高さで決まっており、
+        52px化してもそれを超えないため、pt-6/pb-3.5等の既存パディングはそのままで
+        カード自体の高さは変わらない（items-centerで縦中央揃えのまま収まる）。
       */}
-      <MyIconAvatar size={40} bare />
+      <MyIconAvatar size={52} bare />
       <div className="min-w-0 flex-1">
         <span className="inline-block rounded-sm bg-[var(--ink)]/10 px-1.5 py-0.5 text-xs font-bold tracking-widest text-[var(--ink)]/70">
           ログイン中
