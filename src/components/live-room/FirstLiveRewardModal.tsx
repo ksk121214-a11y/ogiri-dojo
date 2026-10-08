@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { BASE_PATH } from "@/lib/basePath";
 import { getLimitedIconSrc } from "@/lib/limitedIcons";
 
-// 初回本番ライブ(#0001)の限定特典を初めて獲得した時だけ、最終結果画面から一度だけ
+// 本番ライブ（開催番号#0001〜#0005）の限定特典を初めて獲得した時だけ、最終結果画面から一度だけ
 // 呼ばれるモーダル（useFirstLiveRewardStore.attempt()のnewlyGranted=trueの時のみ表示、
 // supabase/migrations/0081参照）。複数タブ・再読込・再接続で何度も出ないことの保証は
 // 呼び出し元（FinalResultView）とストア側のDB冪等性に委ねており、このモーダル自体は
@@ -35,7 +35,7 @@ export default function FirstLiveRewardModal({
         className="w-full max-w-sm rounded-[24px] border-[3px] border-[#ffcf4a] bg-[#12101a] p-6 text-center text-white shadow-[0_0_50px_rgba(255,207,74,0.35)]"
       >
         <p className="font-sans text-xs font-bold tracking-widest text-[#ffcf4a]">
-          初回ライブ限定特典を獲得しました
+          初期ライブ限定特典を獲得しました
         </p>
 
         {iconSrc && (
@@ -48,7 +48,7 @@ export default function FirstLiveRewardModal({
         <p className="mt-4 font-sans text-lg font-black">
           {titleDisplayName ? `限定称号「${titleDisplayName}」` : "限定称号を獲得しました"}
         </p>
-        <p className="mt-1 font-sans text-sm text-white/80">初回ライブ限定アイコン</p>
+        <p className="mt-1 font-sans text-sm text-white/80">初期ライブ限定アイコン</p>
         <p className="mt-4 font-sans text-xs text-white/60">マイページで選択できます</p>
 
         <button

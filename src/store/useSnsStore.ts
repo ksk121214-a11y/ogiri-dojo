@@ -128,7 +128,7 @@ export interface RealAuthorInfo {
   // 段位・一言コメントを表示するため、sns_author_names RPCの戻り値に追加した2列。
   masteryMeter: number;
   bio: string;
-  // 2026-09-27（初回ライブ限定アイコン）：所有者が装備している場合のみ非null。
+  // 2026-09-27（初期ライブ限定アイコン）：所有者が装備している場合のみ非null。
   equippedLimitedIconSlug: string | null;
   // 2026-09-28（寄合帳の他ユーザープロフィールへの称号表示）：装備中かつ運営が
   // is_active=trueにしている称号のtitles.display_name（内部slugではなく最新の

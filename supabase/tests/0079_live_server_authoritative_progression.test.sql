@@ -21,6 +21,24 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'a7900000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e81cfad3-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000005', '2周目用の追加お題5（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000006', '2周目用の追加お題6（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000007', '2周目用の追加お題7（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000008', '2周目用の追加お題8（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000009', '2周目用の追加お題9（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000010', '2周目用の追加お題10（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000011', '2周目用の追加お題11（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000012', '2周目用の追加お題12（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000013', '2周目用の追加お題13（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000014', '2周目用の追加お題14（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000015', '2周目用の追加お題15（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000016', '2周目用の追加お題16（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000017', '2周目用の追加お題17（自動テスト）', 'text', true),
+  ('e81cfad3-0000-0000-0000-000000000018', '2周目用の追加お題18（自動テスト）', 'text', true),
   ('a7910000-0000-0000-0000-000000000001', '0079テスト用お題A', 'text', true),
   ('a7910000-0000-0000-0000-000000000002', '0079テスト用お題B', 'text', true)
 on conflict do nothing;
@@ -35,7 +53,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テスト', 20, 2,
-    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002', 'e81cfad3-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000002']::uuid[]
   );
   reset role;
 
@@ -541,7 +559,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079緊急中止テスト', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[], 'official'
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000003']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -657,7 +675,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストOR1', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000004']::uuid[]
   );
   reset role;
   if v_live_id is null then
@@ -731,7 +749,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストOR2', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000005']::uuid[]
   );
 
   v_before := clock_timestamp();
@@ -794,7 +812,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストOR3', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000006']::uuid[]
   );
   reset role;
   insert into _t0079or_ctx values (v_live_id);
@@ -894,7 +912,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストTP1a', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000007']::uuid[]
   );
   reset role;
   if (select timing_profile from public.lives where id = v_live_id) <> 'standard' then
@@ -908,7 +926,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select * into v_result from public.create_live_preparation(
     now(), '0079テストTP1b', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[],
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000008']::uuid[],
     'official', 900001, 'short_test'
   );
   reset role;
@@ -924,7 +942,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select * into v_result from public.create_live_preparation(
     now(), '0079テストTP1c', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[],
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000009']::uuid[],
     'test', null, 'bogus_profile'
   );
   reset role;
@@ -937,7 +955,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストTP1d', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[],
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000010']::uuid[],
     'test', null, 'short_test'
   );
   reset role;
@@ -979,7 +997,7 @@ end $$;
 do $$
 declare
   v_expected_standard jsonb :=
-    '{"interlude":15000,"opening":45000,"topic_reveal":13000,"answering":60000,"judge":10000,"group_result":15000}'::jsonb;
+    '{"interlude":15000,"opening":45000,"topic_reveal":13000,"answering":90000,"judge":10000,"group_result":15000}'::jsonb;
   v_expected_short jsonb :=
     '{"interlude":4000,"opening":8000,"topic_reveal":7000,"answering":20000,"judge":6000,"group_result":6000}'::jsonb;
   v_phase text;
@@ -1024,7 +1042,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストTP3', 20, 2,
-    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002']::uuid[],
+    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002', 'e81cfad3-0000-0000-0000-000000000011', 'e81cfad3-0000-0000-0000-000000000012']::uuid[],
     'test', null, 'short_test'
   );
   reset role;
@@ -1251,7 +1269,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストCL', 20, 2,
-    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002', 'e81cfad3-0000-0000-0000-000000000013', 'e81cfad3-0000-0000-0000-000000000014']::uuid[]
   );
   perform public.open_reception(v_live_id);
   reset role;
@@ -1406,7 +1424,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0079テストR', 20, 2,
-    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'a7910000-0000-0000-0000-000000000002', 'e81cfad3-0000-0000-0000-000000000015', 'e81cfad3-0000-0000-0000-000000000016']::uuid[]
   );
   reset role;
 
@@ -1786,8 +1804,8 @@ begin
     raise exception 'FAIL: topic_reveal→answeringの遷移自体が失敗した';
   end if;
   v_deadline_ms := extract(epoch from ((v_result.live).phase_deadline - now())) * 1000;
-  if v_deadline_ms < 55000 or v_deadline_ms > 65000 then
-    raise exception 'FAIL: p_answering_duration_ms=1(最小値)を渡したのに締切が本番相当(60秒)から外れた(got=%ms)', v_deadline_ms;
+  if v_deadline_ms < 85000 or v_deadline_ms > 95000 then
+    raise exception 'FAIL: p_answering_duration_ms=1(最小値)を渡したのに締切が本番相当(90秒)から外れた(got=%ms)', v_deadline_ms;
   end if;
 
   -- host_advance_answering_to_group_result：group_result(15000ms)。今度は
@@ -1893,7 +1911,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select ok, live_id into v_prep_ok, v_other_live_id from public.create_live_preparation(
     now(), '0079テストR-別ライブ', 20, 1,
-    array['a7910000-0000-0000-0000-000000000001']::uuid[]
+    array['a7910000-0000-0000-0000-000000000001', 'e81cfad3-0000-0000-0000-000000000017']::uuid[]
   );
   reset role;
 
@@ -1965,7 +1983,7 @@ begin
   perform set_config('myapp.uid', 'a7900000-0000-0000-0000-00000000000f', true);
   select ok, live_id into v_prep_ok, v_live_id from public.create_live_preparation(
     now(), '0079テストR-final緊急中止禁止', 20, 1,
-    array['a7910000-0000-0000-0000-000000000002']::uuid[]
+    array['a7910000-0000-0000-0000-000000000002', 'e81cfad3-0000-0000-0000-000000000018']::uuid[]
   );
   reset role;
   if v_prep_ok is not true or v_live_id = v_shared_live_id then

@@ -13,8 +13,8 @@ interface FloatItem {
   xPercent: number;
 }
 
-// src/components/live-demo/TsukkomiFloatOverlay.tsxと同じ演出だが、
-// useLiveDemoStoreではなく実際にRealtimeブロードキャストで届いたイベント(useLiveFollowerStore)を見る。
+// 体験版（/live-demo）の表示は、この部品と同じ待機列（liveReactionSource）を使う。
+// 既定は実際にRealtimeブロードキャストで届いたイベント(useLiveFollowerStore)。
 // 現在の実ライブ画面ではTsukkomiDanmakuOverlayに置き換わっている（未使用）が、
 // 将来また使われる可能性があるため、0068のキュー方式（src/lib/liveReactionQueue.ts）に
 // 揃えて更新している。

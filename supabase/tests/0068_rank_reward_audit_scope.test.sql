@@ -28,6 +28,8 @@ update public.profiles set role = 'admin' where id = 'a9000000-0000-0000-0000-00
 update public.profiles set role = 'user' where id = 'a9000000-0000-0000-0000-00000000000c';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('ed704242-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('ed704242-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
   ('a9100000-0000-0000-0000-000000000001', '0068監査テスト用お題1', 'text', true),
   ('a9100000-0000-0000-0000-000000000002', '0068監査テスト用お題2', 'text', true)
 on conflict do nothing;
@@ -57,7 +59,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068監査テスト-test異常状態', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['a9100000-0000-0000-0000-000000000001', 'ed704242-0000-0000-0000-000000000001']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -158,7 +160,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068監査テスト-official不整合', 20, 1,
-    array['a9100000-0000-0000-0000-000000000002']::uuid[], 'official'
+    array['a9100000-0000-0000-0000-000000000002', 'ed704242-0000-0000-0000-000000000002']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;

@@ -1,10 +1,10 @@
-// 初回本番ライブ(#0001)限定アイコンのカタログ。src/lib/avatarIcons.tsの通常アイコンとは
+// 初期ライブ（本番の開催番号#0001〜#0005）限定アイコンのカタログ。src/lib/avatarIcons.tsの通常アイコンとは
 // 別物で、CSS maskで単色化せずフルカラーのまま表示する（供給元の全色付きPNGを
 // そのまま使う、supabase/migrations/0081参照）。現状は1種類のみ。
 export const LIMITED_ICON_PRESETS = [
   {
     slug: "first-witness",
-    label: "初回ライブ限定アイコン",
+    label: "初期ライブ限定アイコン",
     src: "/images/live2/limited-first-witness-512.png",
   },
 ] as const;

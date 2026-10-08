@@ -38,6 +38,20 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'c0000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('ec54fb3d-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000005', '2周目用の追加お題5（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000006', '2周目用の追加お題6（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000007', '2周目用の追加お題7（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000008', '2周目用の追加お題8（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000009', '2周目用の追加お題9（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000010', '2周目用の追加お題10（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000011', '2周目用の追加お題11（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000012', '2周目用の追加お題12（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000013', '2周目用の追加お題13（自動テスト）', 'text', true),
+  ('ec54fb3d-0000-0000-0000-000000000014', '2周目用の追加お題14（自動テスト）', 'text', true),
   ('c0100000-0000-0000-0000-000000000001', '0071テスト用お題1', 'text', true),
   ('c0100000-0000-0000-0000-000000000002', '0071テスト用お題2', 'text', true),
   ('c0100000-0000-0000-0000-000000000003', '0071テスト用お題3', 'text', true),
@@ -80,7 +94,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-official報酬除外', 20, 1,
-    array['c0100000-0000-0000-0000-000000000001']::uuid[], 'official'
+    array['c0100000-0000-0000-0000-000000000001', 'ec54fb3d-0000-0000-0000-000000000001']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -342,7 +356,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_other_live_id from public.create_live_preparation(
     now(), '0071再レビュー-別ライブ(クロスライブ攻撃検証用)', 20, 1,
-    array['c0100000-0000-0000-0000-000000000006']::uuid[], 'official'
+    array['c0100000-0000-0000-0000-000000000006', 'ec54fb3d-0000-0000-0000-000000000002']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_other_live_id;
@@ -615,7 +629,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-ゲストplayer直接INSERT拒否', 20, 1,
-    array['c0100000-0000-0000-0000-000000000002']::uuid[], 'official'
+    array['c0100000-0000-0000-0000-000000000002', 'ec54fb3d-0000-0000-0000-000000000003']::uuid[], 'official'
   );
   reset role;
   insert into public.groups (live_id, group_order) values (v_live_id, 1) returning id into v_group_id;
@@ -711,7 +725,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071再レビュー-player直接INSERT拒否(profiles.is_guest不整合)', 20, 1,
-    array['c0100000-0000-0000-0000-000000000002']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000002', 'ec54fb3d-0000-0000-0000-000000000004']::uuid[], 'test'
   );
   reset role;
 
@@ -759,7 +773,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-ゲストplayer直接UPDATE拒否', 20, 1,
-    array['c0100000-0000-0000-0000-000000000003']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000003', 'ec54fb3d-0000-0000-0000-000000000005']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -858,7 +872,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071再レビュー-player直接UPDATE拒否(profiles.is_guest不整合)', 20, 1,
-    array['c0100000-0000-0000-0000-000000000005']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000005', 'ec54fb3d-0000-0000-0000-000000000006']::uuid[], 'test'
   );
   reset role;
 
@@ -1009,7 +1023,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-Xユーザー回帰確認', 20, 1,
-    array['c0100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000001', 'ec54fb3d-0000-0000-0000-000000000007']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1157,7 +1171,7 @@ begin
   perform set_config('myapp.uid', v_host_uid::text, true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071再レビュー-DELETE policyテスト用ライブ', 20, 1,
-    array['c0100000-0000-0000-0000-000000000007']::uuid[], 'official'
+    array['c0100000-0000-0000-0000-000000000007', 'ec54fb3d-0000-0000-0000-000000000008']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1334,7 +1348,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071再々レビュー-participants直接INSERT遮断', 20, 1,
-    array['c0100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000001', 'ec54fb3d-0000-0000-0000-000000000009']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1460,7 +1474,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-多層防御(壊れたゲスト行)', 20, 2,
-    array['c0100000-0000-0000-0000-000000000006', 'c0100000-0000-0000-0000-000000000007']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000006', 'c0100000-0000-0000-0000-000000000007', 'ec54fb3d-0000-0000-0000-000000000010', 'ec54fb3d-0000-0000-0000-000000000011']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1618,7 +1632,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-ゲストのリアクション', 20, 1,
-    array['c0100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000001', 'ec54fb3d-0000-0000-0000-000000000012']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1730,7 +1744,7 @@ begin
   perform set_config('myapp.uid', 'c0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0071テスト-ゲスト判定統一(is_anonymousのみ)', 20, 2,
-    array['c0100000-0000-0000-0000-000000000001', 'c0100000-0000-0000-0000-000000000002']::uuid[], 'test'
+    array['c0100000-0000-0000-0000-000000000001', 'c0100000-0000-0000-0000-000000000002', 'ec54fb3d-0000-0000-0000-000000000013', 'ec54fb3d-0000-0000-0000-000000000014']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -1837,8 +1851,9 @@ begin
   if v_resync_ok is not true then
     raise exception 'FAIL: resync_eligible_judge_countsが失敗した(reason=%)', v_resync_reason;
   end if;
-  if v_updated_turns <> 2 then
-    raise exception 'FAIL: resync_eligible_judge_countsが更新したturns件数が想定と違う(想定=2、実際=%)', v_updated_turns;
+  -- 2周制：2組×2周＝4ターン
+  if v_updated_turns <> 4 then
+    raise exception 'FAIL: resync_eligible_judge_countsが更新したturns件数が想定と違う(想定=4、実際=%)', v_updated_turns;
   end if;
   select eligible_judge_count into v_eligible1 from public.turns where id = v_turn1_id;
   if v_eligible1 <> 1 then

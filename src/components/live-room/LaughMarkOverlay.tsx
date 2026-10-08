@@ -7,9 +7,8 @@ import type { TsukkomiEvent } from "@/store/useLiveFollowerStore";
 
 // 「爆笑」ボタンを押した瞬間、観客シルエット(AudienceLayer)のどこか1人の頭の上に、
 // 漫画的な「大笑いのシワ」マークを1回だけ出す演出。
-// src/components/live-demo/LaughMarkOverlay.tsxと同じ演出だが、あちらは
-// useLiveDemoStoreのtsukkomiSeqを見る点だけがこちら(useLiveFollowerStore)と異なる。
-// タイマー・state更新の構成はsrc/lib/liveReactionQueue.tsの共通フックに揃えている。
+// 実ライブと体験版（/live-demo）で共通の表示部品。待機列は文脈（liveReactionSource）経由で、
+// 既定は実ライブのtsukkomiQueue。タイマー・state更新はsrc/lib/liveReactionQueue.tsの共通フック。
 //
 // マークを出す座標は、AudienceLayerが描画しているaudience-2-crop.png(537x189)を
 // 実際にピクセル解析し、シルエットの「頭のてっぺん」に相当するローカル極小点を

@@ -29,11 +29,17 @@ const p = (id: string, preferred_role: "player" | "audience", is_guest = false):
   assert.equal(players.length + audience.length, list.length, "分割前後で参加者の総数が変わっている");
 }
 
-// 配線：OpeningViewが最大人数との比率(x/y)を出さず、プレイヤー/観客を分けて見出し・0人表示を出す。
+// 配線：OpeningViewが最大人数との比率(x/y)を出さず、プレイヤー/観客を分けて
+// 共用表示部品(OpeningPresentation)へpropsとして渡す。見出し・0人表示そのものは
+// 本番・体験版/撮影モード共用のOpeningPresentation側にある。
 const view = read("src", "components", "live-room", "OpeningView.tsx");
 assert.ok(/splitParticipantsByPreferredRole\(participants\)/.test(view), "OpeningViewが分割関数を使っていない");
-assert.ok(/現在のプレイヤー/.test(view) && /現在の観客/.test(view), "プレイヤー・観客の見出しが無い");
-assert.ok(/まだいません/.test(view), "0人の場合の表示が無い");
+const openingPresentation = read("src", "components", "live-room", "OpeningPresentation.tsx");
+assert.ok(
+  /現在のプレイヤー/.test(openingPresentation) && /現在の観客/.test(openingPresentation),
+  "プレイヤー・観客の見出しが無い",
+);
+assert.ok(/まだいません/.test(openingPresentation), "0人の場合の表示が無い");
 assert.ok(!/\{playerCount\}\s*\/\s*\{live\.max_players\}/.test(view), "最大人数との比率(x/y)表示が残っている");
 assert.ok(!/participants\.length\}人/.test(view), "分けずに全体人数だけを表示する古い実装が残っている");
 // 自分自身の強調・アニメーションは維持されている。
@@ -41,10 +47,11 @@ assert.ok(!/participants\.length\}人/.test(view), "分けずに全体人数だ�
 // もう5文字で省略しない（truncateLiveDisplayNameを使わず全文表示する）。
 // 詳しくはsrc/lib/__tests__/titlesAndFirstLiveRewardWiring.check.tsの26番・27番参照
 // （全文表示へ変更した画面／5文字制限を維持する画面の一覧）。
-assert.ok(/isMe \? "border-\[#3b5bff\]/.test(view), "自分自身の強調表示が維持されていない");
-assert.ok(!/truncateLiveDisplayName/.test(view), "参加登録受付画面がまだ演者名を5文字に省略している（全文表示へ変更する対象）");
-assert.ok(/\{participantNames\[p\.id\] \?\? "（名前未設定）"\}/.test(view), "参加登録受付画面が演者名を全文表示していない");
-assert.ok(/motion\.div/.test(view), "参加者一覧のアニメーションが維持されていない");
+// 一覧の見た目（強調表示・アニメーション）は共用表示部品(OpeningPresentation)側にある。
+assert.ok(/isMe \? "border-\[#3b5bff\]/.test(openingPresentation), "自分自身の強調表示が維持されていない");
+assert.ok(!/truncateLiveDisplayName/.test(openingPresentation), "参加登録受付画面がまだ演者名を5文字に省略している（全文表示へ変更する対象）");
+assert.ok(/participantNames\[p\.id\] \?\? "（名前未設定）"/.test(view), "参加登録受付画面が演者名を全文表示していない");
+assert.ok(/motion\.div/.test(openingPresentation), "参加者一覧のアニメーションが維持されていない");
 
 // 最大参加人数はプレイヤーだけに適用される（表示用のisPlayerFull判定）。観客には適用しない。
 assert.ok(/const playerCount = participants\.filter\(\(p\) => p\.preferred_role === "player"\)\.length;/.test(view));

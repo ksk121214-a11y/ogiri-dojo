@@ -6,7 +6,7 @@ export type LivePhase =
   | "interlude" // 幕間演出（暗転→タイトル）§13
   | "opening" // 組分け発表 §13 / L2
   | "topic_reveal" // お題発表 §1.5
-  | "answering" // 回答（持ち時間60秒、審査サイクルはjudgingで管理）
+  | "answering" // 回答（持ち時間90秒＝本番standard。審査サイクルはjudgingで管理）
   | "group_result" // 組結果発表 L5
   | "final_result" // 最終結果・個人表彰 L6
   | "closed"; // 閉幕
@@ -48,6 +48,8 @@ export interface DemoAnswer {
   scoreTotal: number; // 確定後に集計（採点中は0）
   topScoreVotes: number; // 最高点（3点）を付けた審査員数。過半数で笑いエフェクト発生（2026-07-14改訂：0〜2点の3段階→0〜3点の4段階に変更）
   judgeCount: number; // 採点対象になった時点の審査員母数
+  // 採点開始時点で評価権を持つ全員のID（回答者本人・組に出ている人は含まない）。未評価者もここに残す（0点扱い）
+  eligibleJudgeIds: string[];
   laughTriggered: boolean;
   createdAt: number;
 }
@@ -67,8 +69,13 @@ export interface JudgingState {
 
 // 送信〜実際の回答表示の間に置く「一呼吸」の間（送信直後・前の審査サイクル終了直後の両方で使う）。
 // この間はまだDemoAnswerを作らず、画面には何も表示しない（前の回答は消えた後、まだ次が出ていない状態）。
+// seq は送信時に確定する回答番号。実ライブは送信（DB登録）の時点で「残り○回」が減るため、
+// 回数はフリップではなくこの時点で数える。
 export interface RevealPending {
+  // 回答の合図（送信の瞬間に1つ作る）。送信音と回答席の点灯の音を、この1つの合図で1回だけ鳴らす
+  cueId: string;
   participantId: string;
   body: string;
+  seq: number;
   revealAt: number;
 }

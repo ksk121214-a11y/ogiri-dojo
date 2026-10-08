@@ -10,6 +10,11 @@ import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
 import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
 import { IS_SHORT_TEST_BUILD, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import {
+  manualTopicSelectionMessage,
+  randomTopicShortageMessage,
+  requiredTopicCount,
+} from "@/lib/liveTopicRequirement";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -439,7 +444,11 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
     }
   }, [liveMode, nextAutoNumber, manualNumberTouched]);
 
-  const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
+  const neededTopics = requiredTopicCount(groupCount, ROUNDS_PER_LIVE_DEFAULT);
+  const topicShortage =
+    topicMode === "random"
+      ? randomTopicShortageMessage(neededTopics, topicBank.length)
+      : manualTopicSelectionMessage(neededTopics, manualTopicIds.length);
 
   const handleSubmit = async () => {
     if (submitting) return;
@@ -458,6 +467,11 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
         }
         manualOfficialSequenceNumber = parsed;
       }
+    }
+
+    if (topicShortage) {
+      setLocalError(topicShortage);
+      return;
     }
 
     if (liveMode === "official") {
@@ -629,7 +643,7 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
 
         <div className="rounded border border-gray-200 p-2">
           <p className="text-xs font-bold text-gray-700">
-            お題の選び方（必要数：{neededTopics}件）
+            お題の選び方（必要数：{neededTopics}件 ＝ {groupCount}組 × {ROUNDS_PER_LIVE_DEFAULT}周）
           </p>
           <div className="mt-1 flex gap-3 text-xs">
             <label className="flex items-center gap-1">
@@ -677,9 +691,10 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
           )}
         </div>
 
+        {!localError && topicShortage && <p className="text-xs text-red-600">{topicShortage}</p>}
         {localError && <p className="text-xs text-red-600">{localError}</p>}
 
-        <AdminButton variant="primary" disabled={submitting} onClick={handleSubmit} className="self-start px-6 py-2.5 text-sm">
+        <AdminButton variant="primary" disabled={submitting || topicShortage !== null} onClick={handleSubmit} className="self-start px-6 py-2.5 text-sm">
           {submitting ? "保存中…" : "この内容でライブを準備する"}
         </AdminButton>
       </div>

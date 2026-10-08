@@ -97,14 +97,14 @@ for (const [profile, grace] of [["standard", BOT_HUMAN_GRACE_MS.standard], ["sho
   console.log("PASS: ターン切替で窓をリセット／時計が未同期なら誤った時刻で窓を開始しない");
 }
 
-// 6) 回答時間全体（standard 60秒／short_test 20秒）を通したシミュレーション。
+// 6) 回答時間全体（standard 90秒／short_test 20秒）を通したシミュレーション。
 //    ボット6体が毎tick試み、人間2人は最後まで送信しない（離席）。回答の持ち時間は
 //    「審査中でない時間」だけ進む（猶予中も消費される）。
 //    - 各送信可能時間帯の先頭 graceMs は、必ず人間用猶予（ボットは送れない）。
 //    - それでも持ち時間は必ず0に到達する（永久停止しない）。
 for (const profile of ["standard", "short_test"] as const) {
   const graceMs = botHumanGraceMs(profile);
-  const answerMs = profile === "standard" ? 60_000 : 20_000;
+  const answerMs = profile === "standard" ? 90_000 : 20_000;
   const judgeCycleMs = profile === "standard" ? 16_000 : 12_000; // 審査＋演出（送信不可の時間）
   const TICK = 500;
   const t = createBotIdleTracker();

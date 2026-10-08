@@ -12,15 +12,19 @@ import {
   REVEAL_SEQUENCE_MS,
   TSUKKOMI_TEMPLATES,
 } from "@/data/liveDemoData";
+import { DEFAULT_RECORDING_SETTINGS, type RecordingSettings } from "@/lib/liveDemoMode";
+import { createSeededRandom } from "@/lib/seededRandom";
 import {
   buildParticipantsAndGroups,
   buildTopics,
   buildTurns,
   genId,
   generateBotAnswerSchedule,
+  liveDemoRandom,
   randomBotAnswerBody,
   randomBotScore,
   randomDelay,
+  setLiveDemoRandom,
 } from "@/lib/liveDemoLogic";
 import type {
   DemoAnswer,
@@ -44,9 +48,9 @@ interface BotScheduleEvent {
   targetRemainingMs: number;
 }
 
-// 客席のツッコミ・拍手演出。舞台・客席の両画面で購読して表示するためグローバルに持つ（§9）
+// 客席のツッコミ・拍手演出（実ライブの TsukkomiEvent と同じ形。id は文字列）
 export interface TsukkomiEvent {
-  id: number;
+  id: string;
   kind: "clap" | "stamp";
   text: string;
 }
@@ -57,8 +61,28 @@ export interface TsukkomiEvent {
 const TSUKKOMI_COOLDOWN_MS = 1_000;
 let lastTsukkomiSentAt = 0;
 
+// 待機列（実ライブの tsukkomiQueue と同じ規則）：受信からこの時間を過ぎた古いリアクションは表示せず捨てる。
+// 値は実ライブ（useLiveFollowerStore.ts の TSUKKOMI_STALE_MS）と同じ。一致は静的検査で確認する。
+const DEMO_TSUKKOMI_STALE_MS = 7_000;
+let demoTsukkomiCounter = 0;
+
+interface DemoQueuedTsukkomi {
+  id: string;
+  kind: "clap" | "stamp";
+  text: string;
+  receivedAt: number;
+}
+
+function pruneStaleTsukkomi(queue: DemoQueuedTsukkomi[], now: number): DemoQueuedTsukkomi[] {
+  return queue.filter((item) => now - item.receivedAt <= DEMO_TSUKKOMI_STALE_MS);
+}
+
 export interface LiveDemoState {
   status: "idle" | "running";
+  // 動画撮影モードで開始したか（開始時に決まり、リセットまで変わらない）
+  recording: boolean;
+  // ボットの回答を出すか（撮影モードの既定はOFF。開発確認モードは従来どおりON）
+  botAnswersEnabled: boolean;
   phase: LivePhase;
   phaseEndsAt: number | null; // interlude/opening/topic_reveal/group_resultの自動送りに使う締切時刻
 
@@ -87,12 +111,12 @@ export interface LiveDemoState {
   laughEventSeq: number; // 発生のたびに+1、演出コンポーネントの再トリガーに使う
   lastLaughAnswerId: string | null;
 
-  tsukkomiSeq: number; // 発生のたびに+1、舞台・客席どちらの演出コンポーネントも購読して再トリガーする
-  lastTsukkomi: TsukkomiEvent | null;
+  // 実ライブの待機列（tsukkomiQueue）と同じ役割。演出部品は claimReactionEvent で1件ずつ取り出す
+  tsukkomiQueue: DemoQueuedTsukkomi[];
 
   lastTickAt: number | null;
 
-  startLive: () => void;
+  startLive: (options?: { recording: boolean; seed: string; settings?: RecordingSettings }) => void;
   resetLive: () => void;
   closeLive: () => void;
   tick: (nowMs: number) => void;
@@ -104,10 +128,13 @@ export interface LiveDemoState {
     points: 0 | 1 | 2 | 3,
   ) => void;
   sendTsukkomi: (kind: "clap" | "stamp", text: string) => void;
+  claimReactionEvent: (predicate: (event: TsukkomiEvent) => boolean, now?: number) => TsukkomiEvent | null;
 }
 
 const IDLE_STATE = {
   status: "idle" as const,
+  recording: false,
+  botAnswersEnabled: true,
   phase: "interlude" as LivePhase,
   phaseEndsAt: null,
   participants: [],
@@ -127,8 +154,7 @@ const IDLE_STATE = {
   revealGateUntil: 0,
   laughEventSeq: 0,
   lastLaughAnswerId: null,
-  tsukkomiSeq: 0,
-  lastTsukkomi: null,
+  tsukkomiQueue: [],
   lastTickAt: null,
 };
 
@@ -147,11 +173,16 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     if (now < state.revealGateUntil) return;
 
     const [item, ...rest] = state.submissionQueue;
+    // 送信の時点で回数を進める（実ライブは送信のDB登録で「残り○回」が減る。フリップはその後）
+    const seq = (state.answerCounts[item.participantId] ?? 0) + 1;
     set({
       submissionQueue: rest,
+      answerCounts: { ...state.answerCounts, [item.participantId]: seq },
       revealPending: {
+        cueId: genId("cue"),
         participantId: item.participantId,
         body: item.body,
+        seq,
         revealAt: now + DEMO_TIMING.revealDelayMs,
       },
     });
@@ -173,10 +204,11 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       return;
     }
 
-    const seq = (state.answerCounts[pending.participantId] ?? 0) + 1;
-    const judgeCount = state.participants.filter(
-      (p) => !stageGroup.memberIds.includes(p.id),
-    ).length;
+    const seq = pending.seq;
+    const eligibleJudgeIds = state.participants
+      .filter((p) => !stageGroup.memberIds.includes(p.id))
+      .map((p) => p.id);
+    const judgeCount = eligibleJudgeIds.length;
 
     const answer: DemoAnswer = {
       id: genId("a"),
@@ -188,6 +220,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       scoreTotal: 0,
       topScoreVotes: 0,
       judgeCount,
+      eligibleJudgeIds,
       laughTriggered: false,
       createdAt: now,
     };
@@ -196,7 +229,6 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     set({
       revealPending: null,
       answers: [...state.answers, answer],
-      answerCounts: { ...state.answerCounts, [pending.participantId]: seq },
       judging: { answerId: answer.id, endsAt, judgeCount },
       myPendingScore: null,
     });
@@ -208,7 +240,7 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     // 何回かに1回、ボット審査員全員が満点(3点)をつける「パーフェクト回」にする。
     // 玉が理論上の満点まで積み上がり、ScoringPhysicsBoard側の金色に染まって弾ける
     // 特別演出を実際に確認できるようにするための抽選（2026-08-18：動作確認のため一旦80%に引き上げ）。
-    const isPerfectRound = Math.random() < 0.8;
+    const isPerfectRound = liveDemoRandom() < 0.8;
     for (const judge of botJudges) {
       const delay = randomDelay(400, DEMO_TIMING.judgeMs - 600);
       setTimeout(() => {
@@ -218,13 +250,13 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
 
     // 客席のボットもたまにツッコミ/爆笑/拍手ボタンを押したかのように送る
     // （見た目の賑やかし用のみ。誰が送ったかは表示に使わないため参加者は問わない）。
-    if (botJudges.length > 0 && Math.random() < 0.35) {
+    if (botJudges.length > 0 && liveDemoRandom() < 0.35) {
       const delay = randomDelay(400, DEMO_TIMING.judgeMs - 200);
       setTimeout(() => {
-        const roll = Math.random();
+        const roll = liveDemoRandom();
         const [kind, text]: ["stamp" | "clap", string] =
           roll < 1 / 3
-            ? ["stamp", TSUKKOMI_TEMPLATES[Math.floor(Math.random() * TSUKKOMI_TEMPLATES.length)]]
+            ? ["stamp", TSUKKOMI_TEMPLATES[Math.floor(liveDemoRandom() * TSUKKOMI_TEMPLATES.length)]]
             : roll < 2 / 3
               ? ["stamp", "爆笑"]
               : ["clap", "👏"];
@@ -294,10 +326,10 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     const botMemberIds = stageGroup.memberIds.filter(
       (id) => id !== MY_PARTICIPANT_ID,
     );
-    const schedule = generateBotAnswerSchedule(
-      botMemberIds,
-      DEMO_TIMING.answerMs,
-    );
+    // 撮影モードでボット回答OFFなら、ボットは回答しない（自分の回答だけで進む）
+    const schedule = state.botAnswersEnabled
+      ? generateBotAnswerSchedule(botMemberIds, DEMO_TIMING.answerMs)
+      : [];
     const counts: Record<string, number> = {};
     stageGroup.memberIds.forEach((id) => {
       counts[id] = 0;
@@ -413,8 +445,11 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
     // remainingMs<=0のケースは上のガードで打ち切り済みなので、ここに来る時点では常に
     // remainingMs > 0。「全員が回答回数を使い切った」場合のみ、時間が余っていても
     // 早めにgroup_resultへ進める。
+    // ボットが回答しない設定なら、ボットの回答枠は使い切った扱い（自分の回答が終われば次へ進める）
     const allExhausted = stageGroup.memberIds.every(
-      (id) => (after.answerCounts[id] ?? 0) >= MAX_ANSWERS_PER_PLAYER,
+      (id) =>
+        (after.answerCounts[id] ?? 0) >= MAX_ANSWERS_PER_PLAYER ||
+        (!after.botAnswersEnabled && id !== MY_PARTICIPANT_ID),
     );
     if (
       after.judging === null &&
@@ -429,14 +464,28 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
   return {
     ...IDLE_STATE,
 
-    startLive: () => {
-      const { participants, groups } = buildParticipantsAndGroups();
-      const topics = buildTopics();
+    startLive: (options?: { recording: boolean; seed: string; settings?: RecordingSettings }) => {
+      // 動画撮影モードは種から乱数を作る（同じ種なら毎回同じ組分け・お題・回答・得点）。
+      // 通常の開発確認モードは従来どおり Math.random。
+      setLiveDemoRandom(options?.recording ? createSeededRandom(options.seed) : Math.random);
+      const recording = options?.recording ?? false;
+      const settings = recording ? (options?.settings ?? DEFAULT_RECORDING_SETTINGS) : null;
+      const built = buildParticipantsAndGroups();
+      // 撮影モードでは自分の名前、全組のお題をセッションの設定に差し替える
+      const participants = settings
+        ? built.participants.map((p) =>
+            p.id === MY_PARTICIPANT_ID ? { ...p, displayName: settings.displayName } : p,
+          )
+        : built.participants;
+      const groups = built.groups;
+      const topics = buildTopics().map((t) => (settings ? { ...t, body: settings.topic } : t));
       const turns = buildTurns(groups, topics);
       const now = Date.now();
       set({
         ...IDLE_STATE,
         status: "running",
+        recording,
+        botAnswersEnabled: settings ? settings.botAnswers : true,
         phase: "interlude",
         phaseEndsAt: now + DEMO_TIMING.interludeMs,
         participants,
@@ -582,12 +631,31 @@ export const useLiveDemoStore = create<LiveDemoState>()((set, get) => {
       const now = Date.now();
       if (now - lastTsukkomiSentAt < TSUKKOMI_COOLDOWN_MS) return;
       lastTsukkomiSentAt = now;
-      const state = get();
-      const id = state.tsukkomiSeq + 1;
-      set({
-        tsukkomiSeq: id,
-        lastTsukkomi: { id, kind, text },
-      });
+      demoTsukkomiCounter += 1;
+      const item: DemoQueuedTsukkomi = { id: `demo-tsukkomi-${demoTsukkomiCounter}`, kind, text, receivedAt: now };
+      set({ tsukkomiQueue: [...pruneStaleTsukkomi(get().tsukkomiQueue, now), item] });
+    },
+
+    // 実ライブの claimReactionEvent と同じ規則：古いものは種別を問わず捨て、先頭から順に最初の一致を1件取り出す。
+    claimReactionEvent: (predicate, now = Date.now()) => {
+      const queue = get().tsukkomiQueue;
+      if (queue.length === 0) return null;
+      let claimed: DemoQueuedTsukkomi | null = null;
+      const next: DemoQueuedTsukkomi[] = [];
+      for (const item of queue) {
+        if (claimed) {
+          next.push(item);
+          continue;
+        }
+        if (now - item.receivedAt > DEMO_TSUKKOMI_STALE_MS) continue;
+        if (predicate({ id: item.id, kind: item.kind, text: item.text })) {
+          claimed = item;
+          continue;
+        }
+        next.push(item);
+      }
+      set({ tsukkomiQueue: next });
+      return claimed ? { id: claimed.id, kind: claimed.kind, text: claimed.text } : null;
     },
   };
 });

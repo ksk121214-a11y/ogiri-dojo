@@ -5,7 +5,7 @@
 // 設計メモ:
 // - 審査サイクル中（未表示の回答がある、または表示中で未確定の回答がある間）は
 //   lives.answering_paused/answering_remaining_msを使って持ち時間を一時停止する。
-//   実テストで「審査に時間がかかっている間に60秒が経過し、その後の送信がRLSで
+//   実テストで「審査に時間がかかっている間に持ち時間が経過し、その後の送信がRLSで
 //   弾かれる」不具合が見つかったため、一時停止の配線を実装した。
 // - 採点ボタンを押した本人向けの「光る演出のための猶予」(earlyConfirmDelayMs)は
 //   各クライアントのUI側の関心事であり、ホスト側の確定タイミングには含めない。
@@ -20,6 +20,7 @@ import {
   classifyBotAnswerInsertError,
   createBotAnswerGuard,
   createBotIdleTracker,
+  botAnswersAllowedForTurn,
   decideBotAnswerGate,
   finishBotAnswer,
   observeBotIdleWindow,
@@ -246,7 +247,7 @@ let lastBotTsukkomiAt = 0;
 // answeringRemainingMs/tickAnsweringと同じ考え方：審査サイクル中(busy)はここを減算しない
 // （＝審査時間は持ち時間の予算を消費しない、という元々の仕様どおり）ことで、一時停止・再開を
 // 挟んでも正しく減っていく。以前は「一度だけ計算した絶対締切時刻」を使っていたが、それだと
-// 一時停止で消費される時間ぶんが締切に反映されず、実際にはまだ60秒経っていないのに
+// 一時停止で消費される時間ぶんが締切に反映されず、実際にはまだ持ち時間が経っていないのに
 // （審査で一時停止していた時間の分だけ）早く締切扱いになってしまっていた。
 // 一方、lives.phase_deadline/answering_remaining_ms（DBの一時停止スナップショット）だけに
 // 頼ると、審査サイクルが途切れず連続する場合に「本来の締切をとうに過ぎている」ことに
@@ -1113,7 +1114,7 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
 // ボット参加者に、舞台上なら回答を、客席なら採点を、それぞれ自分自身の
 // 認証済みクライアントで行わせる（本人としての書き込みなので既存RLSにそのまま合致する）。
 // 事前に計算したスケジュールではなく、tickのたびに低確率で抽選する方式にすることで、
-// 60秒の間に自然にばらけて送信されるようにしている。
+// 回答フェーズの持ち時間（standardは90秒）の間に自然にばらけて送信されるようにしている。
 async function runBotBehavior(tickGeneration: number, tickLiveId: string | null) {
   const state = useLiveHostStore.getState();
   const { live, turns, participants, answers, scores } = state;
@@ -1163,7 +1164,7 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
 
   // 客席のボットがたまにツッコミ/爆笑/拍手ボタンを押したかのように送る
   // （見た目の賑やかし。どのボットが送ったかは表示に使わない）。
-  // 60秒の回答フェーズ中に数回程度発生する頻度を狙っている（2026-08-19：2%→5%に引き上げ）。
+  // 回答フェーズ（standardは90秒）の中で数回程度発生する頻度を狙っている（2026-08-19：2%→5%に引き上げ）。
   // 発生確率(0.05)・間隔(1.5秒)・テンプレート・clap/stampの割合(1/3ずつ)は不変。
   // 送信は「ボット本人としてログイン済みのクライアント」から既存の send_tsukkomi を
   // 呼ぶ（participant_idはDB側がauth.uid()から決めるため、ホストが参加者IDを
@@ -1221,6 +1222,9 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
       graceMs: botHumanGraceMs(live.timing_profile),
     });
     if (!gate.allow) return;
+    // 1組・1周あたりのボット回答は最大2件（ボット全員の合計）。人間の回答数には影響させない
+    const botAnswersThisTurn = answers.filter((a) => botParticipantIds.has(a.participant_id)).length;
+    if (!botAnswersAllowedForTurn(botAnswersThisTurn)) return;
     const candidates = bots.filter((bot) => {
       const participant = participants.find((p) => p.id === bot.participantId);
       if (!participant || participant.role !== "player" || participant.kicked_at) return false;

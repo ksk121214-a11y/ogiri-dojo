@@ -4,6 +4,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { isLimitedRewardLive } from "@/lib/limitedRewardEligibility";
+
 import MyIconAvatar from "@/components/app/MyIconAvatar";
 import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
 import XShareButton from "@/components/app/XShareButton";
@@ -78,7 +80,7 @@ export default function FinalResultView({
   // あたかも付与したかのような表示にしないため、末尾の熟練度メーター演出を
   // 出さず、代わりに注記を表示する。
   liveMode?: "test" | "official";
-  // 2026-09-27（初回ライブ限定特典）：mark_final_result_presence/grant_first_live_reward
+  // 2026-09-27（初期ライブ限定特典）：mark_final_result_presence/grant_first_live_reward
   // （supabase/migrations/0081）を呼ぶために必要な情報。official #1・非緊急中止の
   // 場合だけ試行する（それ以外はDB側でも拒否されるが、無駄な通信をしないため
   // クライアント側でも事前に絞る）。
@@ -119,7 +121,7 @@ export default function FinalResultView({
   // （profile取得前・取得失敗でも匿名ユーザーを通常会員として扱わないため）。
   const isGuest = isGuestUser(authUser, profile);
 
-  // 2026-09-27（初回ライブ限定特典）：最終結果画面の初回表示時に到達記録・付与を試みる。
+  // 2026-09-27（初期ライブ限定特典）：最終結果画面の初回表示時に到達記録・付与を試みる。
   // official #1・非緊急中止・非ゲストの場合だけ試行し、それ以外は何もしない
   // （DB側でも同じ条件を検証するが、対象外のライブ・ゲストで無駄な通信をしないため）。
   // リロード・visibilitychange・pageshow・online・Realtime再接続（refetchAllによる
@@ -129,7 +131,7 @@ export default function FinalResultView({
   const [showFirstLiveRewardModal, setShowFirstLiveRewardModal] = useState(false);
   const [firstLiveRewardTitleName, setFirstLiveRewardTitleName] = useState<string | null>(null);
   const isEligibleForFirstLiveReward =
-    liveMode === "official" && officialSequenceNumber === 1 && !emergencyClosed && !isGuest;
+    isLimitedRewardLive(liveMode, officialSequenceNumber, emergencyClosed) && !isGuest;
   useEffect(() => {
     if (!isEligibleForFirstLiveReward) return;
     if (!authUser || !liveId) return;

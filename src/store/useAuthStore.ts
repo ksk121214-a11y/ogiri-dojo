@@ -46,16 +46,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   // このプロジェクトのsupabase-js（src/lib/supabase.ts）はflowTypeを指定しておらず、
   // 使用中のバージョン(2.110.2)の既定であるimplicitフローを使っている（PKCEではない）。
   // signInWithOAuthによるリダイレクトが成功してcallbackへ戻ってきた場合、
-  // supabase-jsのdetectSessionInUrlがURLのフラグメントに含まれるaccess_token/
-  // refresh_tokenを検出し、それを新しいセッション（Xアカウント）としてそのまま
-  // 保存する。この保存によって、既存のセッション（匿名であっても）は自動的に
-  // 新しいセッションへ置き換わる。つまりOAuthが実際に成功した場合は、明示的な
-  // signOut()を挟まなくても匿名セッションは結果的に非匿名セッションへ置き換わる
-  // （「成功した場合にだけゲスト参加状態を終了する」を、事前のsignOut()ではなく
-  // OAuth自体の結果に委ねる形にする）。逆にOAuthをキャンセル・失敗した場合や、
-  // callbackへ到達する前にブラウザで戻った場合は、URLにトークンが含まれないため
-  // 新しいセッションは保存されず、元の匿名セッションがそのまま残る。そのため、
-  // OAuth開始前のsignOut()は廃止する。
+  // access_token/refresh_tokenはURLのフラグメントで返る。セッションの確立は
+  // /auth/callbackページが明示的に行う（src/lib/authCallback.ts）。supabase-jsの
+  // URL自動検出は無効（src/lib/supabase.ts）なので、ここでは自動保存に依存しない。
+  // 保存に成功すると、既存の匿名セッションはXのセッションへ置き換わる。OAuthを
+  // キャンセル・失敗した場合は、URLにトークンが無いか、キャンセルとして扱われ、
+  // 元の匿名セッションにはsetSessionもsignOutも行われないため、そのまま残る。
+  // そのため、OAuth開始前のsignOut()は廃止する。
   // isGuestSwitch（呼び出し元が「現在ゲストからXログインへ切り替えようとしている」
   // ことを分かっている場合だけtrue）が指定された時、または現在のセッションが実際に
   // 匿名の場合だけ、切り替え前に確認ダイアログを挟む（signOut()は行わない）。

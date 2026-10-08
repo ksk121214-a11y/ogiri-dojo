@@ -21,7 +21,8 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'a9400000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
-  ('a9410000-0000-0000-0000-000000000001', '0074テスト用お題1', 'text', true)
+  ('a9410000-0000-0000-0000-000000000001', '0074テスト用お題1', 'text', true),
+  ('a9410000-0000-0000-0000-000000000002', '0074テスト用お題2（2周目）', 'text', true)
 on conflict do nothing;
 
 -- 参加登録用のライブを1本作って現在のフェーズをopeningにし、closeして次を作る、を
@@ -35,7 +36,7 @@ begin
   perform set_config('myapp.uid', 'a9400000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), p_title, 20, 1,
-    array['a9410000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['a9410000-0000-0000-0000-000000000001', 'a9410000-0000-0000-0000-000000000002']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;

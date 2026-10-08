@@ -17,6 +17,15 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'a8000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('ecd7d10b-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000005', '2周目用の追加お題5（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000006', '2周目用の追加お題6（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000007', '2周目用の追加お題7（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000008', '2周目用の追加お題8（自動テスト）', 'text', true),
+  ('ecd7d10b-0000-0000-0000-000000000009', '2周目用の追加お題9（自動テスト）', 'text', true),
   ('a8100000-0000-0000-0000-000000000001', '0068テスト用お題1', 'text', true),
   ('a8100000-0000-0000-0000-000000000002', '0068テスト用お題2', 'text', true),
   ('a8100000-0000-0000-0000-000000000003', '0068テスト用お題3', 'text', true),
@@ -59,7 +68,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-省略時test', 20, 1,
-    array['a8100000-0000-0000-0000-000000000001']::uuid[]
+    array['a8100000-0000-0000-0000-000000000001', 'ecd7d10b-0000-0000-0000-000000000001']::uuid[]
   );
   select live_mode, official_sequence_number into v_live_mode, v_official_seq
     from public.lives where id = v_live_id;
@@ -128,7 +137,7 @@ begin
   perform set_config('myapp.uid', 'a8000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-本番1回目', 20, 1,
-    array['a8100000-0000-0000-0000-000000000002']::uuid[],
+    array['a8100000-0000-0000-0000-000000000002', 'ecd7d10b-0000-0000-0000-000000000002']::uuid[],
     'official'
   );
   select official_sequence_number into v_seq from public.lives where id = v_live_id;
@@ -161,7 +170,7 @@ begin
   -- テストライブを間に挟む。
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-間に挟むtest', 20, 1,
-    array['a8100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['a8100000-0000-0000-0000-000000000001', 'ecd7d10b-0000-0000-0000-000000000003']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'closed' where id = v_live_id;
@@ -170,7 +179,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-本番2回目', 20, 1,
-    array['a8100000-0000-0000-0000-000000000003']::uuid[], 'official'
+    array['a8100000-0000-0000-0000-000000000003', 'ecd7d10b-0000-0000-0000-000000000004']::uuid[], 'official'
   );
   select official_sequence_number into v_seq from public.lives where id = v_live_id;
   reset role;
@@ -237,7 +246,7 @@ begin
   begin
     perform public.create_live_preparation(
       now(), '0068テスト-作成失敗', 20, 2,
-      array['a8100000-0000-0000-0000-000000000004', v_bogus_id]::uuid[], -- 2件必要中1件は存在しないID
+      array['a8100000-0000-0000-0000-000000000004', v_bogus_id, 'ecd7d10b-0000-0000-0000-000000000005', 'ecd7d10b-0000-0000-0000-000000000006']::uuid[], -- 2件必要中1件は存在しないID
       'official'
     );
     -- ここに到達した＝例外が飛ばなかった（v_raisedはfalseのまま、下のifで検出する）。
@@ -393,7 +402,7 @@ begin
   perform set_config('myapp.uid', 'a8000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-test終了時', 20, 1,
-    array['a8100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['a8100000-0000-0000-0000-000000000001', 'ecd7d10b-0000-0000-0000-000000000007']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -523,7 +532,7 @@ begin
   perform set_config('myapp.uid', 'a8000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-official終了時', 20, 1,
-    array['a8100000-0000-0000-0000-000000000002']::uuid[], 'official'
+    array['a8100000-0000-0000-0000-000000000002', 'ecd7d10b-0000-0000-0000-000000000008']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -615,7 +624,7 @@ begin
   perform set_config('myapp.uid', 'a8000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068テスト-manager_best拒否', 20, 1,
-    array['a8100000-0000-0000-0000-000000000003']::uuid[], 'test'
+    array['a8100000-0000-0000-0000-000000000003', 'ecd7d10b-0000-0000-0000-000000000009']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;

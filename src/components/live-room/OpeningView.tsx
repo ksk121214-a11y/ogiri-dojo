@@ -1,10 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 
-import CurtainOverlay from "@/components/live-demo/CurtainOverlay";
-import ScreenShell from "@/components/live-demo/ScreenShell";
+import OpeningPresentation from "@/components/live-room/OpeningPresentation";
 import FirstLiveRewardAnnouncement from "@/components/live-room/FirstLiveRewardAnnouncement";
 import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { isGuestUser } from "@/lib/guestStatus";
@@ -20,9 +18,9 @@ const ROLE_LABEL: Record<ParticipantRole, string> = {
   audience: "観客希望",
 };
 
-// 開幕（参加登録受付中）フェーズの実バックエンド版。src/components/live-demo/OpeningScreen.tsxは
-// 「組分け発表」の演出だが、実バックエンドのopeningフェーズはまだ組分け前の登録受付そのものなので、
-// デモ版をそのまま移植せず、実際の登録状況に合わせた専用の画面として作る。
+// 開幕（参加登録受付中）フェーズの実バックエンド版adapter。表示そのものは
+// src/components/live-room/OpeningPresentation.tsx（本番・体験版/撮影モード共用）に委ね、
+// ここでは実データ（useLiveFollowerStore・Supabase経由のjoinLive）からpropsを組み立てる。
 export default function OpeningView() {
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -42,15 +40,6 @@ export default function OpeningView() {
   // 2026-09-01: 集客施策の効果測定のため、参加登録時に「どこで知ったか」を
   // 任意で選んでもらう（未選択のままでも参加はできる、選択必須にはしない）。
   const [referralSource, setReferralSource] = useState("");
-  // 2026-09-22追加（流入アンケートの1アカウント1回化）：
-  // - ゲストには表示しない。
-  // - profile取得が完了する（profileLoading===false）まで表示判定しない
-  //   （プロフィール取得前の一瞬だけ表示されてしまうことを防ぐ）。
-  // - referralSource/referralSourceAnsweredAtの両方がnullの場合だけ表示する
-  //   （2026-09-22再修正・問題2：join_live成功直後はapplyReferralAnswerFromJoinで
-  //   referralSourceAnsweredAtだけを暫定値で先に埋める設計のため、片方だけを
-  //   見るとローカル反映直後に判定がずれる隙が生じうる。両方nullという厳しい方の
-  //   条件にすることで、ローカル反映直後の安全性を上げる）。
   const showReferralSurvey =
     !isGuest && !profileLoading && !!profile && profile.referralSource == null && profile.referralSourceAnsweredAt == null;
   // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
@@ -69,20 +58,10 @@ export default function OpeningView() {
 
   if (!live) return null;
 
-  // 運営者専用管理画面の追加（第1段階）：最大参加人数はプレイヤーのみに適用し、
-  // 観客には適用しない。上限判定はUIの見た目を早く更新するための表示用であり、
-  // 実際の安全な上限チェックはjoinLive内のRPC(join_live)がSupabase側で行う。
   const playerCount = participants.filter((p) => p.preferred_role === "player").length;
   const isPlayerFull = live.max_players != null && playerCount >= live.max_players;
 
-  // 2026-09-03: 仕様書_v2.md §2.1「一度見学希望で登録した人が後からプレイヤー
-  // 希望に変更することも、上限内であれば可能」に合わせて確認文を修正した。
-  // 観客→プレイヤーへの変更は実際に可能なため「あとから変更できません」と
-  // 案内するのは誤りだった（以前はここが不正確だった）。プレイヤー→観客の
-  // 変更は仕様上想定されていないため、こちらの警告はそのまま残す。
   const handleJoin = async (role: ParticipantRole) => {
-    // 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤーへ変更できない
-    // ため、「あとからプレイヤーへ変更できます」という文言はゲストには出さない。
     const confirmed = window.confirm(
       role === "player"
         ? "プレイヤーとして参加しますか？あとから観客に変更することはできません。"
@@ -100,182 +79,42 @@ export default function OpeningView() {
     }
   };
 
+  const { players, audience } = splitParticipantsByPreferredRole(participants);
+  const toRosterPerson = (p: (typeof participants)[number]) => ({
+    id: p.id,
+    name: participantNames[p.id] ?? "（名前未設定）",
+    isMe: p.id === myParticipant?.id,
+    roleLabel: ROLE_LABEL[p.preferred_role],
+  });
+
   return (
-    <ScreenShell>
-      {showCurtain && <CurtainOverlay />}
-      <p className="font-sans text-xs tracking-widest text-white/60">開幕</p>
-      <motion.h2
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="mt-2 font-sans text-3xl font-black text-[#ffcf4a] sm:text-4xl"
-      >
-        参加登録受付中
-      </motion.h2>
-      <p className="mt-2 font-sans text-sm text-white/80">
-        まもなく組分けが発表されます。参加方法を選んでください。
-      </p>
-      {/* 2026-09-27（レビュー対応）：以前は未ログインの参加入口(src/app/live/page.tsx)
-          にしか案内が出ておらず、Xログイン済みでこの参加受付画面を見る人には
-          見えていなかった。文言・表示条件はFirstLiveRewardAnnouncementに一本化する
-          （supabase/migrations/0081参照）。 */}
-      <FirstLiveRewardAnnouncement
-        liveMode={live.live_mode}
-        officialSequenceNumber={live.official_sequence_number}
-        emergencyClosed={live.emergency_closed}
-        className="mt-2 max-w-xs text-center font-sans text-[11px] text-[#ffcf4a]"
-      />
-
-      {!myParticipant ? (
-        <div className="mt-6 flex flex-col items-center gap-2">
-          {/* 2026-09-01: 集客施策の効果測定のための任意アンケート。選ばなくても
-              参加はできる（グロース部指摘：Xシェアの効果検証ができない問題への対応）。
-              2026-09-22追加：通常会員が過去に一度でも回答済みなら、以後は表示しない
-              （showReferralSurveyの判定参照）。ゲストにも表示しない。 */}
-          {showReferralSurvey && (
-            <label className="flex flex-col items-center gap-1 text-center">
-              <span className="font-sans text-[11px] text-white/50">
-                どこでこのライブを知りましたか？（任意）
-              </span>
-              <select
-                value={referralSource}
-                onChange={(e) => setReferralSource(e.target.value)}
-                className="rounded-full border border-white/30 bg-transparent px-3 py-1.5 font-sans text-xs text-white [&>option]:bg-[#12101a]"
-              >
-                <option value="">選択しない</option>
-                <option value="x">X（旧Twitter）</option>
-                <option value="friend">友人・知人の紹介</option>
-                <option value="app">アプリ内（寄合帳・ホーム等）で知った</option>
-                <option value="other">その他</option>
-              </select>
-            </label>
-          )}
-          <div className="flex flex-wrap justify-center gap-3">
-            {/* 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤー希望を
-                選べないため、このボタン自体を表示しない（DB側join_liveも
-                GUEST_AUDIENCE_ONLYで拒否する多層防御）。 */}
-            {!isGuest && (
-              <button
-                type="button"
-                disabled={joining || isPlayerFull}
-                onClick={() => handleJoin("player")}
-                title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
-                className="rounded-full bg-[#ff3b5b] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {joining ? "参加処理中…" : isPlayerFull ? "満員です" : "プレイヤーとして参加する"}
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={joining}
-              onClick={() => handleJoin("audience")}
-              className="rounded-full border border-white/40 px-6 py-3 font-sans text-sm font-bold text-white transition hover:border-[#ffcf4a] hover:text-[#ffcf4a] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {joining ? "参加処理中…" : "観客として参加する"}
-            </button>
-          </div>
-          {!isGuest && isPlayerFull && (
-            <p className="font-sans text-xs text-[#ffcf4a]">
-              参加人数が上限に達しました。観客として参加できます。
-            </p>
-          )}
-          {/* 2026-09-01: 「観客は採点できない」ことが画面上どこにも説明されておらず、
-              観客が採点UIの不在に戸惑う可能性があったため、選択の時点で一言添える
-              （QA部指摘）。ゲストにはプレイヤーの選択肢自体が無いため、観客の
-              説明だけに絞る。 */}
-          <p className="mt-1 max-w-xs text-center font-sans text-[11px] text-white/50">
-            {isGuest
-              ? "観客：採点はできませんが、爆笑・ツッコミ・拍手でいつでも盛り上げられます。"
-              : "プレイヤー：舞台に立って回答し、自分の組の出番以外は採点も担当します。観客：採点はできませんが、人数制限なくいつでも観戦できます。"}
-          </p>
-        </div>
-      ) : myParticipant.preferred_role === "audience" ? (
-        // 2026-09-03: 仕様書_v2.md §2.1「一度見学希望で登録した人が後から
-        // プレイヤー希望に変更することも、上限内であれば可能」に対応。
-        // 以前はここが確認済みの静的な表示だけで、変更する手段が無かった。
-        // 2026-09-13（ゲスト観客対応の最終仕様確定）：ゲストはプレイヤーへの
-        // 変更もできないため、この変更ボタン自体を表示しない。
-        <div className="mt-6 flex flex-col items-center gap-2">
-          <p className="font-sans text-sm text-[#ffcf4a]">観客希望で参加登録済みです</p>
-          {!isGuest && (
-            <>
-              <button
-                type="button"
-                disabled={joining || isPlayerFull}
-                onClick={() => handleJoin("player")}
-                title={isPlayerFull ? "参加人数が上限に達しました" : undefined}
-                className="rounded-full bg-[#ff3b5b] px-6 py-2.5 font-sans text-xs font-bold text-white transition hover:bg-[#e02040] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {joining ? "変更処理中…" : isPlayerFull ? "満員です" : "プレイヤーに変更する"}
-              </button>
-              {isPlayerFull && (
-                <p className="font-sans text-xs text-[#ffcf4a]">参加人数が上限に達しています。</p>
-              )}
-            </>
-          )}
-        </div>
-      ) : (
-        <p className="mt-6 font-sans text-sm text-[#ffcf4a]">
-          {ROLE_LABEL[myParticipant.preferred_role]}で参加登録済みです
-        </p>
-      )}
-      {followerError && (
-        <p className="mt-2 font-sans text-xs text-[#ff3b5b]">{followerError}</p>
-      )}
-
-      <div className="mt-10 w-full max-w-xl min-w-0">
-        {/* 運営が設定する最大参加人数はプレイヤーだけに適用され、観客には上限が無い
-            （src/lib/participantRoleSplit.ts splitParticipantsByPreferredRole・
-            supabase/migrations/0074_referral_source_survey.sql join_live参照）ため、
-            「3/8」のような最大人数との比率は出さず、現在の人数だけを表示する。 */}
-        {(() => {
-          const { players, audience } = splitParticipantsByPreferredRole(participants);
-          const groups: { label: string; list: typeof players }[] = [
-            { label: "現在のプレイヤー", list: players },
-            { label: "現在の観客", list: audience },
-          ];
-          return (
-            <div className="flex flex-col gap-5">
-              {groups.map((g) => (
-                <div key={g.label} className="min-w-0">
-                  <p className="font-sans text-xs tracking-widest text-white/60">
-                    {g.label}：{g.list.length}人
-                  </p>
-                  {g.list.length === 0 ? (
-                    <p className="mt-3 font-sans text-xs text-white/40">まだいません</p>
-                  ) : (
-                    <div className="mt-3 max-h-64 space-y-1.5 overflow-y-auto">
-                      {g.list.map((p, idx) => {
-                        const isMe = p.id === myParticipant?.id;
-                        return (
-                          <motion.div
-                            key={p.id}
-                            initial={{ opacity: 0, x: -12 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: Math.min(idx, 20) * 0.03 }}
-                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
-                              isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
-                            }`}
-                          >
-                            {/* 2026-09-28（レビュー対応）：参加登録受付画面は横幅に
-                                余裕があるため5文字で切らず全文表示する。 */}
-                            <span className="min-w-0 break-words font-sans text-white/90">
-                              {participantNames[p.id] ?? "（名前未設定）"}
-                            </span>
-                            <span className="shrink-0 font-sans text-xs text-white/60">
-                              {ROLE_LABEL[p.preferred_role]}
-                            </span>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          );
-        })()}
-      </div>
-    </ScreenShell>
+    <OpeningPresentation
+      headerExtra={
+        <FirstLiveRewardAnnouncement
+          liveMode={live.live_mode}
+          officialSequenceNumber={live.official_sequence_number}
+          emergencyClosed={live.emergency_closed}
+          className="mt-2 max-w-xs text-center font-sans text-[11px] text-[#ffcf4a]"
+        />
+      }
+      showCurtain={showCurtain}
+      errorMessage={followerError}
+      myRegistration={
+        myParticipant
+          ? {
+              roleLabel: ROLE_LABEL[myParticipant.preferred_role],
+              canSwitchToPlayer: myParticipant.preferred_role === "audience" && !isGuest,
+            }
+          : null
+      }
+      canChoosePlayer={!isGuest}
+      isPlayerFull={isPlayerFull}
+      joining={joining}
+      isGuest={isGuest}
+      referralSurvey={showReferralSurvey ? { value: referralSource, onChange: setReferralSource } : null}
+      onJoin={handleJoin}
+      players={players.map(toRosterPerson)}
+      audience={audience.map(toRosterPerson)}
+    />
   );
 }

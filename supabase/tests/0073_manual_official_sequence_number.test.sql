@@ -14,6 +14,15 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'a9000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e3694832-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000005', '2周目用の追加お題5（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000006', '2周目用の追加お題6（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000007', '2周目用の追加お題7（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000008', '2周目用の追加お題8（自動テスト）', 'text', true),
+  ('e3694832-0000-0000-0000-000000000009', '2周目用の追加お題9（自動テスト）', 'text', true),
   ('a9100000-0000-0000-0000-000000000001', '0073テスト用お題1', 'text', true),
   ('a9100000-0000-0000-0000-000000000002', '0073テスト用お題2', 'text', true)
 on conflict do nothing;
@@ -93,7 +102,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0073テスト-手動番号', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'official', v_manual
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000001']::uuid[], 'official', v_manual
   );
   reset role;
 
@@ -129,7 +138,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0073テスト-手動直後の自動採番', 20, 1,
-    array['a9100000-0000-0000-0000-000000000002']::uuid[], 'official'
+    array['a9100000-0000-0000-0000-000000000002', 'e3694832-0000-0000-0000-000000000002']::uuid[], 'official'
   );
   reset role;
 
@@ -160,7 +169,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select ok, reason, live_id into v_ok, v_reason, v_live_id from public.create_live_preparation(
     now(), '0073テスト-使用済み番号', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'official', v_used_seq
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000003']::uuid[], 'official', v_used_seq
   );
   reset role;
 
@@ -186,7 +195,7 @@ begin
 
   select ok, reason into v_ok, v_reason from public.create_live_preparation(
     now(), '0073テスト-0拒否', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'official', 0
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000004']::uuid[], 'official', 0
   );
   if v_ok is not false or v_reason !~ '1以上の整数' then
     raise exception 'FAIL: 0の手動指定が拒否されなかった(ok=%, reason=%)', v_ok, v_reason;
@@ -194,7 +203,7 @@ begin
 
   select ok, reason into v_ok, v_reason from public.create_live_preparation(
     now(), '0073テスト-負数拒否', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'official', -1
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000005']::uuid[], 'official', -1
   );
   if v_ok is not false or v_reason !~ '1以上の整数' then
     raise exception 'FAIL: 負数の手動指定が拒否されなかった(ok=%, reason=%)', v_ok, v_reason;
@@ -239,7 +248,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select ok, reason into v_ok, v_reason from public.create_live_preparation(
     now(), '0073テスト-test手動拒否', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'test', 999
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000006']::uuid[], 'test', 999
   );
   reset role;
 
@@ -274,7 +283,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0073テスト-欠番埋め', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'official', v_gap_seq
+    array['a9100000-0000-0000-0000-000000000001', 'e3694832-0000-0000-0000-000000000007']::uuid[], 'official', v_gap_seq
   );
   reset role;
 
@@ -319,7 +328,7 @@ begin
   begin
     perform public.create_live_preparation(
       now(), '0073テスト-手動番号での作成失敗', 20, 2,
-      array['a9100000-0000-0000-0000-000000000002', v_bogus_id]::uuid[], -- 2件必要中1件は存在しないID
+      array['a9100000-0000-0000-0000-000000000002', v_bogus_id, 'e3694832-0000-0000-0000-000000000008', 'e3694832-0000-0000-0000-000000000009']::uuid[], -- 2件必要中1件は存在しないID
       'official', v_manual
     );
   exception

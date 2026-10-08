@@ -1,7 +1,7 @@
 // 実バックエンド版ライブの「組結果発表」「最終結果発表」向け派生ロジック。
 // src/lib/liveDemoSelectors.ts（ローカルモック用、useLiveDemoStore依存）と同じ考え方だが、
 // DBの行そのままの型を引数で受け取る純粋関数として作り直したもの。
-import type { AnswerRow, ParticipantRow } from "@/lib/liveRoomTypes";
+import type { AnswerRow, ParticipantRow } from "./liveRoomTypes";
 
 export interface RoomRankingEntry {
   participantId: string;
@@ -15,7 +15,7 @@ export interface RoomRankingEntry {
 }
 
 // total降順に並べ替えつつ、同点には同じ順位を割り当てる（SQLのrank()と同じ考え方）。
-function withRanks(
+export function withRanks(
   entries: { participantId: string; name: string; total: number }[],
 ): RoomRankingEntry[] {
   const sorted = [...entries].sort((a, b) => b.total - a.total);

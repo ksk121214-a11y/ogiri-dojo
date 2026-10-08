@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import AdminButton from "@/components/admin/AdminButton";
 import AdminCard from "@/components/admin/AdminCard";
@@ -8,6 +8,16 @@ import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
 import { isValidFirstLiveRewardRpcData } from "@/lib/firstLiveRewardResult";
+import {
+  applyPanelLoad,
+  createLimitedRewardPresenceLoader,
+  initialPanelState,
+  selectPanelLive,
+  startPanelReload,
+  type LimitedRewardLiveOption,
+  type LimitedRewardPanelState,
+} from "@/lib/limitedRewardPresenceLoader";
+import { runSingleFlight, type SingleFlightLock } from "@/lib/singleFlight";
 import { supabase } from "@/lib/supabase";
 
 // admin_update_title / admin_regrant_first_live_reward（0081）が投げるエラーコードを
@@ -44,10 +54,41 @@ interface PresenceRow {
 
 const ROLE_LABEL: Record<string, string> = { player: "プレイヤー", audience: "観客" };
 
+// 本番ライブ（開催番号#0001〜#0005）の限定特典の対象ライブを読み込む。
+// 対象範囲はsupabase/migrations/0084（limitedRewardEligibility.tsと同じ範囲）。
+const LIMITED_REWARD_OFFICIAL_NUMBERS = [1, 2, 3, 4, 5];
+
+function formatOfficialNumber(n: number | null | undefined): string {
+  return n === null || n === undefined ? "" : `#${String(n).padStart(4, "0")}`;
+}
+
+// 対象ライブの切替・再読込の競合を防ぐローダー（古い取得結果は画面へ反映しない）。
+const limitedRewardPresenceLoader = createLimitedRewardPresenceLoader<PresenceRow>({
+  fetchLives: async () => {
+    const { data, error } = await supabase
+      .from("lives")
+      .select("id, title, official_sequence_number")
+      .eq("live_mode", "official")
+      .in("official_sequence_number", LIMITED_REWARD_OFFICIAL_NUMBERS)
+      .order("official_sequence_number", { ascending: true });
+    return {
+      data: (data ?? null) as LimitedRewardLiveOption[] | null,
+      error: error ? { message: error.message } : null,
+    };
+  },
+  fetchPresence: async (liveId) => {
+    const { data, error } = await supabase.rpc("admin_list_final_result_presence", { p_live_id: liveId });
+    return {
+      data: (data ?? null) as PresenceRow[] | null,
+      error: error ? { message: error.message } : null,
+    };
+  },
+});
+
 // 称号管理画面（運営者専用）。
-// 2026-09-27：称号（通常5種＋初回ライブ限定「最初の目撃者」）の表示名・説明文・
-// 並び順・公開状態の編集と所有者数の確認、初回ライブ#0001の最終結果到達記録・
-// 称号/アイコンの付与状況の確認、未付与者への再付与を行う（supabase/migrations/0081）。
+// 2026-09-27：称号（通常5種＋初期ライブ限定「最初の目撃者」）の表示名・説明文・
+// 並び順・公開状態の編集と所有者数の確認、本番ライブ（#0001〜#0005）の最終結果到達記録・
+// 称号/アイコンの付与状況の確認、未付与者への再付与を行う（supabase/migrations/0081・0084）。
 // 内部ID(slug)は編集不可。物理削除は行わず、is_activeで非表示にするのみ。
 export default function AdminTitlesPage() {
   const [titles, setTitles] = useState<TitleRow[] | null>(null);
@@ -56,9 +97,18 @@ export default function AdminTitlesPage() {
   const [drafts, setDrafts] = useState<Record<string, { displayName: string; description: string; sortOrder: number; isActive: boolean }>>({});
   const [savingSlug, setSavingSlug] = useState<string | null>(null);
 
-  const [firstLiveId, setFirstLiveId] = useState<string | null>(null);
-  const [presence, setPresence] = useState<PresenceRow[] | null>(null);
-  const [regrantingUserId, setRegrantingUserId] = useState<string | null>(null);
+  // 対象ライブ一覧・選択中のライブ・到達記録の表示状態。非同期の読込結果と描画がずれないよう、
+  // 最新の状態はrefにも持ち、必ずcommitPanel経由で更新する。
+  const [panel, setPanel] = useState<LimitedRewardPanelState<PresenceRow>>(() => initialPanelState<PresenceRow>());
+  const panelRef = useRef(panel);
+  const commitPanel = (next: LimitedRewardPanelState<PresenceRow>) => {
+    panelRef.current = next;
+    setPanel(next);
+  };
+  // 再付与の処理中表示は「ライブID：利用者ID」で持つ（別ライブの同じ利用者と混同しない）。
+  const [regrantingKey, setRegrantingKey] = useState<string | null>(null);
+  // 同期連打を防ぐロック（stateではなくrefで、RPC開始前に同じtickで確保する）。
+  const regrantLockRef = useRef<SingleFlightLock>({ current: false });
 
   const { notice, notifySuccess, notifyError, clear } = useAdminNotice();
 
@@ -101,25 +151,12 @@ export default function AdminTitlesPage() {
     setNormalMemberCount(typeof xLoginCount === "number" ? xLoginCount : null);
   };
 
-  const loadPresence = async () => {
-    const { data: liveRow } = await supabase
-      .from("lives")
-      .select("id")
-      .eq("live_mode", "official")
-      .eq("official_sequence_number", 1)
-      .maybeSingle();
-    const liveId = liveRow?.id ?? null;
-    setFirstLiveId(liveId);
-    if (!liveId) {
-      setPresence([]);
-      return;
-    }
-    const { data, error } = await supabase.rpc("admin_list_final_result_presence", { p_live_id: liveId });
-    if (error) {
-      notifyError(mapAdminTitleError(error.message));
-      return;
-    }
-    setPresence((data ?? []) as PresenceRow[]);
+  // preferredLiveIdを省略した場合は、現在選択中のライブを再読込する。古い読込の結果は
+  // ローダーが破棄するため、後から完了しても画面を上書きしない。
+  const loadPresence = async (preferredLiveId?: string | null) => {
+    const result = await limitedRewardPresenceLoader.load(preferredLiveId ?? panelRef.current.selectedLiveId);
+    if (result.status === "stale") return;
+    commitPanel(applyPanelLoad(panelRef.current, result));
   };
 
   useEffect(() => {
@@ -154,25 +191,44 @@ export default function AdminTitlesPage() {
   };
 
   const handleRegrant = async (userId: string) => {
-    if (!firstLiveId || regrantingUserId) return;
-    setRegrantingUserId(userId);
-    const { data, error } = await supabase.rpc("admin_regrant_first_live_reward", {
-      p_user_id: userId,
-      p_live_id: firstLiveId,
+    // 操作対象のライブID・利用者IDは、クリック時点の値に固定する（以後の選択変更で変えない）。
+    const liveId = panelRef.current.selectedLiveId;
+    if (!liveId) return;
+    const key = `${liveId}:${userId}`;
+    const liveNumber = formatOfficialNumber(panelRef.current.lives.find((l) => l.id === liveId)?.official_sequence_number);
+    const outcome = await runSingleFlight(regrantLockRef.current, async () => {
+      setRegrantingKey(key);
+      try {
+        const { data, error } = await supabase.rpc("admin_regrant_first_live_reward", {
+          p_user_id: userId,
+          p_live_id: liveId,
+        });
+        if (error) {
+          notifyError(mapAdminTitleError(error.message));
+          return "failed" as const;
+        }
+        // 2026-09-28（レビュー対応）：error=nullでもdataがnull・不正な形式の場合は
+        // 「既に付与済み」と誤表示せず、操作失敗として扱う（再試行を促す）。
+        if (!isValidFirstLiveRewardRpcData(data)) {
+          notifyError("操作に失敗しました。時間をおいて再度お試しください");
+          return "failed" as const;
+        }
+        // 成功通知には、実際にRPCへ渡した開催番号を表示する。
+        notifySuccess(
+          data.newly_granted
+            ? `${liveNumber}の限定称号・限定アイコンを付与しました。`
+            : `${liveNumber}は既に付与済みでした（変更なし）。`,
+        );
+        return "done" as const;
+      } catch {
+        notifyError("操作に失敗しました。時間をおいて再度お試しください");
+        return "failed" as const;
+      } finally {
+        setRegrantingKey(null);
+      }
     });
-    setRegrantingUserId(null);
-    if (error) {
-      notifyError(mapAdminTitleError(error.message));
-      return;
-    }
-    // 2026-09-28（レビュー対応）：error=nullでもdataがnull・不正な形式の場合は
-    // 「既に付与済み」と誤表示せず、操作失敗として扱う（再試行を促す）。
-    if (!isValidFirstLiveRewardRpcData(data)) {
-      notifyError("操作に失敗しました。時間をおいて再度お試しください");
-      return;
-    }
-    notifySuccess(data.newly_granted ? "限定称号・限定アイコンを付与しました。" : "既に付与済みでした（変更なし）。");
-    await loadPresence();
+    // 再読込は現在選択中のライブに対して行う（操作対象が別ライブでも選択は変えない）。
+    if (outcome === "done") await loadPresence();
   };
 
   return (
@@ -267,16 +323,50 @@ export default function AdminTitlesPage() {
         )}
       </AdminCard>
 
-      <AdminCard title="初回ライブ「#0001」限定特典の付与状況">
-        {!firstLiveId ? (
-          <p className="text-sm text-gray-500">初回本番ライブ（official #1）がまだ登録されていません。</p>
-        ) : presence === null ? (
+      <AdminCard title="本番ライブ「#0001〜#0005」限定特典の付与状況">
+        {panel.listFailed ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <p className="text-red-700">対象ライブの一覧を取得できませんでした。時間をおいて再度お試しください。</p>
+            <AdminButton disabled={panel.presence === null} onClick={() => { commitPanel(startPanelReload(panelRef.current)); void loadPresence(); }}>
+              {panel.presence === null ? "再試行中…" : "再試行"}
+            </AdminButton>
+          </div>
+        ) : panel.lives.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            {panel.presence === null
+              ? "読み込み中…"
+              : "限定特典の対象となる本番ライブ（official #1〜#5）がまだ登録されていません。"}
+          </p>
+        ) : (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <label htmlFor="limited-live-select" className="font-bold text-gray-700">対象ライブ</label>
+            <select
+              id="limited-live-select"
+              value={panel.selectedLiveId ?? ""}
+              onChange={(e) => {
+                // 選択したIDを直ちに反映し、通信完了まで旧ライブの表示へ戻さない。
+                commitPanel(selectPanelLive(panelRef.current, e.target.value));
+                void loadPresence(e.target.value);
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm"
+            >
+              {panel.lives.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {`${formatOfficialNumber(l.official_sequence_number)} ${l.title ?? "（タイトル未設定）"}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {panel.listFailed || !panel.selectedLiveId ? null : panel.presenceFailed ? (
+          <p className="text-sm text-red-700">到達記録を読み込めませんでした。時間をおいて再度お試しください。</p>
+        ) : panel.presence === null ? (
           <p className="text-sm text-gray-500">読み込み中…</p>
-        ) : presence.length === 0 ? (
+        ) : panel.presence.length === 0 ? (
           <p className="text-sm text-gray-500">最終結果画面への到達記録はまだありません。</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {presence.map((p) => (
+            {panel.presence.map((p) => (
               <li key={p.user_id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-gray-200 p-2.5 text-xs">
                 <div className="text-gray-700">
                   <p className="font-bold text-gray-900">
@@ -297,8 +387,11 @@ export default function AdminTitlesPage() {
                     アイコン{p.has_icon ? "済" : "未"}
                   </span>
                   {(!p.has_title || !p.has_icon) && (
-                    <AdminButton disabled={regrantingUserId === p.user_id} onClick={() => handleRegrant(p.user_id)}>
-                      {regrantingUserId === p.user_id ? "処理中…" : "再付与"}
+                    <AdminButton
+                      disabled={regrantingKey === `${panel.selectedLiveId}:${p.user_id}`}
+                      onClick={() => handleRegrant(p.user_id)}
+                    >
+                      {regrantingKey === `${panel.selectedLiveId}:${p.user_id}` ? "処理中…" : "再付与"}
                     </AdminButton>
                   )}
                 </div>

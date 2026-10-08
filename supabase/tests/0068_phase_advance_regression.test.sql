@@ -27,6 +27,10 @@ insert into auth.users (id) values ('a9000000-0000-0000-0000-00000000000f') on c
 update public.profiles set role = 'admin' where id = 'a9000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e30d5832-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e30d5832-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('e30d5832-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('e30d5832-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
   ('a9100000-0000-0000-0000-000000000001', '0068回帰テスト用お題1', 'text', true),
   ('a9100000-0000-0000-0000-000000000002', '0068回帰テスト用お題2', 'text', true),
   ('a9100000-0000-0000-0000-000000000003', '0068回帰テスト用お題3', 'text', true)
@@ -47,8 +51,7 @@ begin
     array[
       'a9100000-0000-0000-0000-000000000001',
       'a9100000-0000-0000-0000-000000000002',
-      'a9100000-0000-0000-0000-000000000003'
-    ]::uuid[],
+      'a9100000-0000-0000-0000-000000000003', 'e30d5832-0000-0000-0000-000000000001', 'e30d5832-0000-0000-0000-000000000002', 'e30d5832-0000-0000-0000-000000000003']::uuid[],
     'test'
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -79,8 +82,9 @@ declare
 begin
   select live_id into v_live_id from _t0068b_ctx;
   select count(*) into v_group_count from public.turns where live_id = v_live_id;
-  if v_group_count <> 3 then
-    raise exception 'FAIL: begin_game後のturns件数が3でない(got=%)', v_group_count;
+  -- 2周制：3組×2周＝6ターン
+  if v_group_count <> 6 then
+    raise exception 'FAIL: begin_game後のturns件数が6（3組×2周）でない(got=%)', v_group_count;
   end if;
 
   set local role authenticated;
@@ -135,8 +139,9 @@ begin
 
   reset role;
 
-  if v_processed <> 3 then
-    raise exception 'FAIL: 処理した組数が3でない(got=%)', v_processed;
+  -- 2周制：3組×2周＝6ターンすべてを処理してからfinal_resultへ進む
+  if v_processed <> 6 then
+    raise exception 'FAIL: 処理したターン数が6（3組×2周）でない(got=%)', v_processed;
   end if;
   if (select current_phase from public.lives where id = v_live_id) <> 'final_result' then
     raise exception 'FAIL: 最終的にfinal_resultへ到達していない(got=%)', (select current_phase from public.lives where id = v_live_id);
@@ -179,7 +184,7 @@ begin
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0068回帰テストB', 20, 1,
-    array['a9100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['a9100000-0000-0000-0000-000000000001', 'e30d5832-0000-0000-0000-000000000004']::uuid[], 'test'
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
   perform set_config('myapp.uid', 'a9000000-0000-0000-0000-00000000000a', true);

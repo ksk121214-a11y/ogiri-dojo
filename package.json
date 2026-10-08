@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:recording": "LIVE_DEMO_RECORDING=1 next dev -H 0.0.0.0 -p 3100",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

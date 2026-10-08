@@ -1,32 +1,20 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import AudienceLayer from "@/components/live-demo/AudienceLayer";
-import LiveStageBackdrop from "@/components/live-demo/LiveStageBackdrop";
-import ScoreButtons from "@/components/live-demo/ScoreButtons";
-import ScoringPhysicsBoard, { type ScoreEvent } from "@/components/live-demo/ScoringPhysicsBoard";
-import ScreenShell from "@/components/live-demo/ScreenShell";
-import StageHeaderBanner from "@/components/live-demo/StageHeaderBanner";
-import TimerRing from "@/components/live-demo/TimerRing";
+import StageAnsweringPresentation from "@/components/live-room/StageAnsweringPresentation";
 import { getLiveRoomTiming, MAX_ANSWERS_PER_PLAYER, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
-import { truncateLiveDisplayName } from "@/lib/liveRoomSelectors";
+import { confirmedPerfectFor, maxBallsFor } from "@/lib/liveRoomPresentation";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
-import { fitAspect, useElementSize } from "@/lib/useElementSize";
-import { playSfx } from "@/lib/sfx";
 import { answeringRemaining, judgingRemaining } from "@/lib/liveRemaining";
+import { playSfx } from "@/lib/sfx";
 import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
-import AnswerRevealCard from "./AnswerRevealCard";
-import LaughMarkOverlay from "./LaughMarkOverlay";
-import StageCharactersView from "./StageCharactersView";
-import TsukkomiDanmakuOverlay from "./TsukkomiDanmakuOverlay";
+import type { ScoreEvent } from "@/components/live-demo/ScoringPhysicsBoard";
 
-// 回答入力（舞台）画面の実バックエンド版。src/components/live-demo/StageScreen.tsxと
-// 同じ見た目・排他制御の考え方だが、useLiveDemoStoreではなく実際のDB/Realtimeを見る
-// useLiveFollowerStoreを直接使う（このコンポーネントは/live/answering専用の1箇所でしか使わないため、
-// propsで全部受け渡すより自分でストアを読む方がシンプルになる）。
+// 回答入力（舞台）画面の実バックエンド版adapter。表示そのものは
+// src/components/live-room/StageAnsweringPresentation.tsx（本番・体験版/撮影モード共用）に委ね、
+// ここでは実データ（useLiveFollowerStore、Supabase/Realtime）からpropsを組み立てる。
 export default function StageAnsweringView() {
   const live = useLiveFollowerStore((s) => s.live);
   const myParticipant = useLiveFollowerStore((s) => s.myParticipant);
@@ -41,8 +29,6 @@ export default function StageAnsweringView() {
   const activeAnswerScores = useLiveFollowerStore((s) => s.activeAnswerScores);
   const myAnswerCount = useLiveFollowerStore((s) => s.myAnswerCount);
   const submitMyAnswer = useLiveFollowerStore((s) => s.submitMyAnswer);
-  // 2026-09-08（P1-8/9セキュリティレビュー対応）：他のuseLiveFollowerStoreフックと
-  // 同じ並び（早期returnより前）で呼ぶ。Rules of Hooks違反を避けるため。
   const pendingCue = useLiveFollowerStore((s) => s.pendingCue);
   // 3回目レビュー対応（項目2）：このライブが実際に使うtiming_profileから解決する
   // （DB側の進行RPCが参照するのと同じlives.timing_profile。画面表示とDB判定の
@@ -58,38 +44,25 @@ export default function StageAnsweringView() {
 
   // 回答フリップが消えたあと(猶予表示が切れたあと)にその人の回答席で見えるように、
   // 回答フリップの猶予(useJudgingDisplayの既定3600ms)より長く持たせる。
-  // 参加者ID→点数のマップにしているのは、確定が立て続けに起きた場合でも
-  // 前の人の予約タイマーを次の人の検知が巻き込んで消してしまわないようにするため
-  // （下のuseEffectのクリーンアップでrevealTimerを消すと、2件目の確定を検知した
-  // 瞬間に1件目の表示予約が丸ごとキャンセルされ「点数が出る時と出ない時がある」
-  // 不具合になっていた）。
   const [seatScores, setSeatScores] = useState<Record<string, number>>({});
   const prevActiveIdRef = useRef<string | null>(null);
   const pendingTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   useEffect(() => {
     const prevId = prevActiveIdRef.current;
-    // 「直前どのanswerIdを見ていたか」は、この下の分岐で早期returnしても必ず
-    // 更新する（returnより後ろに置くと、2件目以降ずっと1件目のスコアを1件目の
-    // 回答席に出し続けてしまうバグになる。src/components/live-demo/StageScreen.tsx参照）。
     prevActiveIdRef.current = activeAnswer?.id ?? null;
     if (prevId && activeAnswer?.id !== prevId) {
       const resolvedAnswer = turnAnswers.find((a) => a.id === prevId);
       if (resolvedAnswer) {
         const participantId = resolvedAnswer.participant_id;
         const value = resolvedAnswer.score_total;
-        // 回答フリップが消えて→少し間を置いて→採点ボードの玉が弾けて消え終わる
-        // (SCORE_REVEAL_DELAY_MS後)まで待ってから、回答席に得点を表示する。
-        // このタイマーはuseEffectの依存配列変化(＝次の確定の検知)で巻き込みキャンセル
-        // されないよう、ここではcleanupを返さない（アンマウント時だけ下のuseEffectで
-        // まとめて掃除する）。
         const revealTimer = setTimeout(() => {
           pendingTimersRef.current.delete(revealTimer);
           setSeatScores((prev) => ({ ...prev, [participantId]: value }));
           const hideTimer = setTimeout(() => {
             pendingTimersRef.current.delete(hideTimer);
             setSeatScores((prev) => {
-              if (prev[participantId] !== value) return prev; // 既に別の値で上書きされていたら触らない
+              if (prev[participantId] !== value) return prev;
               const next = { ...prev };
               delete next[participantId];
               return next;
@@ -111,14 +84,8 @@ export default function StageAnsweringView() {
   }, []);
 
   // 採点ボード（ScoringPhysicsBoard）が表示する「今の1件」は、回答フリップ(displayedAnswer)
-  // よりも長く生き続ける必要がある。フリップは確定後の表示猶予が切れると消えるが、
-  // ボードの玉はそこからさらに間を置いてから弾けるため、displayedAnswerの寿命に合わせて
-  // ボードのroundKeyまで一緒にリセットしてしまうと、弾ける演出の前に玉が一瞬で消える
-  // （ハードリセットされる）事故になる（src/components/live-demo/StageScreen.tsx参照）。
+  // よりも長く生き続ける必要がある。
   const [boardRoundId, setBoardRoundId] = useState<string | null>(null);
-  // レンダー中にstateを調整する公式パターン(useEffectではなくレンダー本体で直接setState)。
-  // activeAnswer.idが新しくなった瞬間だけ更新され、それ以外は毎回同じ値を返すため
-  // 無限ループにはならない。
   if (activeAnswer?.id && activeAnswer.id !== boardRoundId) {
     setBoardRoundId(activeAnswer.id);
   }
@@ -130,35 +97,19 @@ export default function StageAnsweringView() {
       playSfx("spotlightIn");
     }
   }, [boardRoundId]);
-  // 回答送信音は「answering_cues.busy」がfalse/null→trueになった瞬間に、全員の画面で
-  // 鳴らす（2026-09-08 P1-8/9再レビュー対応）。以前はturnAnswers.length（＝answers件数）
-  // の増加を監視していたが、未発表回答が本人以外に返らなくなった(0063のRLS変更)ことで、
-  // 本人以外の端末ではturnAnswersの件数が回答公開(reveal)まで増えず、送信音が遅れる・
-  // 鳴らない不具合が生じていた。busyは回答本文を含まないanswering_cuesの列で、
-  // 送信と同時にDBトリガーで即座にtrueへ更新されるため、これを基準にする。
-  // busyPrevRef.currentの初期値はnull（＝「前回値がまだ無い」）にし、
-  // 判定はnull→trueでは鳴らさずfalse→trueの時だけ鳴らす条件にすることで、
-  // 初回読み込み・リロードによるstate復元時（既にbusy=trueの状態からstart）には
-  // 鳴らないようにする。busyはreveal・採点が終わって次の回答が来るまでtrueのまま
-  // 変化しないため（recompute_answering_cue_for_turn参照）、同一回答の公開・確定時に
-  // 遅れて鳴ったり複数回鳴ったりすることもない。ターンが変わるとcueForCurrentTurnは
-  // 一旦null(busy=false相当)に戻ってから次の回答でtrueになるため、次ターンでも
-  // 正常に再生される。送信者本人も他の参加者と同じくこの合図経由で1回だけ鳴る
-  // （二重再生防止のため、以前あったturnAnswers.length基準の再生処理は削除した）。
-  const busyPrevRef = useRef<boolean | null>(null);
-  useEffect(() => {
-    const turnId = currentTurn?.id ?? null;
-    const cue = pendingCue && turnId && pendingCue.turnId === turnId ? pendingCue : null;
-    const currentBusy = cue?.busy ?? false;
-    if (busyPrevRef.current === false && currentBusy) {
-      playSfx("answerSubmit");
-    }
-    busyPrevRef.current = currentBusy;
-  }, [pendingCue, currentTurn?.id]);
+
+  // 回答送信音の合図：answering_cues.busyがfalse/null→trueになった瞬間を表す。
+  // busyは回答本文を含まないanswering_cuesの列で、送信と同時にDBトリガーで即座にtrueへ
+  // 更新されるため、これを基準にする（本人以外の端末でも未発表回答の本文は返らないため、
+  // turnAnswers.lengthの増加では検知できない）。revisionはこの行が更新されるたびにDB側で
+  // 増える値のため、(turnId, revision)の組は1回の送信につき必ず1つの新しいcueIdになる。
+  const cueForCurrentTurn = pendingCue?.turnId === currentTurn?.id ? pendingCue : null;
+  const answerSubmitCue =
+    cueForCurrentTurn?.busy && currentTurn
+      ? { cueId: `${currentTurn.id}:${cueForCurrentTurn.revision}` }
+      : null;
 
   // 確定した瞬間も回答カードを表示し続ける猶予ぶんだけ残す（activeAnswerは確定と同時にnullになるため）。
-  // revealGraceMsを明示的に渡すことで、玉が弾け始めるタイミング(resolvedPopDelayMs)や
-  // 得点表示のタイミング(SCORE_REVEAL_DELAY_MS)と揃える。
   const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, timing.revealGraceMs);
 
   const scoreEvents: ScoreEvent[] = useMemo(
@@ -171,9 +122,6 @@ export default function StageAnsweringView() {
     [activeAnswerScores, boardAnswer],
   );
 
-  const [boardBoxRef, boardBoxSize] = useElementSize<HTMLDivElement>();
-  const boardFitted = boardBoxSize ? fitAspect(boardBoxSize.width, boardBoxSize.height, 16 / 9) : null;
-
   if (!live || !currentTurn || !currentTopic || !myParticipant) return null;
 
   const groupOrder = groups.find((g) => g.id === currentTurn.group_id)?.group_order ?? 0;
@@ -182,39 +130,13 @@ export default function StageAnsweringView() {
     .map((p) => ({ id: p.id, name: participantNames[p.id] ?? "（名前未設定）" }));
 
   const activeParticipantId = activeAnswer?.participant_id ?? null;
-  // 送信直後・司会がまだ表示していない「一呼吸」中(revealDelayMs)の対象者、および
-  // reveal直後にactiveAnswerの反映がまだ届いていない間の対象者。
-  // 2026-09-08（P1-8/9セキュリティレビュー対応）：未発表answersが投稿者本人以外に
-  // 返らなくなった（answers RLSの変更、supabase/migrations/0063）ため、以前のように
-  // turnAnswers（=answers全件）から他人の未発表回答を直接見つけて判定することが
-  // できなくなった。回答本文を含まない専用の合図(pendingCue、DBトリガーで自動更新)を
-  // 代わりに見る。currentTurnと一致しない（切り替わり途中の古い合図）場合は無視する。
-  // 2026-09-08（0064）：pendingCue.pendingParticipantIdは「まだ採点確定していない
-  // 回答者」を採点確定(resolved=true)まで指し続ける（reveal時にnullへ戻らない）よう
-  // DB側を修正した。これにより、activeAnswerの反映がまだ届いていない一瞬の間も
-  // 同じparticipantIdがここに残り続け、回答席の光が途切れない
-  // （詳細はsupabase/migrations/0064参照）。
-  const cueForCurrentTurn = pendingCue?.turnId === currentTurn.id ? pendingCue : null;
   const revealPendingParticipantId = activeAnswer ? null : (cueForCurrentTurn?.pendingParticipantId ?? null);
-  // 2026-09-03:「お題ボードの分母(maxBalls)が回答者と審査員で違って見える」不具合対策。
-  // participants一覧から毎回計算するのをやめ、ゲーム開始時にサーバー側で1回だけ
-  // 確定させたturns.eligible_judge_count（全クライアント共通）を使う（0049）。
-  const maxBalls = Math.max(3, currentTurn.eligible_judge_count * 3);
-  // 審査サイクル中(=司会が持ち時間を一時停止している間)は送信を止める。lives.answering_pausedは
-  // 「表示中の回答がある」だけでなく「直前の採点確定演出(reveal_sequence_until)が終わって
-  // いない」間もtrueのままになるよう司会側(useLiveHostStore.ts)で拡張済みだが、これは司会の
-  // ポーリング(最大500ms間隔)を経由してlivesテーブル経由で伝わるため、多少の遅れが出うる。
-  // 誰かが送信した直後、実際にはもう「busy」なのにこの伝搬が間に合わず送信ボタンが
-  // 一瞬押せてしまう隙間があったため、pendingCue.busy（Realtimeで即座に届く、回答本文を
-  // 含まない合図）からも未表示・未確定の回答が無いかを判定し、両方のORで即座にロックする
-  // （最終的な二重送信の防止はDB側のanswers_one_unresolved_per_turn制約が担保する）。
+  const maxBalls = maxBallsFor(currentTurn.eligible_judge_count);
   const busyByTurnAnswers = cueForCurrentTurn?.busy ?? false;
   const busyWithOthers = live.answering_paused || busyByTurnAnswers;
 
   const answeringRemainingState = answeringRemaining(live, clock);
   const judgingRemainingState = judgingRemaining(displayedAnswer?.judging_ends_at, clock);
-  const answeringRemainingMs = answeringRemainingState.ms;
-  const judgingRemainingMs = judgingRemainingState.ms;
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -235,175 +157,51 @@ export default function StageAnsweringView() {
   const submitDisabled = overLimit || busyWithOthers || submitting || !draft.trim();
 
   return (
-    <ScreenShell className="!items-stretch !justify-center !overflow-visible !px-3 !pt-1 !pb-1">
-      <LiveStageBackdrop variant="neon2" />
-      <div className="grid h-full w-full grid-cols-1 grid-rows-[auto_auto_minmax(140px,1fr)_auto] gap-1 overflow-visible">
-        <StageHeaderBanner variant="neon2" />
-        <div className="relative z-20 -mt-[22px] flex min-h-0 flex-col items-center gap-2 overflow-visible sm:-mt-[32px]">
-          <div
-            ref={boardBoxRef}
-            className="relative flex w-full justify-center"
-            style={{ height: boardFitted ? boardFitted.height : "38vh" }}
-          >
-            <div
-              className="relative"
-              style={boardFitted ? { width: boardFitted.width, height: boardFitted.height } : undefined}
-            >
-              <ScoringPhysicsBoard
-                variant="neon2"
-                topicBody={currentTopic.body}
-                roundLabel={`第${currentTurn.round}周 ・ ${groupOrder}組目`}
-                maxBalls={maxBalls}
-                scoreEvents={scoreEvents}
-                resolved={boardAnswer?.resolved ?? false}
-                // 2026-09-03:「満点じゃないのに金になる」不具合対策。確定済みなら
-                // DBの確定値(answers.judge_count/top_score_votes)で満点かどうかを
-                // 判定し、クライアントローカルなボール数の積み上げに依存しない。
-                confirmedPerfect={
-                  boardAnswer?.resolved
-                    ? boardAnswer.judge_count > 0 && boardAnswer.top_score_votes === boardAnswer.judge_count
-                    : null
-                }
-                resolvedPopDelayMs={timing.revealGraceMs + timing.ballPopPauseMs}
-                roundKey={boardRoundId}
-              />
-              <div className="absolute right-8 top-5">
-                <TimerRing
-                  remainingMs={answeringRemainingMs}
-                  syncing={answeringRemainingState.syncing}
-                  totalMs={timing.answerMs}
-                  paused={busyWithOthers}
-                  size={40}
-                  darkText
-                  palette="neon2"
-                />
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-        <div className="relative flex min-h-0 w-full flex-1 items-start justify-center overflow-visible">
-          {/*
-            舞台・アイコンは審査中でも消さず常時表示する。回答カードはその手前に
-            absoluteで重ねる「ドカンと出る」演出にし、スペースを奪い合って
-            どちらかが消える・縮む構成を避ける。
-          */}
-          <StageCharactersView
-            members={stageMembers}
-            myParticipantId={myParticipant.id}
-            participantAvatars={participantAvatars}
-            activeParticipantId={activeParticipantId}
-            revealPendingParticipantId={revealPendingParticipantId}
-            scoreReveals={seatScores}
-          />
-          <AnimatePresence>
-            {displayedAnswer && (
-              <motion.div
-                key="judging"
-                initial={{ opacity: 0, scale: 0.9, y: 16 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: -16 }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-                className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 px-2 py-0"
-              >
-                <div className="flex h-full w-full flex-col items-center gap-2">
-                  <div className="w-full min-h-[100px] flex-1">
-                    <AnswerRevealCard
-                      authorName={truncateLiveDisplayName(
-                        participantNames[displayedAnswer.participant_id] ?? "（名前未設定）",
-                      )}
-                      answerBody={displayedAnswer.body}
-                      fillHeight
-                      scaleUp={false}
-                      hideAuthorName
-                    />
-                  </div>
-                  <ScoreButtons
-                    isJudge={false}
-                    myScore={null}
-                    resolved={displayedAnswer.resolved}
-                    remainingMs={judgingRemainingMs}
-                    syncing={judgingRemainingState.syncing}
-                    totalMs={timing.judgeMs}
-                    scaleUp={false}
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <AudienceLayer
-            fixedBottomPx={-45}
-            zIndex={5}
-            imageSrc="/images/live2/audience-2-crop.png"
-            fixedRenderWidthPx={614}
-            fixedRenderHeightPx={216}
-            imageClassName="brightness-150 contrast-125"
-          />
-          <LaughMarkOverlay />
-        </div>
-
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="relative z-10 mx-auto w-full max-w-xl"
-        >
-          {/* 残り回答回数は、舞台（回答席・名前）と重ならないよう入力欄の直上に置く。 */}
-          <div className="mb-1.5 flex items-center justify-center gap-1.5">
-            {Array.from({ length: MAX_ANSWERS_PER_PLAYER }).map((_, i) => (
-              <span
-                key={i}
-                className={`h-3 w-3 rounded-full border border-[#3b5bff] ${
-                  i < myAnswerCount ? "bg-[#3b5bff]" : "bg-transparent"
-                }`}
-              />
-            ))}
-            <span className="ml-1 font-sans text-xs text-white/70">
-              残り{Math.max(0, MAX_ANSWERS_PER_PLAYER - myAnswerCount)}回
-            </span>
-          </div>
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled={overLimit}
-            placeholder={
-              overLimit
-                ? "回答できる回数の上限に達しました"
-                : busyWithOthers
-                  ? "他の回答を審査中です。書きためておけます（送信は少し待ってね）"
-                  : "回答を入力……"
+    <StageAnsweringPresentation
+      topicBody={currentTopic.body}
+      roundLabel={`第${currentTurn.round}周 ・ ${groupOrder}組目`}
+      maxBalls={maxBalls}
+      scoreEvents={scoreEvents}
+      boardResolved={boardAnswer?.resolved ?? false}
+      confirmedPerfect={confirmedPerfectFor(
+        boardAnswer?.resolved ?? false,
+        boardAnswer?.judge_count ?? 0,
+        boardAnswer?.top_score_votes ?? 0,
+      )}
+      boardRoundKey={boardRoundId}
+      timing={timing}
+      answeringRemainingMs={answeringRemainingState.ms}
+      answeringSyncing={answeringRemainingState.syncing}
+      busyWithOthers={busyWithOthers}
+      stageMembers={stageMembers}
+      myParticipantId={myParticipant.id}
+      participantAvatars={participantAvatars}
+      activeParticipantId={activeParticipantId}
+      revealPendingParticipantId={revealPendingParticipantId}
+      seatScores={seatScores}
+      displayedAnswer={
+        displayedAnswer
+          ? {
+              id: displayedAnswer.id,
+              participantId: displayedAnswer.participant_id,
+              authorName: participantNames[displayedAnswer.participant_id] ?? "（名前未設定）",
+              body: displayedAnswer.body,
+              resolved: displayedAnswer.resolved,
             }
-            rows={2}
-            className="w-full resize-none rounded-xl border-2 border-[#3b5bff]/40 bg-white px-4 py-2.5 font-sans text-lg text-[#1a1a3a] placeholder:text-[#6b6b90] focus:border-[#3b5bff] focus:outline-none disabled:bg-[#e4e6f5] disabled:text-[#8a8ab0] [@media(max-height:600px)]:py-1.5 [@media(max-height:600px)]:text-base"
-          />
-          {error && <p className="mt-1 font-sans text-xs text-red-400">{error}</p>}
-          <div className="mt-2 flex items-center justify-center gap-3">
-            {/* タイマー表示時にボタンが右にずれないよう、反対側に同じ幅の
-                透明スペーサーを置いてボタンを常に中央固定にする。 */}
-            {busyWithOthers && <div className="w-10 shrink-0" aria-hidden />}
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitDisabled}
-              className="w-1/2 max-w-[11rem] rounded-xl border-2 border-[#3b5bff] bg-[#3b5bff] px-4 py-2 font-sans text-base font-bold text-white transition hover:bg-[#2947e0] disabled:cursor-not-allowed disabled:border-[#5b6bb0] disabled:bg-[#5b6bb0] disabled:text-white/60 [@media(max-height:600px)]:py-1.5 [@media(max-height:600px)]:text-sm"
-            >
-              {busyWithOthers ? "審査中…" : "送信する"}
-            </button>
-            {busyWithOthers && (
-              <TimerRing
-                remainingMs={judgingRemainingMs}
-                syncing={judgingRemainingState.syncing}
-                totalMs={timing.judgeMs}
-                size={40}
-                palette="neon2"
-              />
-            )}
-          </div>
-        </motion.div>
-      </div>
-
-      <TsukkomiDanmakuOverlay />
-    </ScreenShell>
+          : null
+      }
+      judgingRemainingMs={judgingRemainingState.ms}
+      judgingSyncing={judgingRemainingState.syncing}
+      answerSubmitCue={answerSubmitCue}
+      draft={draft}
+      onDraftChange={setDraft}
+      onSubmit={handleSubmit}
+      overLimit={overLimit}
+      submitDisabled={submitDisabled}
+      myAnswerCount={myAnswerCount}
+      maxAnswersPerPlayer={MAX_ANSWERS_PER_PLAYER}
+      errorMessage={error}
+      textareaRef={textareaRef}
+    />
   );
 }

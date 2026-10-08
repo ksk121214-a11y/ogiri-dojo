@@ -30,11 +30,15 @@ for (const f of walk(join(process.cwd(), "src"))) {
 }
 for (const f of [
   ["components", "live-room", "GroupResultView.tsx"],
-  ["components", "live-demo", "GroupResultScreen.tsx"],
   ["components", "live-design-preview-2", "GroupResultViewPreview2.tsx"],
 ]) {
   assert.ok(/laughCountLabel\(/.test(read("src", ...f)), `${f.join("/")} が共通の「爆笑発生」表示を使っていない`);
 }
+// 体験版の組結果は実ライブのGroupResultViewをそのまま使う（表示は共有し、ここでは複製しない）
+assert.ok(
+  /import GroupResultView from "@\/components\/live-room\/GroupResultView";/.test(read("src", "components", "live-demo", "GroupResultScreen.tsx")),
+  "体験版の組結果が実ライブのGroupResultViewを使っていない",
+);
 
 // 12・13・16) フェーズごとの画面
 const P = (phase: string, hasParticipant: boolean, entering: boolean) => planAudienceJoinUi({ phase, hasParticipant, entering });

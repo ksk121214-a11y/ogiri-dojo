@@ -1,4 +1,4 @@
-// 配線確認：称号システム・初回本番ライブ(#0001)限定特典（supabase/migrations/0081）の
+// 配線確認：称号システム・本番ライブ(#0001〜#0005)限定特典（supabase/migrations/0081・0084）の
 // フロント側配線を、ソースの静的検査で確認する。実際のDB権限・冪等性はsupabase/tests/
 // 0081_titles_and_first_live_rewards.test.sqlが、single-flight/冪等性のロジックは
 // src/lib/__tests__/store/useFirstLiveRewardStore.check.tsが検証する。
@@ -47,12 +47,14 @@ const stageCharactersView = readFileSync(
   join(process.cwd(), "src", "components", "live-room", "StageCharactersView.tsx"),
   "utf8",
 );
+// 名前の5文字制限(truncateLiveDisplayName)は、本番・体験版/撮影モード共用の表示部品
+// （StageAnsweringPresentation・AudienceAnsweringPresentation）側で行う。
 const stageAnsweringView = readFileSync(
-  join(process.cwd(), "src", "components", "live-room", "StageAnsweringView.tsx"),
+  join(process.cwd(), "src", "components", "live-room", "StageAnsweringPresentation.tsx"),
   "utf8",
 );
 const audienceAnsweringView = readFileSync(
-  join(process.cwd(), "src", "components", "live-room", "AudienceAnsweringView.tsx"),
+  join(process.cwd(), "src", "components", "live-room", "AudienceAnsweringPresentation.tsx"),
   "utf8",
 );
 const scoreRevealToast = readFileSync(
@@ -143,8 +145,8 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
 //    再生成）のいずれでも再試行し、実行中に利用者が切り替わっていたら結果を反映しない。
 {
   assert.ok(
-    /liveMode === "official" && officialSequenceNumber === 1 && !emergencyClosed && !isGuest/.test(finalResultView),
-    "FinalResultViewがofficial #1・非緊急中止・非ゲストの条件で絞り込んでいない",
+    /isLimitedRewardLive\(liveMode, officialSequenceNumber, emergencyClosed\) && !isGuest/.test(finalResultView),
+    "FinalResultViewが限定特典の対象判定(isLimitedRewardLive)・非ゲストの条件で絞り込んでいない",
   );
   assert.ok(
     /document\.addEventListener\("visibilitychange", onVisible\)/.test(finalResultView) &&
@@ -179,7 +181,7 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
 //    ハードコードせずtitleDisplayName（運営が改称可能なtitles.display_name）を使う。
 //    取得できなかった場合は生のエラーではなく安全な一般文言へフォールバックする。
 {
-  assert.ok(/初回ライブ限定特典を獲得しました/.test(firstLiveRewardModal), "獲得モーダルに指定文言が無い");
+  assert.ok(/初期ライブ限定特典を獲得しました/.test(firstLiveRewardModal), "獲得モーダルに指定文言が無い");
   assert.ok(
     /titleDisplayName\?: string \| null/.test(firstLiveRewardModal),
     "獲得モーダルがtitleDisplayNameをpropsで受け取っていない（表示名がハードコードされている疑い）",
@@ -192,17 +194,17 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
   console.log("PASS: 獲得モーダルは指定の文言を表示し、称号名は運営が改称可能なtitleDisplayNameを動的に使う（取得失敗時はフォールバック）");
 }
 
-// 8: 初回ライブ限定特典の案内(FirstLiveRewardAnnouncement)は、未ログインの参加入口
+// 8: 初期ライブ限定特典の案内(FirstLiveRewardAnnouncement)は、未ログインの参加入口
 //    (/live)とXログイン済みの参加受付画面(OpeningView)の両方から共通コンポーネント
-//    経由で表示され、文言・表示条件が重複実装されていない。公式#0001・非緊急中止の
+//    経由で表示され、文言・表示条件が重複実装されていない。公式#0001〜#0005・非緊急中止の
 //    時だけ表示し、表示名はtitles.display_nameを動的に取得する（ハードコードしない）。
 {
   assert.ok(
-    /liveMode === "official" && officialSequenceNumber === 1 && !emergencyClosed/.test(firstLiveRewardAnnouncement),
-    "FirstLiveRewardAnnouncementの表示条件が公式#0001・非緊急中止限定になっていない",
+    /return isLimitedRewardLive\(liveMode, officialSequenceNumber, emergencyClosed\);/.test(firstLiveRewardAnnouncement),
+    "FirstLiveRewardAnnouncementの表示条件が限定特典の対象判定(isLimitedRewardLive)になっていない",
   );
   assert.ok(
-    /最終結果まで参加したXログイン会員に、限定称号「\{titleName\}」と限定アイコンをプレゼントします。ゲスト参加は対象外です。/.test(
+    /本番ライブ第5回まで、最終結果まで参加したXログイン会員に、限定称号「\{titleName\}」と限定アイコンをプレゼントします。ゲスト参加は対象外です。/.test(
       firstLiveRewardAnnouncement,
     ),
     "FirstLiveRewardAnnouncementの案内文言が指定のものと一致しない、または表示名がハードコードされている",
@@ -211,7 +213,7 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
     /from\("titles"\)/.test(firstLiveRewardAnnouncement) && /eq\("slug", "first-witness"\)/.test(firstLiveRewardAnnouncement),
     "FirstLiveRewardAnnouncementがtitles.display_nameを動的に取得していない",
   );
-  console.log("PASS: FirstLiveRewardAnnouncementは公式#0001・非緊急中止の時だけ、運営が変更可能な表示名を使って案内する");
+  console.log("PASS: FirstLiveRewardAnnouncementは公式#0001〜#0005・非緊急中止の時だけ、運営が変更可能な表示名を使って案内する");
 }
 
 // 8b: /liveの未ログイン参加入口とOpeningView（Xログイン済みの参加受付画面）の
@@ -235,7 +237,7 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
   assert.ok(profileInfoIdx >= 0, "プライバシーポリシーに「プロフィール情報」の項目が見当たらない");
   const profileInfoBlock = privacyPage.slice(profileInfoIdx, profileInfoIdx + 200);
   // 2026-09-28（レビュー対応）：「初回ライブ参加記念の限定アイコン」という
-  // 初回ライブ限定に読める表現を、将来別の限定アイコンを追加しても通用する
+  // 初期ライブ限定に読める表現を、将来別の限定アイコンを追加しても通用する
   // 「限定アイコン」へ一般化した（28番で新旧文言・法務バージョン不変を確認）。
   assert.ok(
     /表示名（演者名）、アイコン（種類・色の組み合わせ、又は限定アイコン）、一言コメント、選択中の称号/.test(
@@ -247,7 +249,7 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
 }
 
 // 10: 管理画面(/admin/titles)は、表示名・説明文・並び順・公開状態の編集、内部ID(slug)の
-//     編集不可、所有者数確認、初回ライブ到達記録一覧、未付与者への再付与を備える。
+//     編集不可、所有者数確認、本番ライブ(#0001〜#0005)の到達記録一覧、未付与者への再付与を備える。
 {
   assert.ok(/admin_update_title/.test(adminTitlesPage), "管理画面がadmin_update_titleを呼んでいない");
   assert.ok(!/p_slug:.*draft\.slug|input.*slug.*onChange/.test(adminTitlesPage), "内部ID(slug)を編集できる入力欄がある可能性");

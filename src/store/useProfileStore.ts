@@ -46,7 +46,7 @@ export interface DojoProfile {
   // 直接updateする手段は無く、join_live（SECURITY DEFINER）が最初の1回だけ書く。
   referralSource: string | null;
   referralSourceAnsweredAt: string | null;
-  // 2026-09-27（称号・初回ライブ限定特典）：装備中の称号(titles.slug)・限定アイコン
+  // 2026-09-27（称号・初期ライブ限定特典）：装備中の称号(titles.slug)・限定アイコン
   // (現状'first-witness'のみ)。どちらも直接updateはできない列（set_equipped_title/
   // set_equipped_limited_iconというSECURITY DEFINER RPC経由のみ、supabase/migrations/
   // 0081参照）。未選択はnull。
@@ -73,7 +73,7 @@ interface ProfileState {
   // 追加UPDATEなしでローカルprofileへ即座に反映する。refreshProfileの完了を
   // 待たずに「回答済み」表示へ切り替えられるようにするための専用アクション。
   applyReferralAnswerFromJoin: (userId: string, referralSource: string) => void;
-  // 2026-09-27（称号・初回ライブ限定特典）：装備の変更はset_equipped_title/
+  // 2026-09-27（称号・初期ライブ限定特典）：装備の変更はset_equipped_title/
   // set_equipped_limited_icon（SECURITY DEFINER、所有権をDB内で検証）経由のみ。
   // nullを渡すと解除する。
   setEquippedTitle: (titleSlug: string | null) => Promise<{ ok: true } | { ok: false; reason: string }>;

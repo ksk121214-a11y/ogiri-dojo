@@ -19,6 +19,8 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'f1000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e219cb7d-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e219cb7d-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
   ('f2000000-0000-0000-0000-000000000001', '0064テスト用お題A', 'text', true),
   ('f2000000-0000-0000-0000-000000000002', '0064テスト用お題B', 'text', true)
 on conflict do nothing;
@@ -33,7 +35,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0064テスト', 20, 2,
-    array['f2000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000002']::uuid[]
+    array['f2000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000002', 'e219cb7d-0000-0000-0000-000000000001', 'e219cb7d-0000-0000-0000-000000000002']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 

@@ -30,6 +30,10 @@ const snsLiveResultBody = readFileSync(
   "utf8",
 );
 const openingView = readFileSync(join(process.cwd(), "src", "components", "live-room", "OpeningView.tsx"), "utf8");
+const openingPresentation = readFileSync(
+  join(process.cwd(), "src", "components", "live-room", "OpeningPresentation.tsx"),
+  "utf8",
+);
 const audienceAnsweringView = readFileSync(
   join(process.cwd(), "src", "components", "live-room", "AudienceAnsweringView.tsx"),
   "utf8",
@@ -360,9 +364,17 @@ const snsLiveResultsStore = readFileSync(
     /const isGuest = isGuestUser\(authUser, profile\);/.test(openingView),
     "OpeningViewにisGuest判定が無い",
   );
+  // OpeningView（本番adapter）は!isGuestを共用表示部品(OpeningPresentation)へ
+  // canChoosePlayerとして渡し、実際のボタンの分岐そのものは共用部品側にある
+  // （本番・体験版/撮影モードで共通の1箇所の分岐にするため、OpeningViewの中に
+  // 別のJSX分岐を複製しない）。
   assert.ok(
-    /\{!isGuest && \(/.test(openingView),
-    "OpeningViewのプレイヤー参加ボタンが{!isGuest && (…で分岐していない",
+    /canChoosePlayer=\{!isGuest\}/.test(openingView),
+    "OpeningViewがcanChoosePlayer={!isGuest}をOpeningPresentationへ渡していない",
+  );
+  assert.ok(
+    /canChoosePlayer\s*&&\s*\(/.test(openingPresentation),
+    "OpeningPresentationのプレイヤー参加ボタンがcanChoosePlayer && (…で分岐していない",
   );
   assert.ok(
     !/あとからプレイヤーへ変更できます/.test(openingView) || /isGuest\s*\n?\s*\?\s*"観客として参加しますか？"/.test(openingView),

@@ -29,6 +29,14 @@ export const BOT_HUMAN_GRACE_MS: Record<BotAnswerTimingProfile, number> = {
 // 締切を跨いでRLSで拒否されるのを避けるための余裕）。
 export const BOT_ANSWER_DEADLINE_MARGIN_MS = 1_500;
 
+// 本番のボット回答は、1組・1周（ターン）あたり最大2件（ボット全員の合計）。
+// 人間の回答数には影響させない。撮影用の体験版（ローカル）の既定はボット回答0件で、ここは本番のみ。
+export const BOT_ANSWER_MAX_PER_TURN = 2;
+
+export function botAnswersAllowedForTurn(botAnswersSentThisTurn: number): boolean {
+  return botAnswersSentThisTurn < BOT_ANSWER_MAX_PER_TURN;
+}
+
 export function botHumanGraceMs(timingProfile: string | null | undefined): number {
   return timingProfile === "short_test"
     ? BOT_HUMAN_GRACE_MS.short_test

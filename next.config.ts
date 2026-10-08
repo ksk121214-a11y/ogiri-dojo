@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
+// 動画撮影用の開発サーバー（npm run dev:recording、LIVE_DEMO_RECORDING=1）のときだけ、
+// 左下の開発インジケーター（Nマーク）を消す。通常の npm run dev では従来どおり表示する。
+const isRecordingDev = process.env.LIVE_DEMO_RECORDING === "1";
+
 const nextConfig: NextConfig = {
   trailingSlash: true,
+  ...(isRecordingDev ? { devIndicators: false } : {}),
   // 2026-08-27: ライブ演出の画像素材は既にパレット化で十分軽量(合計885KB程度)なため、
   // Vercelの画像最適化API(オンデマンド変換)を経由する遅延・コールドスタートを避け、
   // 素のファイルをそのまま配信する方が結果的に速い。読み込みが遅い/背景や回答席の
@@ -9,7 +14,9 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   // 開発サーバーをスマホ実機からLAN経由（IPアドレス）で確認できるようにする設定。
   // next devにのみ影響し、本番ビルドには影響しない。
-  allowedDevOrigins: ["192.168.10.13"],
+  // 2026-10-06：同一Wi-Fi内のスマホから動画撮影モードを開けるよう、現在のMacのLANアドレスも許可する。
+  // Wi-Fiを変えてIPが変わったら、ここへ追記する（開発サーバーの設定のみ・本番ビルドには影響しない）。
+  allowedDevOrigins: ["192.168.10.13", "192.168.10.10"],
 
   // 2026-08-29:「ライブ画面の必須素材が表示の瞬間に読み込み待ちにならないように」対応の一環。
   // public/配下の画像・音声は秘密でない共通ゲーム素材で、ビルドのたびに内容が変わる

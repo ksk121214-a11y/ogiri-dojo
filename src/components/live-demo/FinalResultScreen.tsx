@@ -1,271 +1,54 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
-import MyIconAvatar from "@/components/app/MyIconAvatar";
-import ParticipantIconAvatar from "@/components/app/ParticipantIconAvatar";
-import { BEST_ANSWER_BONUS_POINTS, BONUS_BY_RANK, MASTERY_GAIN } from "@/data/collectionData";
+import FinalResultView from "@/components/live-room/FinalResultView";
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
-import { getBestAnswer, getOverallRanking, getParticipantName } from "@/lib/liveDemoSelectors";
-import { playSfx } from "@/lib/sfx";
+import { buildFinalResultData } from "@/lib/liveDemoSelectors";
+import { computePointBreakdown } from "@/lib/pointBreakdown";
 import { useLiveDemoStore } from "@/store/useLiveDemoStore";
 import { useUserStore } from "@/store/useUserStore";
-import MasteryGauge from "./MasteryGauge";
 import ScreenShell from "./ScreenShell";
 
-// 最終結果 L6：本日のベストアンサー → 個人1〜3位（3位→2位→1位）→ 総合ランキング（§1.7）
-// → 熟練度メーターの円形ゲージ演出（§6.3.5）
+// 最終結果（表彰式）：実ライブの FinalResultView をそのまま使う（段階表示・順位・効果音rankReveal・
+// 表彰ボーナスの文言を実ライブと一致させるため）。体験版だけの追加は2点：
+// ①体験版の手元のユーザー（useUserStore）へ、実ライブと同じ式（computePointBreakdown）で獲得分を加算する
+// ②「もう一度体験する」（体験版だけの操作。実ライブにはない）
 export default function FinalResultScreen() {
   const state = useLiveDemoStore((s) => s);
   const resetLive = useLiveDemoStore((s) => s.resetLive);
-  const closeLive = useLiveDemoStore((s) => s.closeLive);
   const addPoints = useUserStore((s) => s.addPoints);
   const addMastery = useUserStore((s) => s.addMastery);
-  const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    if (step >= 4) return;
-    const t = setTimeout(() => setStep((s) => s + 1), 2000);
-    return () => clearTimeout(t);
-  }, [step]);
-
-  // 3位→2位→1位と切り替わるたびに発表音を鳴らす（step0=ベストアンサーは対象外）。
-  useEffect(() => {
-    if (step >= 1) playSfx("rankReveal");
-  }, [step]);
-
-  const bestAnswer = getBestAnswer(state);
-  const ranking = getOverallRanking(state);
-  const top3 = ranking.slice(0, 3);
-  const myRank = ranking.findIndex((r) => r.participant.id === MY_PARTICIPANT_ID) + 1;
-  const myTotal = ranking.find((r) => r.participant.id === MY_PARTICIPANT_ID)?.total ?? 0;
-  const gotBestAnswer = bestAnswer?.participantId === MY_PARTICIPANT_ID;
-
-  // 表彰ボーナス（§5.4）・熟練度メーター加算（§6.2）を最終結果表示時に1回だけ確定させる。
-  // マイページ側の表示にもそのまま反映されるよう共有ユーザーストアへ加算する（ダミー実装）。
-  // baselineは「このライブで加算される前」の値をマウント時の1回だけ記憶しておく。
-  const [baseline] = useState(() => useUserStore.getState().user.masteryMeter);
+  const data = buildFinalResultData(state);
+  const myEntry = data.ranking.find((r) => r.participantId === MY_PARTICIPANT_ID);
+  const breakdown = computePointBreakdown(myEntry?.total ?? 0, data.myRank);
   const appliedRef = useRef(false);
-  const rankBonus =
-    myRank === 1
-      ? BONUS_BY_RANK.first
-      : myRank === 2
-        ? BONUS_BY_RANK.second
-        : myRank === 3
-          ? BONUS_BY_RANK.third
-          : BONUS_BY_RANK.participation;
-  const masteryRankBonus =
-    myRank === 1
-      ? MASTERY_GAIN.rankBonus.first
-      : myRank === 2
-        ? MASTERY_GAIN.rankBonus.second
-        : myRank === 3
-          ? MASTERY_GAIN.rankBonus.third
-          : 0;
-  const pointsGain = rankBonus + (gotBestAnswer ? BEST_ANSWER_BONUS_POINTS : 0);
-  const masteryGain =
-    MASTERY_GAIN.participation +
-    myTotal +
-    masteryRankBonus +
-    (gotBestAnswer ? MASTERY_GAIN.bestAnswer : 0);
+  // 動画撮影モードでは、ポイント・熟練度を端末に保存しない（撮り直しで何度でも同じ画面を出すため）
+  const recording = useLiveDemoStore((s) => s.recording);
 
   useEffect(() => {
     if (appliedRef.current) return;
     appliedRef.current = true;
-    addPoints(pointsGain);
-    addMastery(masteryGain);
-    // このライブぶんの表彰ボーナス確定は最終結果表示時に1回だけ行う（closed時確定のダミー実装）
+    if (recording) return;
+    // 実ライブのapply_live_rank_rewardsと同じく、獲得ポイントと熟練度は同じ量だけ増える
+    addPoints(breakdown.totalPoints);
+    addMastery(breakdown.totalPoints);
+    // 初回マウント時の一度だけ加算する（再描画で二重加算しない）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rankLabel = ["1位", "2位", "3位"];
-  const rankColor = ["text-[#ffcf4a]", "text-[#c8d4ff]", "text-[#ff8f4a]"];
-  // 順位別の表彰ボーナス（§5.4）を1〜3位発表カードにその場で明記する（第5ラウンドフィードバック）。
-  const rankBonusPoints = [
-    BONUS_BY_RANK.first,
-    BONUS_BY_RANK.second,
-    BONUS_BY_RANK.third,
-  ];
-
   return (
     <ScreenShell>
-      <p className="font-sans text-xs tracking-widest text-white/60">
-        最終結果
-      </p>
-      <h2 className="mt-2 font-sans text-3xl font-black text-[#ffcf4a] sm:text-4xl">
-        表彰式
-      </h2>
-
-      <div className="mt-8 flex min-h-[260px] w-full max-w-lg flex-col items-center justify-center">
-        <AnimatePresence mode="wait">
-          {step === 0 && bestAnswer && (
-            <motion.div
-              key="best"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="relative w-full rounded-2xl border border-[#ff3b5b]/70 bg-white/5 p-6 shadow-[0_0_40px_rgba(255,59,91,0.25)]"
-            >
-              <p className="font-sans text-xs tracking-widest text-[#ff3b5b]">
-                本日のベストアンサー
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                {bestAnswer.participantId === MY_PARTICIPANT_ID ? (
-                  <MyIconAvatar size={24} bare />
-                ) : (
-                  <ParticipantIconAvatar participantId={bestAnswer.participantId} size={24} bare />
-                )}
-                <p className="font-sans text-xs text-[#ffcf4a]">
-                  {getParticipantName(state, bestAnswer.participantId)}
-                </p>
-              </div>
-              <p className="mt-2 font-sans text-xl font-bold leading-relaxed text-white">
-                {bestAnswer.body}
-              </p>
-              <p className="mt-3 font-sans text-sm font-bold text-[#ff8f4a]">
-                {bestAnswer.scoreTotal}点
-              </p>
-            </motion.div>
-          )}
-
-          {step >= 1 && step <= 3 && top3.length >= step && (
-            <motion.div
-              key={`rank-${step}`}
-              initial={{ opacity: 0, y: 30, scale: 0.85 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ type: "spring", stiffness: 200, damping: 16 }}
-              className="relative w-full rounded-2xl border border-[#3b5bff]/70 bg-white/5 p-8 text-center shadow-[0_0_50px_rgba(59,91,255,0.35)]"
-            >
-              <p
-                className={`font-sans text-4xl font-black ${rankColor[3 - step]}`}
-              >
-                {rankLabel[3 - step]}
-              </p>
-              <div className="mt-3 flex items-center justify-center gap-2">
-                {top3[3 - step].participant.id === MY_PARTICIPANT_ID ? (
-                  <MyIconAvatar size={32} bare />
-                ) : (
-                  <ParticipantIconAvatar
-                    participantId={top3[3 - step].participant.id}
-                    size={32}
-                    bare
-                  />
-                )}
-                <p className="font-sans text-lg font-bold text-white">
-                  {top3[3 - step].participant.displayName}
-                  {top3[3 - step].participant.id === MY_PARTICIPANT_ID
-                    ? "（あなた）"
-                    : ""}
-                </p>
-              </div>
-              <p className="mt-1 font-sans text-sm text-[#ff8f4a]">
-                {top3[3 - step].total}点
-              </p>
-              <p className="mt-2 font-sans text-sm font-bold text-[#ffcf4a]">
-                表彰ボーナス +{rankBonusPoints[3 - step]}pt
-              </p>
-            </motion.div>
-          )}
-
-          {step >= 4 && (
-            <motion.div
-              key="overall"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="w-full"
-            >
-              <p className="font-sans text-sm text-white/80">
-                あなたの総合順位：
-                <span className="font-bold text-[#ffcf4a]">
-                  {myRank}位
-                </span>
-                （{ranking.length}人中）
-              </p>
-              <div className="mt-4 max-h-64 w-full space-y-1.5 overflow-y-auto">
-                {ranking.map((r, idx) => {
-                  const isMe = r.participant.id === MY_PARTICIPANT_ID;
-                  return (
-                    <div
-                      key={r.participant.id}
-                      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                        isMe ? "border-[#3b5bff] bg-white/10" : "border-white/10 bg-white/[0.03]"
-                      }`}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="shrink-0">{idx + 1}位</span>
-                        {isMe ? (
-                          <MyIconAvatar size={24} bare />
-                        ) : (
-                          <ParticipantIconAvatar participantId={r.participant.id} size={24} bare />
-                        )}
-                        <span className="truncate">
-                          {r.participant.displayName}
-                          {isMe ? "（あなた）" : ""}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="tabular-nums text-[#ff8f4a]">
-                          {r.total}点
-                        </span>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {step >= 4 && (
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="mt-8 flex w-full max-w-lg flex-col items-center rounded-2xl border border-[#3b5bff]/30 bg-white/[0.03] px-6 py-6"
-        >
-          <p className="font-sans text-xs tracking-widest text-white/60">
-            熟練度メーター獲得
-          </p>
-          <div className="mt-4">
-            {/* 2026-09-22：実ライブ側の表示分離（今回の獲得＝大喜利得点のみ）に
-                そろえる。獲得ポイント（pointsGain、寄合券/ガチャ用の別経済）は
-                元々masteryGainとは別物のため変更しない。 */}
-            <MasteryGauge baseline={baseline} gained={masteryGain} displayGained={myTotal} />
-          </div>
-          <p className="mt-4 font-sans text-xs text-white/80">
-            獲得ポイント：
-            <span className="font-bold text-[#ffcf4a]">
-              +{pointsGain}pt
-            </span>
-          </p>
-        </motion.div>
-      )}
-
-      {step >= 4 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="mt-6 flex w-full max-w-sm flex-col gap-3 sm:w-auto sm:flex-row sm:gap-4"
-        >
-          <button
-            type="button"
-            onClick={closeLive}
-            className="rounded-full bg-[#3b5bff] px-6 py-3 font-sans text-sm font-bold text-white transition hover:bg-[#2947e0]"
-          >
-            閉幕する
-          </button>
-          <button
-            type="button"
-            onClick={resetLive}
-            className="rounded-full border border-white/25 px-6 py-3 font-sans text-sm text-white/80 transition hover:border-[#3b5bff] hover:text-[#7ab2ff]"
-          >
-            もう一度体験する
-          </button>
-        </motion.div>
-      )}
+      {/* 最終結果の表示は実ライブの FinalResultView。liveId を渡さないため、初回ライブ特典の
+          到達記録・付与（本番DBへの書き込み）は体験版では発生しない（静的検査で固定する） */}
+      <FinalResultView data={data} myParticipantId={MY_PARTICIPANT_ID} liveMode="official" />
+      {recording ? null : <button
+        type="button"
+        onClick={resetLive}
+        className="mt-4 rounded-full border border-white/40 px-5 py-2 font-sans text-sm font-bold text-white/80 transition hover:bg-white/10"
+      >
+        もう一度体験する
+      </button>}
     </ScreenShell>
   );
 }

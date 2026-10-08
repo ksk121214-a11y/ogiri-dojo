@@ -24,7 +24,7 @@ export const STANDARD_TIMING = {
   interludeMs: 15_000, // 実仕様: 幕間10〜20秒
   openingMs: 45_000, // 実仕様: 開幕30〜60秒
   topicRevealMs: 13_000, // 2026-08-27改訂：22秒→15秒→10秒→13秒（テンポ優先、実仕様レンジ15〜30秒は緩和）
-  answerMs: 60_000, // 2026-08-27改訂：90秒→60秒
+  answerMs: 90_000, // 2026-10-04改訂：60秒→90秒（初回本番ライブの結果を受けて）
   judgeMs: 10_000, // 実仕様どおり：採点10秒
   judgeGraceMs: 400, // 採点タイマー表示が0になった後の滑り込み猶予
   groupResultMs: 15_000, // 2026-09-08改訂：30秒→15秒（実仕様: 組結果15秒）
@@ -98,7 +98,8 @@ export const REVEAL_SEQUENCE_MS =
   SCORE_REVEAL_DELAY_MS + LIVE_ROOM_TIMING.scoreDisplayMs + LIVE_ROOM_TIMING.gateTailMs;
 
 export const MAX_ANSWERS_PER_PLAYER = 5;
-export const ROUNDS_PER_LIVE_DEFAULT = 1; // 2026-08-27改訂：2周→1周
+// 2026-10-04改訂：1周→2周（初回本番ライブの結果を受けて）。DB側のbegin_game・create_live_preparationと必ず同じ値にする。
+export const ROUNDS_PER_LIVE_DEFAULT = 2;
 // ライブ本番の回答入力の文字数上限。入力欄自体に文字数カウンター等は出さず、
 // 上限を超えた状態で送信しようとした時だけエラーメッセージで知らせる。
 export const MAX_ANSWER_BODY_LENGTH = 50;

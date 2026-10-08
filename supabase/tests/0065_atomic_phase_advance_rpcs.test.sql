@@ -32,6 +32,8 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'a5000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('ec4f10c8-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('ec4f10c8-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
   ('a5100000-0000-0000-0000-000000000001', '0065テスト用お題A', 'text', true),
   ('a5100000-0000-0000-0000-000000000002', '0065テスト用お題B', 'text', true)
 on conflict do nothing;
@@ -46,7 +48,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0065テスト', 20, 2,
-    array['a5100000-0000-0000-0000-000000000001', 'a5100000-0000-0000-0000-000000000002']::uuid[]
+    array['a5100000-0000-0000-0000-000000000001', 'a5100000-0000-0000-0000-000000000002', 'ec4f10c8-0000-0000-0000-000000000001', 'ec4f10c8-0000-0000-0000-000000000002']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 
@@ -73,7 +75,7 @@ select
   pending_t.id as turn_b_id
 from public.lives l
 join public.turns active_t on active_t.live_id = l.id and active_t.status = 'active'
-join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending'
+join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending' and pending_t.round = active_t.round
 where l.title = '0065テスト';
 
 grant select on _t0065_ctx to authenticated, anon;
@@ -501,7 +503,10 @@ declare
   v_turn_b uuid;
   v_result record;
 begin
-  select live_id, turn_b_id into v_live_id, v_turn_b from _t0065_ctx;
+  select live_id into v_live_id from _t0065_ctx;
+  -- 2周制：「最後のターン」は2周目の最後の組（周→組順の末尾）。
+  select t.id into v_turn_b from public.turns t join public.groups g on g.id = t.group_id
+    where t.live_id = v_live_id order by t.round desc, g.group_order desc limit 1;
 
   update public.lives
     set current_phase = 'group_result', current_turn_id = v_turn_b, phase_deadline = now() - interval '1 second'

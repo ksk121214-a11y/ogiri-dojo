@@ -1,4 +1,4 @@
-// useFirstLiveRewardStore.ts（初回本番ライブ#0001の最終結果到達記録・限定特典付与、
+// useFirstLiveRewardStore.ts（本番ライブ#0001〜#0005の最終結果到達記録・限定特典付与、
 // supabase/migrations/0081）を「本番と同じ実装のまま」呼び出して、以下を検証する
 // スクリプト。実行方法はsrc/lib/__tests__/run.sh参照。
 //   - キー単位のsingle-flight（liveId×userIdの組ごとに独立管理。A開始→B開始→A再呼び出し

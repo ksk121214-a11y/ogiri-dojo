@@ -77,7 +77,7 @@ interface QueuedTsukkomiEvent extends TsukkomiEvent {
 export interface ParticipantAvatarInfo {
   icon: string;
   color: string;
-  // 2026-09-27（初回ライブ限定アイコン）：所有者が装備している場合のみ非null
+  // 2026-09-27（初期ライブ限定アイコン）：所有者が装備している場合のみ非null
   // （'first-witness'等、supabase/migrations/0081）。非nullならicon/colorより
   // 優先してフルカラー表示する（ParticipantIconAvatar参照）。
   equippedLimitedIconSlug: string | null;

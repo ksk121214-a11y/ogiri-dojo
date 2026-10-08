@@ -27,7 +27,7 @@ export default function ParticipantIconAvatar({
   participantId: string;
   avatarIcon?: string;
   avatarColor?: string;
-  // 2026-09-27（初回ライブ限定アイコン）：participant_display_names/sns_author_names
+  // 2026-09-27（初期ライブ限定アイコン）：participant_display_names/sns_author_names
   // RPCが返すequipped_limited_icon_slugをそのまま渡す。指定されていれば通常アイコンより
   // 優先してフルカラー表示する（呼び出し元がこの値を取得していない場合は従来どおり）。
   equippedLimitedIconSlug?: string | null;

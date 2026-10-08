@@ -41,7 +41,8 @@
 //   既存のtsukkomiIdCounter等と同じ考え方でモジュールスコープの変数として持つ。
 import { useEffect, useRef, useState } from "react";
 
-import { useLiveFollowerStore, type TsukkomiEvent } from "@/store/useLiveFollowerStore";
+import type { TsukkomiEvent } from "@/store/useLiveFollowerStore";
+import { useLiveReactionSource } from "@/lib/liveReactionSource";
 
 const DEFAULT_TICK_MS = 100;
 
@@ -341,6 +342,12 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
   // ようにする（本番のmapToDisplayはevent.idをそのまま使うため通常は同じ値に
   // なるが、共通処理としてこの前提に依存しない）。
   const schedulerIdByDisplayIdRef = useRef(new Map<string, string>());
+  // 待機列の取り出し口（既定は実ライブ、体験版は体験版のストア）
+  const source = useLiveReactionSource();
+  const sourceRef = useRef(source);
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
 
   useEffect(() => {
     predicateRef.current = predicate;
@@ -370,7 +377,7 @@ export function useTsukkomiReactionQueue<T extends { id: string }>(
     // 1つ作る。sharedCounterは省略してモジュール単位のシングルトンを使う
     // （＝他のuseTsukkomiReactionQueueインスタンスと合計上限を共有する）。
     const scheduler = new ReactionDisplayScheduler({
-      claim: (p, now) => useLiveFollowerStore.getState().claimReactionEvent(p, now),
+      claim: (p, now) => sourceRef.current.claimReactionEvent(p, now),
       predicate: (event) => predicateRef.current(event),
       maxConcurrent,
     });

@@ -1,4 +1,4 @@
-// 初回本番ライブ(#0001)の最終結果画面への到達記録・限定特典付与を管理するストア。
+// 本番ライブ（開催番号#0001〜#0005）の最終結果画面への到達記録・限定特典付与を管理するストア。
 // supabase/migrations/0081のmark_final_result_presence/grant_first_live_rewardを
 // 呼ぶだけの薄いラッパーだが、以下をここに集約する：
 //   - キー単位のsingle-flight（liveId×userIdの組ごとに独立して管理する。異なる

@@ -151,12 +151,12 @@ function contrast(a: string, b: string): number {
 
 // 7) 回答席：残り回数の行は舞台（回答席・名前）と重ならない場所（入力欄の直上）にあり、席は人数で幅を縮める。
 {
-  const stage = read("src/components/live-room/StageAnsweringView.tsx");
-  const dotsIdx = stage.indexOf("残り{Math.max(0, MAX_ANSWERS_PER_PLAYER - myAnswerCount)}回");
+  const stage = read("src/components/live-room/StageAnsweringPresentation.tsx");
+  const dotsIdx = stage.indexOf("残り{Math.max(0, maxAnswersPerPlayer - myAnswerCount)}回");
   const stageViewIdx = stage.indexOf("<StageCharactersView");
   const textareaIdx = stage.indexOf("<textarea");
   assert.ok(dotsIdx > stageViewIdx && dotsIdx < textareaIdx, "残り回数の行が回答席と重なり得る位置（舞台とボードの間）に残っている");
-  assert.equal((stage.match(/残り\{Math\.max\(0, MAX_ANSWERS_PER_PLAYER/g) ?? []).length, 1, "残り回数の行が複数ある");
+  assert.equal((stage.match(/残り\{Math\.max\(0, maxAnswersPerPlayer/g) ?? []).length, 1, "残り回数の行が複数ある");
   const chars = read("src/components/live-room/StageCharactersView.tsx");
   assert.ok(chars.includes("calc((100% - 8px) / ${Math.max(1, members.length)})"), "回答席の幅が人数に応じて縮まない（5人以上・狭い画面で重なる）");
   assert.ok(/members\.map\(\(member\) =>/.test(chars) && !/members\s*\.\s*(?:sort|reverse|slice\()/.test(chars), "席の並び順を変える処理がある");

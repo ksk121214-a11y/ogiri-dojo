@@ -24,7 +24,7 @@ export default function AvatarGlyph({
   // （StageCharactersView等、親の可変サイズに追従させたい箇所）はfillを使う。
   size?: number;
   fill?: boolean;
-  // 2026-09-27（初回ライブ限定アイコン）：指定された場合、CSS maskによる線画+単色塗り
+  // 2026-09-27（初期ライブ限定アイコン）：指定された場合、CSS maskによる線画+単色塗り
   // ではなく、この画像をフルカラーのまま表示する（全色付きPNGを単色化しないため）。
   // 指定時はiconSrc/silhouetteSrc/colorを無視する。
   fullColorSrc?: string | null;

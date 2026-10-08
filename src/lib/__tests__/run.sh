@@ -47,6 +47,16 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../referralSurveySummary.ts"
   "$SCRIPT_DIR/../singleFlight.ts"
   "$SCRIPT_DIR/../legalInfo.ts"
+  "$SCRIPT_DIR/../limitedRewardEligibility.ts"
+  "$SCRIPT_DIR/../liveTopicRequirement.ts"
+  "$SCRIPT_DIR/../limitedRewardPresenceLoader.ts"
+  "$SCRIPT_DIR/../liveRoomSelectors.ts"
+  "$SCRIPT_DIR/../liveRoomPresentation.ts"
+  "$SCRIPT_DIR/../liveDemoMode.ts"
+  "$SCRIPT_DIR/../seededRandom.ts"
+  "$SCRIPT_DIR/../cuePlayback.ts"
+  "$SCRIPT_DIR/../liveRoomPresentation.ts"
+  "$SCRIPT_DIR/../liveRoomTypes.ts"
   "$SCRIPT_DIR/../consentCheck.ts"
   "$SCRIPT_DIR/../serverClock.ts"
   "$SCRIPT_DIR/../serverClockAutoSync.ts"
@@ -70,6 +80,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../audienceJoinUiPlan.ts"
   "$SCRIPT_DIR/../liveParticipantPath.ts"
   "$SCRIPT_DIR/../authCallbackGuard.ts"
+  "$SCRIPT_DIR/../authCallback.ts"
   "$SCRIPT_DIR/../authorLookupStatus.ts"
   "$SCRIPT_DIR/../calendarInitialMonth.ts"
 )
@@ -269,6 +280,31 @@ else
   FAILED=1
 fi
 rm -rf "$FOLLOWER_JOIN_REFERRAL_DIR"
+
+# src/lib/__tests__/store/useLiveFollowerStoreAnswerScore.check.ts も同じ理由
+# （useLiveFollowerStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を
+# 含む）で専用tsconfig経由にする。第2段階（本番・体験版/撮影モードの画面共通化）
+# レビュー対応：共用表示部品から渡されるonSubmit/onScoreの到達先である
+# submitMyAnswer/submitMyScoreを「本番と同じ実装のまま」呼び出し、引数・回数・
+# Supabaseへの書き込み内容が共通化の前後で変わっていないことを検証する。
+FOLLOWER_ANSWER_SCORE_DIR="$(mktemp -d)"
+FOLLOWER_ANSWER_SCORE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.followerAnswerScore.json"
+FOLLOWER_ANSWER_SCORE_ENTRY="$FOLLOWER_ANSWER_SCORE_DIR/src/lib/__tests__/store/useLiveFollowerStoreAnswerScore.check.js"
+
+echo "--- useLiveFollowerStoreAnswerScore.check.ts ---"
+if npx tsc -p "$FOLLOWER_ANSWER_SCORE_TSCONFIG" --outDir "$FOLLOWER_ANSWER_SCORE_DIR" && [ -f "$FOLLOWER_ANSWER_SCORE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$FOLLOWER_ANSWER_SCORE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_ANSWER_SCORE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreAnswerScore.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FOLLOWER_ANSWER_SCORE_DIR"
 
 # src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.ts も同じ理由
 # （useLiveFollowerStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を
@@ -545,7 +581,7 @@ else
 fi
 rm -rf "$CONSENT_GATE_DIR" "$AUDIENCE_JOIN_DIR"
 
-# useFirstLiveRewardStore.ts（初回本番ライブ#0001の限定特典、supabase/migrations/0081）も
+# useFirstLiveRewardStore.ts（本番ライブ#0001〜#0005の限定特典、supabase/migrations/0081・0084）も
 # 同じ理由で専用tsconfig経由にする。
 FIRST_LIVE_REWARD_DIR="$(mktemp -d)"
 FIRST_LIVE_REWARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.firstLiveReward.json"

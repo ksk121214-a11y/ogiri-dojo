@@ -25,6 +25,11 @@ on conflict do nothing;
 update public.profiles set role = 'admin' where id = 'b0000000-0000-0000-0000-00000000000f';
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e52a1b51-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e52a1b51-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
+  ('e52a1b51-0000-0000-0000-000000000003', '2周目用の追加お題3（自動テスト）', 'text', true),
+  ('e52a1b51-0000-0000-0000-000000000004', '2周目用の追加お題4（自動テスト）', 'text', true),
+  ('e52a1b51-0000-0000-0000-000000000005', '2周目用の追加お題5（自動テスト）', 'text', true),
   ('b0100000-0000-0000-0000-000000000001', '0070テスト用お題1', 'text', true),
   ('b0100000-0000-0000-0000-000000000002', '0070テスト用お題2', 'text', true),
   ('b0100000-0000-0000-0000-000000000003', '0070テスト用お題3', 'text', true),
@@ -50,7 +55,7 @@ begin
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0070テスト-officialライブ', 20, 1,
-    array['b0100000-0000-0000-0000-000000000002']::uuid[], 'official'
+    array['b0100000-0000-0000-0000-000000000002', 'e52a1b51-0000-0000-0000-000000000001']::uuid[], 'official'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -125,7 +130,7 @@ begin
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_test_live_id from public.create_live_preparation(
     now(), '0070テスト-testライブ(player拒否確認)', 20, 1,
-    array['b0100000-0000-0000-0000-000000000003']::uuid[], 'test'
+    array['b0100000-0000-0000-0000-000000000003', 'e52a1b51-0000-0000-0000-000000000002']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_test_live_id;
@@ -173,7 +178,7 @@ begin
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0070テスト-testライブ', 20, 1,
-    array['b0100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['b0100000-0000-0000-0000-000000000001', 'e52a1b51-0000-0000-0000-000000000003']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;
@@ -285,7 +290,7 @@ begin
   perform set_config('myapp.uid', 'b0000000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_id from public.create_live_preparation(
     now(), '0070テスト-回答採点フロー', 20, 2,
-    array['b0100000-0000-0000-0000-000000000004', 'b0100000-0000-0000-0000-000000000001']::uuid[], 'test'
+    array['b0100000-0000-0000-0000-000000000004', 'b0100000-0000-0000-0000-000000000001', 'e52a1b51-0000-0000-0000-000000000004', 'e52a1b51-0000-0000-0000-000000000005']::uuid[], 'test'
   );
   reset role;
   update public.lives set current_phase = 'opening' where id = v_live_id;

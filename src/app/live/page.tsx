@@ -282,9 +282,9 @@ export default function LivePage() {
           Xでログイン
         </button>
         {xLoginError && <p className="mt-2 font-sans text-xs text-dojo-deep-crimson">{xLoginError}</p>}
-        {/* 2026-09-27（初回ライブ限定特典）：公式#0001（初回本番ライブ）のときだけ、
+        {/* 2026-09-27（初期ライブ限定特典）：公式の本番ライブ（開催番号#0001〜#0005）のときだけ、
             案内を表示する。ゲスト観戦自体は妨げず、対象外であることだけを伝える
-            （supabase/migrations/0081参照）。テストライブ・#0002以降では出さない。
+            （supabase/migrations/0081・0084参照）。テストライブ・#0006以降・緊急中止のライブでは出さない。
             文言・表示条件はOpeningView（Xログイン済みの参加受付画面）と共通化する。 */}
         <FirstLiveRewardAnnouncement
           liveMode={live?.live_mode}

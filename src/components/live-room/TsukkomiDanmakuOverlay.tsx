@@ -10,8 +10,8 @@ import type { TsukkomiEvent } from "@/store/useLiveFollowerStore";
 // 右から左へ流す演出。以前は画面下部から上に浮くバッジ(TsukkomiFloatOverlay)
 // だったが、それに代えてこちらを使う。「爆笑」はLaughMarkOverlay側の頭上マークで
 // 表現するため、ここでは扱わない(素通りさせる)。
-// src/components/live-demo/TsukkomiDanmakuOverlay.tsxと同じ演出だが、あちらは
-// useLiveDemoStoreのtsukkomiSeqを見る点だけがこちら(useLiveFollowerStore)と異なる。
+// 実ライブと体験版（/live-demo）で共通の表示部品。待機列は文脈（liveReactionSource）経由で、
+// 既定は実ライブのtsukkomiQueue。
 //
 // AudienceLayer呼び出し側と同じfixedRenderWidthPx=614/fixedRenderHeightPx=216/
 // bottom=-45pxのボックスに重ねて配置する(LaughMarkOverlayと同じ理由)。

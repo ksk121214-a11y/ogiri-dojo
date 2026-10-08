@@ -39,7 +39,10 @@ function makeChain(resolveValue: { data: unknown; error: null }) {
   if (table === "topic_bank") {
     // 手動お題選択：必要数ぶんのダミーお題を返す。
     return makeChain({
-      data: [{ id: "topic-1", body: "テストお題", format: "text" }],
+      data: [
+        { id: "topic-1", body: "テストお題", format: "text" },
+        { id: "topic-2", body: "テストお題2", format: "text" },
+      ],
       error: null,
     });
   }
@@ -58,7 +61,7 @@ function makeInput(): LivePreparationInput {
     scheduledAt: new Date().toISOString(),
     maxPlayers: 20,
     groupCount: 1,
-    topicSelection: { mode: "manual", topicBankIds: ["topic-1"] },
+    topicSelection: { mode: "manual", topicBankIds: ["topic-1", "topic-2"] },
     liveMode: "official",
     manualOfficialSequenceNumber: null,
   timingProfile: "standard",

@@ -21,9 +21,9 @@ const EMPTY_AVATARS: Record<string, ParticipantAvatarInfo> = {};
 
 // 中央の「舞台」ビジュアルエリア：組の回答者を横並びに配置し、
 // 審査サイクルに乗っている1人だけスポットライトを浴びて前に出る。
-// src/components/live-demo/StageCharacters.tsxと同じ見た目・演出（design-preview-2由来の
-// neon2デザイン）をそのまま移植したもの。useLiveDemoState/MY_PARTICIPANT_IDには依存せず、
-// 名前解決済みのメンバー一覧をpropsで受け取る点だけがデモ版と異なる。
+// 体験版（/live-demo）も、この部品をそのまま使う（旧い複製は2026-10-06に削除した）。
+// 見た目・演出は design-preview-2 由来の neon2 デザイン。ストアには依存せず、
+// 名前解決済みのメンバー一覧をpropsで受け取るため、実ライブと体験版の両方で使える。
 // 舞台の丸い土台はLiveStageBackdrop(variant="neon2")のstage-bg-2.png側に描き込まれて
 // いるため、ここでは演壇・アイコンの列だけを画面下部に固定表示する（fixed）。
 export default function StageCharactersView({

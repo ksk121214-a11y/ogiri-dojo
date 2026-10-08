@@ -5,15 +5,15 @@ import { useEffect, useState } from "react";
 
 import { LIVE_ROOM_TIMING } from "@/data/liveRoomTiming";
 import { playSfx } from "@/lib/sfx";
-import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
+import { useLiveReactionSource } from "@/lib/liveReactionSource";
 
 const STAMP_WORDS = ["ドッ", "ウケた!", "座布団3枚!"];
 
 // 笑いエフェクト（過半数3点で発生）：画面フラッシュ＋紙吹雪＋擬音スタンプ。
-// src/components/live-demo/LaughEffectOverlay.tsxと同じ演出だが、
-// useLiveDemoStoreではなくuseLiveFollowerStoreのlaughEventSeq（実際の採点確定で増える）を見る。
+// 実ライブと体験版（/live-demo）で共通の表示部品。笑いの発生回数は、文脈
+// （liveReactionSource）経由で受け取る。既定は実ライブのlaughEventSeq（実際の採点確定で増える）。
 export default function LaughEffectOverlay() {
-  const laughEventSeq = useLiveFollowerStore((s) => s.laughEventSeq);
+  const laughEventSeq = useLiveReactionSource().useLaughEventSeq();
   const [visible, setVisible] = useState(false);
   const [seenSeq, setSeenSeq] = useState(laughEventSeq);
   const [word] = useState(() => STAMP_WORDS[Math.floor(Math.random() * STAMP_WORDS.length)]);

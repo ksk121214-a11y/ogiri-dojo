@@ -26,7 +26,9 @@ update public.profiles set role = 'admin' where id = 'd1000000-0000-0000-0000-00
 
 insert into public.topic_bank (id, body, format, is_active) values
   ('d2000000-0000-0000-0000-000000000001', 'P1-8/9テスト用お題(登壇組)', 'text', true),
-  ('d2000000-0000-0000-0000-000000000002', 'P1-8/9テスト用お題(非登壇組・未発表のはず)', 'text', true)
+  ('d2000000-0000-0000-0000-000000000002', 'P1-8/9テスト用お題(非登壇組・未発表のはず)', 'text', true),
+  ('d2000000-0000-0000-0000-000000000003', 'P1-8/9テスト用お題(2周目・1組用)', 'text', true),
+  ('d2000000-0000-0000-0000-000000000004', 'P1-8/9テスト用お題(2周目・2組用)', 'text', true)
 on conflict do nothing;
 
 -- ライブ準備〜開始（adminとして）。
@@ -39,7 +41,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), 'P1-8/9テスト', 20, 2,
-    array['d2000000-0000-0000-0000-000000000001', 'd2000000-0000-0000-0000-000000000002']::uuid[]
+    array['d2000000-0000-0000-0000-000000000001', 'd2000000-0000-0000-0000-000000000002', 'd2000000-0000-0000-0000-000000000003', 'd2000000-0000-0000-0000-000000000004']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 
@@ -76,7 +78,7 @@ select
   pending_p.user_id as judge_user_id
 from public.lives l
 join public.turns active_t on active_t.live_id = l.id and active_t.status = 'active'
-join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending'
+join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending' and pending_t.round = active_t.round
 join lateral (
   select p.id, p.user_id from public.participants p
   where p.live_id = l.id and p.group_id = active_t.group_id and p.role = 'player'
@@ -582,7 +584,9 @@ end $$;
 -- ============================================================
 insert into public.topic_bank (id, body, format, is_active) values
   ('d2000000-0000-0000-0000-000000000011', 'P1-8/9追加テスト用お題A', 'text', true),
-  ('d2000000-0000-0000-0000-000000000012', 'P1-8/9追加テスト用お題B', 'text', true)
+  ('d2000000-0000-0000-0000-000000000012', 'P1-8/9追加テスト用お題B', 'text', true),
+  ('d2000000-0000-0000-0000-000000000013', 'P1-8/9追加テスト用お題C(2周目)', 'text', true),
+  ('d2000000-0000-0000-0000-000000000014', 'P1-8/9追加テスト用お題D(2周目)', 'text', true)
 on conflict do nothing;
 
 do $$
@@ -596,7 +600,7 @@ begin
 
   select live_id into v_live_id from public.create_live_preparation(
     now(), 'P1-8/9追加テスト', 20, 2,
-    array['d2000000-0000-0000-0000-000000000011', 'd2000000-0000-0000-0000-000000000012']::uuid[]
+    array['d2000000-0000-0000-0000-000000000011', 'd2000000-0000-0000-0000-000000000012', 'd2000000-0000-0000-0000-000000000013', 'd2000000-0000-0000-0000-000000000014']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 
@@ -625,7 +629,7 @@ select
   active_p.user_id as answerer_user_id
 from public.lives l
 join public.turns active_t on active_t.live_id = l.id and active_t.status = 'active'
-join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending'
+join public.turns pending_t on pending_t.live_id = l.id and pending_t.status = 'pending' and pending_t.round = active_t.round
 join lateral (
   select p.id, p.user_id from public.participants p
   where p.live_id = l.id and p.group_id = active_t.group_id and p.role = 'player'

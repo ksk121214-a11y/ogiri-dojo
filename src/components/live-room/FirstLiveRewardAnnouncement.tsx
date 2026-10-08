@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 
+import { isLimitedRewardLive } from "@/lib/limitedRewardEligibility";
 import { supabase } from "@/lib/supabase";
 
-// 2026-09-27（レビュー対応）：初回ライブ限定特典の案内文言・表示条件をここに一本化し、
+// 2026-09-27（レビュー対応）：初期ライブ限定特典の案内文言・表示条件をここに一本化し、
 // 「未ログインの参加入口」（src/app/live/page.tsx）と「Xログイン済みの参加受付画面
 // （OpeningView）」の両方から同じ文言・同じ条件で呼べるようにする（重複実装を避ける）。
 // 表示名(titles.display_name)は運営が管理画面(/admin/titles)から後から変更できるため、
 // ここでハードコードせず毎回取得する。取得に失敗した場合は一般的な文言へフォールバックする。
-const FALLBACK_TITLE_NAME = "初回ライブ限定称号";
+const FALLBACK_TITLE_NAME = "初期ライブ限定称号";
 
 function useFirstWitnessTitleName(shouldFetch: boolean): string {
   const [name, setName] = useState<string>(FALLBACK_TITLE_NAME);
@@ -37,7 +38,7 @@ export function isFirstLiveRewardAnnounceable(
   officialSequenceNumber: number | null | undefined,
   emergencyClosed: boolean | null | undefined,
 ): boolean {
-  return liveMode === "official" && officialSequenceNumber === 1 && !emergencyClosed;
+  return isLimitedRewardLive(liveMode, officialSequenceNumber, emergencyClosed);
 }
 
 export default function FirstLiveRewardAnnouncement({
@@ -58,7 +59,7 @@ export default function FirstLiveRewardAnnouncement({
 
   return (
     <p className={className}>
-      最終結果まで参加したXログイン会員に、限定称号「{titleName}」と限定アイコンをプレゼントします。ゲスト参加は対象外です。
+      本番ライブ第5回まで、最終結果まで参加したXログイン会員に、限定称号「{titleName}」と限定アイコンをプレゼントします。ゲスト参加は対象外です。
     </p>
   );
 }

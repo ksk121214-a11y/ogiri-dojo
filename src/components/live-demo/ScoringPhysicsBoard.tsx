@@ -77,25 +77,6 @@ const GOLD_CONFETTI_COLORS = ["#ffd76a", "#fff1b8", "#ffb703", "#f6d77c"];
 // 満点到達時、玉を虹色のまま弾けさせず全て金色に染める。
 const PERFECT_BALL_COLOR = "#ffd700";
 // 満点に達してから、積み上がった玉が虹色→金色に少しずつ変わりきるまでの時間。
-// 満点＝弾ける、を即座につなげず、「溜まる→間を置いて金色に染まっていく→弾ける」と
-// 一呼吸ずつ演出を挟むための猶予（誕生日会に近い盛り上げ方をイメージ）。
-const GOLD_TRANSITION_MS = 900;
-// 金色に染まりきってから、実際に弾けるまでのさらなる余韻。
-const PERFECT_POP_HOLD_MS = 350;
-
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function lerpColor(from: string, to: string, t: number): string {
-  const [fr, fg, fb] = hexToRgb(from);
-  const [tr, tg, tb] = hexToRgb(to);
-  const r = Math.round(fr + (tr - fr) * t);
-  const g = Math.round(fg + (tg - fg) * t);
-  const b = Math.round(fb + (tb - fb) * t);
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
 // 半径は「maxBalls個ぴったりでボックスが満杯になる」ように理論的に逆算した係数。
 // 円のヘックス充填(高さ方向の段積み)で N個・半径rがおおよそ幅Wの箱を満たす条件から
@@ -181,6 +162,9 @@ export default function ScoringPhysicsBoard({
   const runnerRef = useRef<Matter.Runner | null>(null);
   const boundsRef = useRef<Matter.Body[]>([]);
   const ballColorsRef = useRef<Map<number, string>>(new Map());
+  // 満点が確定した瞬間（評価権のある全員の評価が届き、全員が最高点）から、弾けるまでの間ずっとtrue。
+  // 「弾ける瞬間」ではなく「確定した瞬間」に金色化するための状態で、1回答につき一度だけtrueになる。
+  const isGoldRoundRef = useRef(false);
   const poppingBallsRef = useRef<PoppingBall[]>([]);
   const confettiRef = useRef<ConfettiPiece[]>([]);
   const flashAlphaRef = useRef(0);
@@ -190,9 +174,6 @@ export default function ScoringPhysicsBoard({
   // 虹色」に出し分けるために使う（紙吹雪は玉が全て弾け終わってから作られるため、
   // 弾け中の色情報とは別に持っておく必要がある）。
   const lastPopWasPerfectRef = useRef(false);
-  // 満点(maxBalls)に最初に到達した時刻。これを起点に、積み上がった玉を虹色→金色へ
-  // 少しずつ染めるアニメーションと、実際に弾けるまでの一呼吸(PERFECT_POP_HOLD_MS)を計る。
-  const perfectReachedAtRef = useRef<number | null>(null);
   const totalSpawnedRef = useRef(0);
   const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   // 2026-09-04:「予約済みボールを回答間で持ち越さない」対策。玉のスポーン
@@ -272,7 +253,22 @@ export default function ScoringPhysicsBoard({
     onBigLaughRef.current = onBigLaugh;
   }, [onBigLaugh]);
   useEffect(() => {
+    const wasConfirmedPerfect = confirmedPerfectRef.current;
     confirmedPerfectRef.current = confirmedPerfect;
+    // 評価権のある最後の人の評価が届き、全員が最高点だと確定した「その瞬間」に金色化する
+    // （弾ける瞬間まで待たない）。満点でない・未確定の間は何もしない。1回答につき一度だけ実行する。
+    if (confirmedPerfect === true && wasConfirmedPerfect !== true && !isGoldRoundRef.current) {
+      isGoldRoundRef.current = true;
+      const engine = engineRef.current;
+      if (engine) {
+        // 既にボードに溜まっている玉（静止中・落下中のどちらも、Matterのworldにいる限り対象）を、
+        // 即座にすべて金色へ塗り替える。これ以降に生成される玉はtrySpawnOneBall側でisGoldRoundRefを見て
+        // 最初から金色にする。
+        for (const body of engine.world.bodies) {
+          if (body.circleRadius) ballColorsRef.current.set(body.id, PERFECT_BALL_COLOR);
+        }
+      }
+    }
   }, [confirmedPerfect]);
 
   // コンテナのリサイズに追従して物理ワールドの境界を再構築する。
@@ -381,27 +377,14 @@ export default function ScoringPhysicsBoard({
       // 大ウケライン（理論上の最大得点の2/3ライン）：見た目の線は非表示。判定にのみ使う。
       const bigLaughThreshold = maxBallsRef.current * (2 / 3);
 
-      // 満点に達していて、まだ弾けていなければ、積み上がった玉を虹色→金色へ
-      // 少しずつ染めていく（GOLD_TRANSITION_MSかけて進行度0→1）。
-      const frameNow = performance.now();
-      const isPerfectPending =
-        totalSpawnedRef.current >= maxBallsRef.current && !perfectTriggeredRef.current;
-      if (isPerfectPending && perfectReachedAtRef.current === null) {
-        perfectReachedAtRef.current = frameNow;
-      }
-      const goldProgress =
-        isPerfectPending && perfectReachedAtRef.current !== null
-          ? Math.min(1, (frameNow - perfectReachedAtRef.current) / GOLD_TRANSITION_MS)
-          : 0;
 
       // 降下中・堆積中のボール
       const engine = engineRef.current;
       if (engine) {
         for (const body of engine.world.bodies) {
           if (!body.circleRadius) continue;
-          const baseColor = ballColorsRef.current.get(body.id) ?? "#ffffff";
-          const color =
-            goldProgress > 0 ? lerpColor(baseColor, PERFECT_BALL_COLOR, goldProgress) : baseColor;
+          // 金色は弾ける瞬間にだけ付ける（積み上がり中は、採点の確定前も確定後も通常の色のまま）
+          const color = ballColorsRef.current.get(body.id) ?? "#ffffff";
           // shadowBlurはCanvas 2Dの中でも特に重い操作で、堆積中の玉すべてに毎フレーム
           // かけると（審査員が多い組では最大数十個）メインスレッドを圧迫し、setTimeout等の
           // 他の処理まで遅延させる原因になっていた（効果音が遅れて鳴る・演出が出ない等）。
@@ -529,8 +512,9 @@ export default function ScoringPhysicsBoard({
     // answers.judge_countから呼び出し元が渡す)が分かっていればそれを最優先する。
     // まだ確定前（理論上の満点まで溜まった時点でのボーナス演出、resolved前）は
     // 従来通りローカルの積み上げ数で判定する。
-    const isPerfectScore =
-      confirmedPerfectRef.current ?? totalSpawnedRef.current >= maxBallsRef.current;
+    // 満点かどうかは、満点確定の瞬間に一度だけ決まるisGoldRoundRef（上のconfirmedPerfect同期effect参照）
+    // をそのまま使う。弾ける瞬間に改めて判定し直さない（既にその色で玉が溜まっているため）。
+    const isPerfectScore = isGoldRoundRef.current;
     poppingBallsRef.current = balls.map((b) => ({
       x: b.position.x,
       y: b.position.y,
@@ -578,7 +562,7 @@ export default function ScoringPhysicsBoard({
     for (const id of spawnTimeoutsRef.current) clearTimeout(id);
     spawnTimeoutsRef.current.clear();
     perfectTriggeredRef.current = false;
-    perfectReachedAtRef.current = null;
+    isGoldRoundRef.current = false;
     lineFlashedRef.current = false;
     flashAlphaRef.current = 0;
     poppingBallsRef.current = [];
@@ -596,8 +580,7 @@ export default function ScoringPhysicsBoard({
   }, [roundKey]);
 
   // 理論上の満点まで溜まり、かつ全てのボールがほぼ静止したら弾けさせる（ボーナス演出）。
-  // 静止した瞬間に即座に弾けさせず、金色に染まりきる(GOLD_TRANSITION_MS)のを見せた上で
-  // さらに一呼吸(PERFECT_POP_HOLD_MS)置いてから弾けるようにする。
+  // 採点が確定し、全てのボールがほぼ静止したら弾ける。満点の場合は、弾ける瞬間に金色へ変わる。
   useEffect(() => {
     if (totalBalls < fixedMaxBalls || perfectTriggeredRef.current) return;
     const checkInterval = setInterval(() => {
@@ -609,39 +592,19 @@ export default function ScoringPhysicsBoard({
         (b) => Matter.Vector.magnitude(b.velocity) < 0.4,
       );
       if (!allSettled) return;
-      const reachedAt = perfectReachedAtRef.current;
-      if (
-        reachedAt !== null &&
-        performance.now() - reachedAt < GOLD_TRANSITION_MS + PERFECT_POP_HOLD_MS
-      ) {
-        return;
-      }
+      // 採点が確定するまでは弾けさせない（暫定の満点で金色になる・弾けるのを防ぐ）
+      if (confirmedPerfectRef.current === null) return;
       clearInterval(checkInterval);
       triggerPerfectEffect();
     }, 150);
     return () => clearInterval(checkInterval);
   }, [totalBalls, fixedMaxBalls, triggerPerfectEffect]);
 
-  // 採点が確定した(resolved)瞬間に弾けさせる（既定では遅延0）。満点の場合は、
-  // 金色に染まりきる猶予(GOLD_TRANSITION_MS+PERFECT_POP_HOLD_MS)が
-  // resolvedPopDelayMsより短い呼び出し元でも、染まりきる前に弾けてしまわないよう
-  // 追加で待つ（通常の呼び出し元はresolvedPopDelayMsの方が十分長いため実質発火しない）。
+  // 採点が確定した(resolved)瞬間に弾けさせる（既定では遅延0）。
   useEffect(() => {
     if (!resolved) return;
     const timeouts = timeoutsRef.current;
     const t = setTimeout(() => {
-      const isPerfectPending =
-        totalSpawnedRef.current >= maxBallsRef.current && !perfectTriggeredRef.current;
-      const reachedAt = perfectReachedAtRef.current;
-      const remaining =
-        isPerfectPending && reachedAt !== null
-          ? GOLD_TRANSITION_MS + PERFECT_POP_HOLD_MS - (performance.now() - reachedAt)
-          : 0;
-      if (remaining > 0) {
-        const t2 = setTimeout(() => triggerPerfectEffect(), remaining);
-        timeouts.add(t2);
-        return;
-      }
       triggerPerfectEffect();
     }, resolvedPopDelayMs);
     timeouts.add(t);
@@ -738,7 +701,7 @@ export default function ScoringPhysicsBoard({
     Matter.Body.setVelocity(ball, { x: (Math.random() - 0.5) * 1.5, y: 0 });
     ballColorsRef.current.set(
       ball.id,
-      BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
+      isGoldRoundRef.current ? PERFECT_BALL_COLOR : BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
     );
     Matter.Composite.add(currentEngine.world, ball);
     totalSpawnedRef.current += 1;

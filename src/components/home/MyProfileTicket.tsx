@@ -66,7 +66,7 @@ export default function MyProfileTicket({
   const isLoadingMember = isLoggedIn && !isGuest && !isMember;
   const rank = getRankByMeter(isMember ? (profile?.masteryMeter ?? 0) : 0);
   const [titleModalOpen, setTitleModalOpen] = useState(false);
-  // 2026-09-27（称号・初回ライブ限定特典）：equipped_title_slugは称号の内部ID
+  // 2026-09-27（称号・初期ライブ限定特典）：equipped_title_slugは称号の内部ID
   // （slug）だけなので、表示名はtitlesテーブルから引く。称号は数が少なく頻繁に
   // 変わらないため、装備中のslugが変わった時だけ取得し直す簡易実装にしている。
   const equippedTitleSlug = isMember ? (profile?.equippedTitleSlug ?? null) : null;

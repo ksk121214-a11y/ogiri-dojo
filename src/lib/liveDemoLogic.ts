@@ -24,10 +24,20 @@ export function genId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${idCounter}`;
 }
 
+// 体験版の乱数の出所。通常は Math.random。動画撮影モードでは startLive 時に
+// 種から作った乱数へ切り替え、同じ種なら組分け・お題・ボットの回答と得点を毎回同じにする。
+let demoRandom: () => number = Math.random;
+export function setLiveDemoRandom(random: () => number): void {
+  demoRandom = random;
+}
+export function liveDemoRandom(): number {
+  return demoRandom();
+}
+
 function shuffle<T>(items: T[]): T[] {
   const arr = [...items];
   for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(demoRandom() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -114,7 +124,7 @@ export function buildTurns(
 // 採点のランダム分布（多少の偏りをつける：0点よりは1〜2点が出やすい寄席らしい甘め判定、
 // 3点は「大ウケ」枠のため出現率を絞る。2026-07-14改訂：0〜2点の3段階→0〜3点の4段階に変更）
 export function randomBotScore(): 0 | 1 | 2 | 3 {
-  const r = Math.random();
+  const r = demoRandom();
   if (r < 0.15) return 0;
   if (r < 0.45) return 1;
   if (r < 0.8) return 2;
@@ -122,7 +132,7 @@ export function randomBotScore(): 0 | 1 | 2 | 3 {
 }
 
 export function randomBotAnswerBody(): string {
-  return BOT_ANSWER_POOL[Math.floor(Math.random() * BOT_ANSWER_POOL.length)];
+  return BOT_ANSWER_POOL[Math.floor(demoRandom() * BOT_ANSWER_POOL.length)];
 }
 
 // ボット回答者の送信スケジュールを生成する。
@@ -135,12 +145,12 @@ export function generateBotAnswerSchedule(
   const schedule: { participantId: string; targetRemainingMs: number }[] = [];
   for (const participantId of botMemberIds) {
     // 1〜最大回答数の範囲でランダムに送信回数を決める（多め寄りに偏らせる）
-    const count = 1 + Math.floor(Math.random() * MAX_ANSWERS_PER_PLAYER);
+    const count = 1 + Math.floor(demoRandom() * MAX_ANSWERS_PER_PLAYER);
     const targets = new Set<number>();
     while (targets.size < count) {
       // 持ち時間のうち序盤〜終盤にランダムに散らす（あまり終了間際に集中しすぎないよう余白を残す）
       const targetRemaining = Math.floor(
-        Math.random() * answerMs * 0.85 + answerMs * 0.05,
+        demoRandom() * answerMs * 0.85 + answerMs * 0.05,
       );
       targets.add(targetRemaining);
     }
@@ -153,5 +163,5 @@ export function generateBotAnswerSchedule(
 }
 
 export function randomDelay(minMs: number, maxMs: number): number {
-  return minMs + Math.random() * Math.max(0, maxMs - minMs);
+  return minMs + demoRandom() * Math.max(0, maxMs - minMs);
 }

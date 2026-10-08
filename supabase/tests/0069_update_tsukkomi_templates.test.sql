@@ -25,6 +25,8 @@ insert into auth.users (id) values
 on conflict do nothing;
 
 insert into public.topic_bank (id, body, format, is_active) values
+  ('e58c817f-0000-0000-0000-000000000001', '2周目用の追加お題1（自動テスト）', 'text', true),
+  ('e58c817f-0000-0000-0000-000000000002', '2周目用の追加お題2（自動テスト）', 'text', true),
   ('a6910000-0000-0000-0000-000000000001', '0069テスト用お題1', 'text', true),
   ('a6910000-0000-0000-0000-000000000002', '0069テスト用お題2', 'text', true)
 on conflict do nothing;
@@ -42,7 +44,7 @@ begin
   perform set_config('myapp.uid', 'a6900000-0000-0000-0000-00000000000f', true);
   select live_id into v_live_a from public.create_live_preparation(
     now(), '0069テストA', 20, 2,
-    array['a6910000-0000-0000-0000-000000000001', 'a6910000-0000-0000-0000-000000000002']::uuid[]
+    array['a6910000-0000-0000-0000-000000000001', 'a6910000-0000-0000-0000-000000000002', 'e58c817f-0000-0000-0000-000000000001', 'e58c817f-0000-0000-0000-000000000002']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_a;
 

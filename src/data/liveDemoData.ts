@@ -6,20 +6,23 @@ export const GROUP_COUNT = 3;
 export const ROUNDS_PER_LIVE = 2; // 仕様書 §1.3 の既定値どおり2周
 export const MAX_ANSWERS_PER_PLAYER = 5; // 仕様書どおり（2026-07-14改訂：3回→5回）
 
+// 体験版の表示時間。実ライブ（src/data/liveRoomTiming.tsのSTANDARD_TIMING＝本番standard）と
+// 同じ値にする（2026-10-06：体験版と実ライブの乖離の監査で、お題発表・組結果・送信から
+// 回答フリップまでの時間が実ライブと違っていたため揃えた）。
+// 一致は src/lib/__tests__/liveDemoSyncWiring.check.ts で検査する。
 export const DEMO_TIMING = {
-  interludeMs: 2400, // 実仕様: 幕間10〜20秒。デモは短縮
-  openingMs: 2600, // 実仕様: 開幕30〜60秒
-  topicRevealMs: 2200, // 実仕様: お題発表15〜30秒
-  // 実仕様どおり：持ち時間60秒（仕様書.md §1参照）。2026-07-14に120秒→90秒へ改訂した後、
-  // 2026-08-27に90秒→60秒へ再改訂されたが、このレガシーなデモ用定数だけ更新が漏れていた
-  // （実バックエンド側のsrc/data/liveRoomTiming.tsのLIVE_ROOM_TIMING.answerMsは
-  // 既に60秒に追従済み）。短縮しない。
-  answerMs: 60_000,
+  interludeMs: 15_000, // 実ライブ（STANDARD_TIMING.interludeMs）と同じ
+  openingMs: 45_000, // 実ライブ（STANDARD_TIMING.openingMs）と同じ
+  topicRevealMs: 13_000, // 実ライブ（STANDARD_TIMING.topicRevealMs）と同じ
+  // 実仕様どおり：持ち時間90秒（本番standardと同じ値。src/data/liveRoomTiming.tsの
+  // STANDARD_TIMING.answerMs・supabase 0084の_live_phase_durationと必ず一致させる）。
+  // 2026-10-04改訂：60秒→90秒。短縮しない。
+  answerMs: 90_000,
   judgeMs: 10_000, // 実仕様どおり：採点10秒。採点権を持つ全員が投票し終えたら10秒を待たず早期確定する（§1.1・§4.1）。短縮しない
   judgeGraceMs: 400, // 採点タイマー表示が0になった後も、ギリギリ滑り込みの採点を受け付ける猶予（2026-07-14追加）
-  groupResultMs: 3_400, // 実仕様: 組結果15秒（2026-09-08改訂：20〜40秒→15秒）。デモは短縮
+  groupResultMs: 15_000, // 実ライブ（STANDARD_TIMING.groupResultMs）と同じ：組結果15秒
   laughEffectMs: 1_100, // デザイン方針§4.4: 0.8〜1.2秒で収束
-  revealDelayMs: 1_500, // 送信後・前の審査サイクル終了後に「一呼吸」置いてから回答を表示するまでの間（2026-07-14追加、同日700ms→1500msに延長）
+  revealDelayMs: 2_200, // 送信後に「一呼吸」置いてから回答フリップを出すまでの間（実ライブのSTANDARD_TIMING.revealDelayMsと同じ）
   // 採点確定（評価が全員終わった or 時間切れ）後の一連の流れは、必ずこの順で一件ずつ進む：
   // ①回答フリップを一定時間見せる(revealGraceMs) → ②フリップが消える → ③少し間を置く
   // (ballPopPauseMs) → ④採点ボードの玉が「パァン」と弾けて消える(ScoringPhysicsBoardの
@@ -54,18 +57,18 @@ export const MY_DISPLAY_NAME = "あなた";
 
 // ボット参加者名（芸人風の呼び名）。テスト操作者と合わせて13名で3組編成。
 export const BOT_NAMES = [
-  "べらんめえ次郎",
-  "扇子亭こんぶ",
-  "三日月アキラ",
-  "落語亭シロップ",
-  "太鼓持ちマサ",
-  "座布団ヒナ",
-  "招き猫ケンタ",
-  "楽屋裏ミナミ",
-  "早口テツヤ",
-  "半纏のリョウ",
-  "めくり札カナ",
-  "高座のユウ",
+  "レモン信号",
+  "深夜トースト",
+  "ソーダ階段",
+  "逆さポケット",
+  "毛布ロケット",
+  "透明ピアノ",
+  "夕焼けドーナツ",
+  "雨音ストーブ",
+  "紙飛行ベル",
+  "星屑バス",
+  "角砂糖ラジオ",
+  "ひなたクジラ",
 ] as const;
 
 // お題プール（組数×周回数=6問ぶん。すべてtextフォーマット §8.3）

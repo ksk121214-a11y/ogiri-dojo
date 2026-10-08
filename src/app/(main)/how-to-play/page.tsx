@@ -20,10 +20,8 @@ import { MAX_ANSWERS_PER_PLAYER } from "@/data/liveDemoData";
 // 遊び方ページ。従来はモーダル（TutorialModal、削除済み）で表示していたが、下部ナビ・
 // ヒーローの「遊び方を見る」から専用ページへ遷移する形に変更した。
 // いただいた参考画像（手順1〜6のチケット風カード＋明るいコンクリート背景）を元にしている。
-// 「各組の持ち時間」は当初、実装側のレガシーな値（DEMO_TIMING.answerMs、当時90秒）に
-// 合わせて90秒と表記していたが、仕様書.md §1・実バックエンド側のLIVE_ROOM_TIMING.answerMsを
-// 確認したところ現行仕様は60秒（2026-08-27改訂）で、DEMO_TIMING側の更新漏れだったと判明。
-// DEMO_TIMING.answerMsを60秒に修正した上で、表記も60秒に戻した。
+// 「各組の持ち時間」は本番standard（STANDARD_TIMING.answerMs）と同じ90秒で表記する
+// （2026-10-04改訂：60秒→90秒）。DEMO_TIMING.answerMsも同じ90秒に揃えてある。
 // 「結果発表で貰えるポイント」は、実装（FinalResultScreen.tsxのrankBonus＋ベストアンサー
 // ボーナス）が順位に応じたボーナス方式のため、参考画像の「獲得点と同じポイント」から
 // その表現に補正している。
@@ -73,7 +71,7 @@ export default function HowToPlayPage() {
           <PeopleTag label="3組" tone="accent" count={2} />
         </div>
         <p className="mt-2">
-          1組5人程度が目安。参加人数に応じて2〜4組に分かれ、各組60秒で回答します。
+          1組5人程度が目安。参加人数に応じて2〜4組に分かれ、各組90秒で回答します。
           出番ではない組の参加者が審査員を担当します。
         </p>
       </StepCard>

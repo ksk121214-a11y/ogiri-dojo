@@ -1,6 +1,7 @@
 // ストアの状態から画面表示用データを組み立てる派生ロジック（選択関数）。
 
 import { MY_PARTICIPANT_ID } from "@/data/liveDemoData";
+import { withRanks, type RoomRankingEntry } from "@/lib/liveRoomSelectors";
 import type { LiveDemoState } from "@/store/useLiveDemoStore";
 import type { DemoAnswer, DemoGroup, DemoParticipant } from "@/types/liveDemo";
 
@@ -112,4 +113,37 @@ export function getMyScoreForCurrentJudging(state: LiveDemoState) {
         s.judgeParticipantId === MY_PARTICIPANT_ID,
     )?.points ?? null
   );
+}
+
+// ---------------------------------------------------------------------------
+// 実ライブの表示部品（GroupResultView・FinalResultView）へ渡すデータへの変換。
+// 同点の順位（rank）は実ライブと同じwithRanks（liveRoomSelectors）で付けるため、
+// 体験版だけ別の順位の付け方になることを防ぐ。
+// ---------------------------------------------------------------------------
+
+export function toRoomRanking(entries: { participant: DemoParticipant; total: number }[]): RoomRankingEntry[] {
+  return withRanks(
+    entries.map((e) => ({ participantId: e.participant.id, name: e.participant.displayName, total: e.total })),
+  );
+}
+
+export function buildGroupResultData(state: LiveDemoState, turnId: string) {
+  const turn = state.turns.find((t) => t.id === turnId);
+  return {
+    round: turn?.round ?? 0,
+    groupOrder: turn?.groupOrder ?? 0,
+    topicBody: turn ? getTopicBody(state, turn.topicId) : "",
+    ranking: toRoomRanking(getGroupTurnRanking(state, turnId)),
+    laughCount: state.answers.filter((a) => a.turnId === turnId && a.laughTriggered).length,
+  };
+}
+
+export function buildFinalResultData(state: LiveDemoState) {
+  const ranking = toRoomRanking(getOverallRanking(state));
+  return {
+    // 実ライブの最終結果画面はベストアンサーを表示しない（FinalResultView参照）
+    bestAnswer: null,
+    ranking,
+    myRank: ranking.find((r) => r.participantId === MY_PARTICIPANT_ID)?.rank ?? null,
+  };
 }

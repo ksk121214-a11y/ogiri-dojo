@@ -137,7 +137,7 @@ function MyProfileEditForm({
   const [bio, setBio] = useState(profile.bio);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // 2026-09-27（初回ライブ限定アイコン）：所有している限定アイコンのslug一覧
+  // 2026-09-27（初期ライブ限定アイコン）：所有している限定アイコンのslug一覧
   // （通常は空、所有していれば'first-witness'を含む）。限定アイコンを選んでも
   // 通常アイコンのicon/colorはこのフォーム内では一切変更しない（保存時に両方とも
   // 送るため、通常アイコンへ戻した時に元の色がそのまま復元される）。
@@ -196,7 +196,7 @@ function MyProfileEditForm({
       setError(avatarResult.reason);
       return;
     }
-    // 2026-09-27（初回ライブ限定アイコン）：装備の変更は所有権をDB内で検証する
+    // 2026-09-27（初期ライブ限定アイコン）：装備の変更は所有権をDB内で検証する
     // 専用RPC経由（set_equipped_limited_icon）。通常アイコン(icon/color)は上で
     // 既に保存済みなので、限定アイコンを解除しても通常アイコンの色は消えない。
     if (limitedIconSlug !== profile.equippedLimitedIconSlug) {
@@ -279,7 +279,7 @@ function MyProfileEditForm({
                     <AvatarGlyph iconSrc={preset.src} silhouetteSrc={preset.silhouetteSrc} color={color} size={36} />
                   </button>
                 ))}
-                {/* 2026-09-27（初回ライブ限定アイコン）：所有している場合だけ、通常アイコンの
+                {/* 2026-09-27（初期ライブ限定アイコン）：所有している場合だけ、通常アイコンの
                     並びに追加する。全色付きPNGのためCSS maskで単色化せずそのまま表示する。 */}
                 {ownedLimitedIconSlugs.map((slug) => {
                   const preset = LIMITED_ICON_PRESETS.find((p) => p.slug === slug);
