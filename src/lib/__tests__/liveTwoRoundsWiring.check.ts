@@ -1,5 +1,8 @@
-// 2周制・90秒化の配線検査。
-// 周回数(2)・回答時間(90秒)の値がTS(定数)とDB(0084の関数)で一致していること、
+// 2周制・90秒化の配線検査（0085で2周固定・自動進行から、運営者が周ごとに
+// 次へ進むか終了するかを選ぶ動的な周回追加へ変更したため、1〜6はその変更後の
+// 値（初期1周・上限10周）がTS(定数)とDB(0085の関数)で一致していることを検証する
+// ように更新した。7以降は周回数の仕組みと無関係な既存項目のため0084のまま検証する）。
+// 回答時間(90秒)の値がTS(定数)とDB(0084の関数)で一致していること、
 // お題必要数（組数×周回数）の計算と不足案内が正しいことを確認する。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,12 +19,17 @@ import {
 const ROOT = process.cwd();
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
-// 1) お題必要数：組数×2周
+// 1) お題必要数：ライブ作成時点では組数×1周（0085で2周目以降は動的追加へ変更）
 {
   assert.equal(requiredTopicCount(2, 2), 4);
   assert.equal(requiredTopicCount(3, 2), 6);
   assert.equal(requiredTopicCount(5, 2), 10);
-  console.log("PASS: お題の必要数は組数×2周（2組→4件、3組→6件、5組→10件）");
+  const timingForInitial = read("src/data/liveRoomTiming.ts");
+  const initialMatch = /export const ROUNDS_PER_LIVE_INITIAL = (\d+);/.exec(timingForInitial);
+  assert.ok(initialMatch, "TSにROUNDS_PER_LIVE_INITIALが見つからない");
+  const initialRounds = Number(initialMatch![1]);
+  assert.equal(requiredTopicCount(2, initialRounds), 2, "ライブ作成時点の必要お題数が組数×1周になっていない");
+  console.log("PASS: requiredTopicCountは組数×周回数の汎用計算で、ライブ作成時点はROUNDS_PER_LIVE_INITIAL(1)を使うため組数と同数になる");
 }
 
 // 2) ランダム選択の不足案内
@@ -40,29 +48,35 @@ const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
   console.log("PASS: 手動選択は必要数ちょうどだけを受け付け、不足・超過を案内する");
 }
 
-// 4) TS定数とDB(0084)の周回数・回答時間が一致している
+// 4) TS定数とDB(0085)の初期周回数・上限周回数・回答時間が一致している
 {
   const timing = read("src/data/liveRoomTiming.ts");
-  assert.match(timing, /export const ROUNDS_PER_LIVE_DEFAULT = 2;/, "TSの周回数が2になっていない");
+  assert.match(timing, /export const ROUNDS_PER_LIVE_INITIAL = 1;/, "TSの初期周回数が1になっていない");
+  assert.match(timing, /export const MAX_ROUNDS_PER_LIVE = 10;/, "TSの周回数上限が10になっていない");
   assert.match(timing, /answerMs: 90_000,/, "TSの本番回答時間が90秒になっていない");
 
-  const sql = read("supabase/migrations/0084_live_limited_rewards_to_round5_and_timing.sql");
-  assert.match(sql, /v_rounds_per_live constant int := 2;/, "0084のcreate_live_preparationの周回数が2になっていない");
-  assert.match(sql, /v_rounds constant int := 2;/, "0084のbegin_gameの周回数が2になっていない");
-  assert.match(sql, /when 'answering' then 90000/, "0084の本番回答時間が90秒になっていない");
-  console.log("PASS: 周回数(2)と本番回答時間(90秒)はTSとDB(0084)で一致している");
+  const sql85 = read("supabase/migrations/0085_staging_operations_and_dynamic_rounds.sql");
+  assert.match(sql85, /v_initial_rounds constant int := 1;/, "0085のcreate_live_preparationの初期周回数が1になっていない");
+  assert.match(sql85, /v_expected_initial_rounds constant int := 1;/, "0085のbegin_gameの初期周回数が1になっていない");
+  assert.match(sql85, /v_max_rounds constant int := 10;/, "0085のhost_add_next_roundの周回数上限が10になっていない");
+
+  const sql84 = read("supabase/migrations/0084_live_limited_rewards_to_round5_and_timing.sql");
+  assert.match(sql84, /when 'answering' then 90000/, "0084の本番回答時間が90秒になっていない");
+  console.log("PASS: 初期周回数(1)・周回数上限(10)・本番回答時間(90秒)はTSとDB(0085)で一致している");
 }
 
-// 5) 保存値の統一：新規作成はrounds_per_liveを明示保存し、begin_gameは保存値が2でなければ開始しない
+// 5) 保存値の統一：新規作成はrounds_per_live=1を明示保存し、begin_gameは保存値が1でなければ
+//    開始しない。host_add_next_roundは周を追加するたびにrounds_per_liveを増やす。
 {
-  const sql = read("supabase/migrations/0084_live_limited_rewards_to_round5_and_timing.sql");
+  const sql = read("supabase/migrations/0085_staging_operations_and_dynamic_rounds.sql");
   const insertStart = sql.indexOf("insert into public.lives (");
-  assert.ok(insertStart >= 0, "0084にlivesのINSERT文が見つからない");
+  assert.ok(insertStart >= 0, "0085にlivesのINSERT文が見つからない");
   const insertBlock = sql.slice(insertStart, sql.indexOf(";", insertStart));
   assert.match(insertBlock, /rounds_per_live/, "create_live_preparationのINSERTがrounds_per_liveを保存していない");
-  assert.match(insertBlock, /v_timing_profile, v_rounds_per_live\s*$/m, "rounds_per_liveに関数内の周回数定数を入れていない");
-  assert.match(sql, /if v_saved_rounds is distinct from v_rounds then/, "begin_gameが保存された周回数を検証していない");
-  console.log("PASS: 新規作成はlives.rounds_per_live=2を明示保存し、begin_gameは保存値が2でなければ開始しない");
+  assert.match(insertBlock, /v_timing_profile, v_initial_rounds\s*$/m, "rounds_per_liveに関数内の初期周回数定数を入れていない");
+  assert.match(sql, /if v_saved_rounds is distinct from v_expected_initial_rounds then/, "begin_gameが保存された周回数を検証していない");
+  assert.match(sql, /rounds_per_live = v_new_round/, "host_add_next_roundが周追加のたびにrounds_per_liveを更新していない");
+  console.log("PASS: 新規作成はlives.rounds_per_live=1を明示保存し、begin_gameは保存値が1でなければ開始しない。host_add_next_roundは追加ごとにrounds_per_liveを増やす");
 }
 
 // 6) 権限の明示（0084末尾）：公開RPCはauthenticatedのみ、内部ヘルパーは直接実行不可

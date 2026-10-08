@@ -1,10 +1,13 @@
--- 0084 回帰テスト：2周制の得点・回答の扱いを実データで検証する。
+-- 0084/0085 回帰テスト：複数周の得点・回答の扱いを実データで検証する
+--  （0085で周回が運営者の動的な追加に変わったため、host_add_next_roundで
+--   2周目を追加する手順を挟む形に更新した。検証項目自体は0084から変更しない）。
 --  - 同じプレイヤーが1周目と2周目で回答し、各周に異なる得点を設定する
 --  - 最終順位・付与ポイントの基礎となる合計得点は2周分の合算になる（1周目だけの最高点と順位が逆になる例で確認）
 --  - 1周目の回答・得点は2周目開始時に消えない
 --  - 現在の組の回答数・採点対象はそのターンのお題分だけ（前周の回答が混ざらない）
 --  - 回答回数の上限（1お題あたり5回）はお題ごとにリセットされる
---  - 1周目最終組の後は2周目の第1組へ進み、2周目最終組の後だけfinal_resultへ進む
+--  - 1周目最終組の後はawaiting_round_decisionへ入り、host_add_next_roundで2周目を
+--    追加すると2周目第1組へ進み、2周目最終組の後はawaiting_round_decisionへ戻る
 --  - 同じお題は2周に重複しない
 -- 実行方法はsupabase/tests/run.sh参照。
 
@@ -24,9 +27,7 @@ update public.profiles set role = 'admin' where id = 'f0880000-0000-0000-0000-00
 
 insert into public.topic_bank (id, body, format, is_active) values
   ('f0880000-0000-0000-0000-000000000001', '得点合算テスト用お題1', 'text', true),
-  ('f0880000-0000-0000-0000-000000000002', '得点合算テスト用お題2', 'text', true),
-  ('f0880000-0000-0000-0000-000000000003', '得点合算テスト用お題3', 'text', true),
-  ('f0880000-0000-0000-0000-000000000004', '得点合算テスト用お題4', 'text', true)
+  ('f0880000-0000-0000-0000-000000000002', '得点合算テスト用お題2', 'text', true)
 on conflict do nothing;
 
 -- 補助関数：ライブ・周・組の順番からターンID、ライブ内の利用者から参加者IDを引く
@@ -54,6 +55,7 @@ declare
   v_begin record;
   v_n int;
   v_expected_next text;
+  v_add record;
   v_before jsonb := '{}'::jsonb;
   v_after jsonb;
   v_t record;
@@ -63,13 +65,13 @@ begin
 
   -- ----------------------------------------------------------
   -- 準備：本番(official)の2組ライブを作り、4人を参加させ、組分けして開始する
-  -- （テスト専用の大きな開催番号を使い、後でカウンターを元に戻す。ランキング加算はtest modeでは行われないため本番ライブが必要）
+  -- （1周目分のお題2件だけで作成する。2周目のお題はhost_add_next_roundで追加する）
   -- ----------------------------------------------------------
   set local role authenticated;
   perform set_config('myapp.uid', v_host::text, true);
   select * into v_r from public.create_live_preparation(
     now(), '得点合算(テスト)', 20, 2,
-    array['f0880000-0000-0000-0000-000000000001', 'f0880000-0000-0000-0000-000000000002', 'f0880000-0000-0000-0000-000000000003', 'f0880000-0000-0000-0000-000000000004']::uuid[],
+    array['f0880000-0000-0000-0000-000000000001', 'f0880000-0000-0000-0000-000000000002']::uuid[],
     'official', 982060, 'standard'
   );
   reset role;
@@ -102,20 +104,17 @@ begin
   reset role;
   if v_begin.ok is not true then raise exception 'FAIL: 得点合算テストのbegin_gameに失敗(reason=%)', v_begin.reason; end if;
 
-  -- 同じお題は2周に重複しない（4ターンに4つのお題が1回ずつ）
+  -- 1周目は2組に2つの異なるお題
   select count(*) into v_n from (select topic_id from public.turns where live_id = v_live group by topic_id having count(*) > 1) d;
-  if v_n <> 0 then raise exception 'FAIL: 2周の中で同じお題が重複している'; end if;
+  if v_n <> 0 then raise exception 'FAIL: 1周目の中で同じお題が重複している'; end if;
   select count(distinct topic_id) into v_n from public.turns where live_id = v_live;
-  if v_n <> 4 then raise exception 'FAIL: 2組×2周で4つの異なるお題が使われていない(distinct=%)', v_n; end if;
-  raise notice 'PASS: 2周で同じお題は重複せず、4ターンそれぞれに別のお題が割り当てられる';
+  if v_n <> 2 then raise exception 'FAIL: 2組×1周で2つの異なるお題が使われていない(distinct=%)', v_n; end if;
+  raise notice 'PASS: 1周目は2組に2つの異なるお題が割り当てられる';
 
   -- ----------------------------------------------------------
-  -- 回答と得点（1周目・2周目で異なる点数。1周目だけならBが1位になる組み合わせ）
+  -- 1周目の回答と得点（1周目だけならBが1位になる組み合わせ）
   --   1周目 第1組：A=5点（1点×5回答）、B=10点
   --   1周目 第2組：C=0点、D=2点
-  --   2周目 第1組：A=7点
-  --   2周目 第2組：D=1点、C=0点
-  --   合計：A=12、B=10、D=3、C=0 → 2周合算の順位はA・B・D・C
   -- ----------------------------------------------------------
   for v_n in 1..5 loop
     insert into public.answers (turn_id, participant_id, seq, body, score_total, resolved)
@@ -124,23 +123,17 @@ begin
   insert into public.answers (turn_id, participant_id, seq, body, score_total, resolved)
     values (pg_temp.turn_id(v_live, 1, 1), pg_temp.part(v_live, v_b), 1, '1周目B', 10, true),
            (pg_temp.turn_id(v_live, 1, 2), pg_temp.part(v_live, v_c), 1, '1周目C', 0, true),
-           (pg_temp.turn_id(v_live, 1, 2), pg_temp.part(v_live, v_d), 1, '1周目D', 2, true),
-           (pg_temp.turn_id(v_live, 2, 1), pg_temp.part(v_live, v_a), 1, '2周目A', 7, true),
-           (pg_temp.turn_id(v_live, 2, 2), pg_temp.part(v_live, v_d), 1, '2周目D', 1, true),
-           (pg_temp.turn_id(v_live, 2, 2), pg_temp.part(v_live, v_c), 1, '2周目C', 0, true);
+           (pg_temp.turn_id(v_live, 1, 2), pg_temp.part(v_live, v_d), 1, '1周目D', 2, true);
 
-  -- 回答数の見え方：各ターンにはそのターンのお題の回答だけがある（前周が混ざらない）
-  if (select count(*) from public.answers where turn_id = pg_temp.turn_id(v_live, 2, 1)) <> 1 then
-    raise exception 'FAIL: 2周目第1組に1周目の回答が混ざっている';
-  end if;
   if (select count(*) from public.answers where turn_id = pg_temp.turn_id(v_live, 1, 1)) <> 6 then
     raise exception 'FAIL: 1周目第1組の回答数がそのお題分になっていない';
   end if;
-  raise notice 'PASS: 各ターンの回答はそのターンのお題の分だけで、前周の回答は混ざらない';
+  raise notice 'PASS: 1周目の回答はそのターンのお題の分だけ記録される';
 
   -- ----------------------------------------------------------
-  -- 進行：1周目→2周目→最終結果。各組の結果後に、次のターン・回答数・得点を確認する。
+  -- 進行：1周目の2組を終える→awaiting_round_decisionへ入る。
   -- ----------------------------------------------------------
+  set local role authenticated;
   perform set_config('myapp.uid', v_host::text, true);
   v_n := 0;
   for v_t in
@@ -151,39 +144,116 @@ begin
     update public.lives set current_phase = 'group_result', current_turn_id = v_t.id, phase_deadline = now() - interval '1 second'
       where id = v_live;
     update public.turns set status = 'done' where id = v_t.id;
-    -- 運営の進行RPCは認証ロールで呼ぶ（is_host()の実際の判定経路を通す）
-    set local role authenticated;
-    perform set_config('myapp.uid', v_host::text, true);
     select advanced_to into v_expected_next from public.host_advance_group_result_to_next(v_live, v_t.id, 0);
-    reset role;
-    if v_n < 4 then
+    if v_n < 2 then
       if v_expected_next <> 'topic_reveal' then
         raise exception 'FAIL: % 番目（周%・組%）の後に次のお題へ進まなかった(got=%)', v_n, v_t.round, v_t.group_order, v_expected_next;
       end if;
-    elsif v_expected_next <> 'final_result' then
-      raise exception 'FAIL: 2周目最終組の後にfinal_resultへ進まなかった(got=%)', v_expected_next;
-    end if;
-    -- 次のターンへ移った直後の確認（1周目の回答は消えず、現在のターンの回答数は現在のお題分だけ）
-    -- 1周目最終組（4ターン中の2番目）の結果後：2周目第1組へ移っている
-    if v_n = 2 then
-      if (select count(*) from public.answers where turn_id = pg_temp.turn_id(v_live, 1, 1)) <> 6 then
-        raise exception 'FAIL: 2周目開始時に1周目の回答が消えた';
-      end if;
-      if (select current_turn_id from public.lives where id = v_live) <> pg_temp.turn_id(v_live, 2, 1) then
-        raise exception 'FAIL: 1周目最終組の後に2周目第1組へ進んでいない';
-      end if;
-      -- 回答回数の上限は1お題ごと：Aは1周目に5回答えたが、2周目第1組では1回のみ（引き継がない）
-      if public.answer_count_for_turn(pg_temp.turn_id(v_live, 2, 1), pg_temp.part(v_live, v_a)) <> 1 then
-        raise exception 'FAIL: 2周目第1組のAの回答回数が1周目の回答（5回）を引き継いでいる';
-      end if;
-      if public.answer_count_for_turn(pg_temp.turn_id(v_live, 1, 1), pg_temp.part(v_live, v_a)) <> 5 then
-        raise exception 'FAIL: 1周目第1組のAの回答回数が5になっていない';
-      end if;
+    elsif v_expected_next <> 'awaiting_round_decision' then
+      raise exception 'FAIL: 1周目最終組の後にawaiting_round_decisionへ進まなかった(got=%)', v_expected_next;
     end if;
   end loop;
+  reset role;
+  if (select current_phase from public.lives where id = v_live) <> 'awaiting_round_decision' then
+    raise exception 'FAIL: 1周目終了後の現在フェーズがawaiting_round_decisionになっていない';
+  end if;
+  raise notice 'PASS: 1周目の2組が終わるとawaiting_round_decision（運営者の周回判断待ち）へ入る';
+
+  -- 1周目の回答・回答回数は維持されている
+  if (select count(*) from public.answers where turn_id = pg_temp.turn_id(v_live, 1, 1)) <> 6 then
+    raise exception 'FAIL: 周回判断待ちの間に1周目の回答が消えた';
+  end if;
+  if public.answer_count_for_turn(pg_temp.turn_id(v_live, 1, 1), pg_temp.part(v_live, v_a)) <> 5 then
+    raise exception 'FAIL: 1周目第1組のAの回答回数が5になっていない';
+  end if;
+
+  -- ----------------------------------------------------------
+  -- 運営者が2周目を追加する（host_add_next_round）。
+  -- ----------------------------------------------------------
+  set local role authenticated;
+  perform set_config('myapp.uid', v_host::text, true);
+  select * into v_add from public.host_add_next_round(v_live, 2, jsonb_build_array(
+    jsonb_build_object('group_id', (select id from public.groups where live_id = v_live and group_order = 1), 'topic_body', '得点合算テスト用お題(2周目・第1組)'),
+    jsonb_build_object('group_id', (select id from public.groups where live_id = v_live and group_order = 2), 'topic_body', '得点合算テスト用お題(2周目・第2組)')
+  ));
+  reset role;
+  if v_add.ok is not true then raise exception 'FAIL: host_add_next_roundで2周目の追加に失敗(reason=%)', v_add.reason; end if;
+  if (select current_phase from public.lives where id = v_live) <> 'topic_reveal' then
+    raise exception 'FAIL: 2周目追加後のフェーズがtopic_revealになっていない';
+  end if;
+  if (select current_turn_id from public.lives where id = v_live) <> pg_temp.turn_id(v_live, 2, 1) then
+    raise exception 'FAIL: 2周目追加後に2周目第1組へ進んでいない';
+  end if;
+  raise notice 'PASS: host_add_next_roundで2周目を追加すると、2周目第1組のtopic_revealへ進む';
+
+  -- 同じお題は重複しない（1周目2件＋2周目2件＝4ターンに4つの異なるお題。
+  -- 第3段階修正：2周目以降も既存仕様どおり「1組につき1お題」に戻したため、
+  -- 組ごとに別のお題が割り当てられる＝重複は0件）。
+  select count(*) into v_n from (select topic_id from public.turns where live_id = v_live group by topic_id having count(*) > 1) d;
+  if v_n <> 0 then raise exception 'FAIL: お題が重複している(got=%件)', v_n; end if;
+  select count(distinct topic_id) into v_n from public.turns where live_id = v_live;
+  if v_n <> 4 then raise exception 'FAIL: 2組×2周で4つの異なるお題が使われていない(distinct=%)', v_n; end if;
+  raise notice 'PASS: 2周目も1組につき1お題で、1周目・2周目を通じて全ターンに別々のお題が割り当てられる';
+
+  -- 2周目第1組の回答数見え方：前周の回答が混ざらない
+  if (select count(*) from public.answers where turn_id = pg_temp.turn_id(v_live, 2, 1)) <> 0 then
+    raise exception 'FAIL: 2周目第1組に1周目の回答が混ざっている';
+  end if;
+  -- 回答回数の上限は1お題ごと：Aは1周目に5回答えたが、2周目第1組ではまだ0回
+  if public.answer_count_for_turn(pg_temp.turn_id(v_live, 2, 1), pg_temp.part(v_live, v_a)) <> 0 then
+    raise exception 'FAIL: 2周目第1組のAの回答回数が1周目の回答（5回）を引き継いでいる';
+  end if;
+  raise notice 'PASS: 2周目は前周の回答・回答回数を引き継がない（お題（ターン）ごとにリセットされる）';
+
+  -- ----------------------------------------------------------
+  -- 2周目の回答と得点
+  --   2周目 第1組：A=7点
+  --   2周目 第2組：D=1点、C=0点
+  --   合計：A=12、B=10、D=3、C=0 → 2周合算の順位はA・B・D・C
+  -- ----------------------------------------------------------
+  insert into public.answers (turn_id, participant_id, seq, body, score_total, resolved)
+    values (pg_temp.turn_id(v_live, 2, 1), pg_temp.part(v_live, v_a), 1, '2周目A', 7, true),
+           (pg_temp.turn_id(v_live, 2, 2), pg_temp.part(v_live, v_d), 1, '2周目D', 1, true),
+           (pg_temp.turn_id(v_live, 2, 2), pg_temp.part(v_live, v_c), 1, '2周目C', 0, true);
+
+  -- ----------------------------------------------------------
+  -- 進行：2周目の2組を終える→再びawaiting_round_decisionへ入る→運営者が終了を選ぶ。
+  -- ----------------------------------------------------------
+  set local role authenticated;
+  perform set_config('myapp.uid', v_host::text, true);
+  v_n := 0;
+  for v_t in
+    select t.id, t.round, g.group_order from public.turns t join public.groups g on g.id = t.group_id
+    where t.live_id = v_live and t.round = 2 order by g.group_order
+  loop
+    v_n := v_n + 1;
+    update public.lives set current_phase = 'group_result', current_turn_id = v_t.id, phase_deadline = now() - interval '1 second'
+      where id = v_live;
+    update public.turns set status = 'done' where id = v_t.id;
+    select advanced_to into v_expected_next from public.host_advance_group_result_to_next(v_live, v_t.id, 0);
+    if v_n < 2 then
+      if v_expected_next <> 'topic_reveal' then
+        raise exception 'FAIL: 2周目% 番目（組%）の後に次のお題へ進まなかった(got=%)', v_n, v_t.group_order, v_expected_next;
+      end if;
+    elsif v_expected_next <> 'awaiting_round_decision' then
+      raise exception 'FAIL: 2周目最終組の後にawaiting_round_decisionへ進まなかった(got=%)', v_expected_next;
+    end if;
+  end loop;
+  reset role;
+  raise notice 'PASS: 2周目の2組が終わると再びawaiting_round_decisionへ入る（自動でfinal_resultへは進まない）';
+
+  -- 運営者がライブを終了する（最終結果へ）
+  set local role authenticated;
+  perform set_config('myapp.uid', v_host::text, true);
+  select * into v_r from public.host_finish_live_from_round_decision(v_live);
+  reset role;
+  if v_r.ok is not true then raise exception 'FAIL: host_finish_live_from_round_decisionに失敗(reason=%)', v_r.reason; end if;
+  if (select current_phase from public.lives where id = v_live) <> 'final_result' then
+    raise exception 'FAIL: 終了操作の後にfinal_resultへ進んでいない';
+  end if;
+  raise notice 'PASS: 運営者がhost_finish_live_from_round_decisionを実行すると最終結果へ進む';
+
   perform set_config('myapp.uid', '', true);
-  raise notice 'PASS: 1周目最終組の後は2周目第1組へ進み、2周目最終組の後だけfinal_resultへ進む';
-  raise notice 'PASS: 1周目の回答は2周目開始時に消えず、回答回数の上限はお題（ターン）ごとにリセットされる';
 
   -- ----------------------------------------------------------
   -- 集計：2周分の合計得点で順位・付与ポイントが決まる
@@ -195,18 +265,15 @@ begin
   raise notice 'PASS: Aの合計得点は1周目5点＋2周目7点の12点（2周分の合算）';
 
   update public.lives set current_phase = 'closed' where id = v_live;
-  -- 付与前の残高を控える（付与ポイントの差分で検証する）
   select jsonb_object_agg(id::text, jsonb_build_object('total', total_points, 'balance', points_balance))
     into v_before from public.profiles where id in (v_a, v_b, v_c, v_d);
 
-  -- 運営としての適用（auth.uidを空にして、運営の内部処理として実行する）
   perform set_config('myapp.uid', '', true);
   perform public.apply_live_rank_rewards(v_live);
 
   select jsonb_object_agg(id::text, jsonb_build_object('total', total_points, 'balance', points_balance))
     into v_after from public.profiles where id in (v_a, v_b, v_c, v_d);
 
-  -- 付与額：10 + 合計得点 + 順位ボーナス（1位100・2位60・3位30）
   if (v_after -> v_a::text ->> 'total')::int - (v_before -> v_a::text ->> 'total')::int <> 10 + 12 + 100 then
     raise exception 'FAIL: Aの付与ポイントが2周合算の1位（122）になっていない';
   end if;

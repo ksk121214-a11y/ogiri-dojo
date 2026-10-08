@@ -720,6 +720,7 @@ export const useLiveDesignPreviewStore2 = create<LiveDesignPreviewState>()((set,
       emergency_close_reason: null,
       next_reveal_pending_at: null,
       timing_profile: "standard",
+      access_restricted: false,
     };
     set({
       live,

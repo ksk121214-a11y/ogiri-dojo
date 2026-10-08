@@ -9,7 +9,7 @@ import AdminHeader from "@/components/admin/AdminHeader";
 import AdminNotice, { useAdminNotice } from "@/components/admin/AdminNotice";
 import AdminShell from "@/components/admin/AdminShell";
 import AdminTemplateChips from "@/components/admin/AdminTemplateChips";
-import { IS_SHORT_TEST_BUILD, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import { IS_SHORT_TEST_BUILD, ROUNDS_PER_LIVE_INITIAL } from "@/data/liveRoomTiming";
 import {
   manualTopicSelectionMessage,
   randomTopicShortageMessage,
@@ -26,6 +26,9 @@ import { referralSourceDisplayLabel, summarizeReferralSurvey } from "@/lib/refer
 import { useLiveAssetPreload } from "@/lib/useLiveAssetPreload";
 import { phaseRemainingSeconds } from "@/lib/liveRemaining";
 import { useServerClockState } from "@/lib/useServerNow";
+import { MAX_ROUNDS_PER_LIVE } from "@/data/liveRoomTiming";
+import { getConfiguredProjectRef, isStagingMode } from "@/lib/stagingEnv";
+import { supabase } from "@/lib/supabase";
 
 const ROLE_LABEL: Record<string, string> = {
   player: "回答者",
@@ -39,9 +42,22 @@ const PHASE_LABEL: Record<string, string> = {
   topic_reveal: "お題発表",
   answering: "回答受付中",
   group_result: "組結果発表",
+  awaiting_round_decision: "周回の判断待ち（運営操作が必要です）",
   final_result: "最終結果発表",
   closed: "終了",
 };
+
+// 第3段階：ステージング運営モードであることを常時示すバナー。本番ではNEXT_PUBLIC_APP_ENV
+// を設定しないため、isStagingMode()は常にfalseでこの関数はnullを返す（既存表示に影響しない）。
+function StagingBanner() {
+  if (!isStagingMode()) return null;
+  const ref = getConfiguredProjectRef();
+  return (
+    <div className="sticky top-0 z-50 rounded border-2 border-yellow-500 bg-yellow-100 px-3 py-2 text-center text-xs font-bold text-yellow-900">
+      STAGING／本番ではありません（接続先Project Ref: {ref ?? "不明"}）
+    </div>
+  );
+}
 
 // datetime-local用のローカル時刻文字列→ISO文字列の変換。
 // ブラウザのタイムゾーン（日本時間想定）でそのまま入力できるようにする。
@@ -200,6 +216,7 @@ export default function LiveHostPage() {
 
   return (
     <AdminShell>
+      <StagingBanner />
       <AdminHeader title="司会コンソール（ライブ準備・操作）" />
 
       <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
@@ -214,6 +231,8 @@ export default function LiveHostPage() {
       </div>
 
       <AdminNotice notice={notice} onClose={clear} />
+
+      {isStagingMode() && <StagingTestersPanel />}
 
       <LiveAssetPreloadCard
         total={assetPreload.total}
@@ -261,6 +280,7 @@ export default function LiveHostPage() {
             live.current_phase === "topic_reveal" ||
             live.current_phase === "answering" ||
             live.current_phase === "group_result" ||
+            live.current_phase === "awaiting_round_decision" ||
             live.current_phase === "final_result") && (
             <AnnouncementPanel
               onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
@@ -324,6 +344,17 @@ export default function LiveHostPage() {
                 <p className="mt-1 text-xs text-gray-500">表示中の回答はありません</p>
               )}
             </AdminCard>
+          )}
+
+          {live.current_phase === "awaiting_round_decision" && (
+            <RoundDecisionPanel
+              key={live.rounds_per_live}
+              live={live}
+              groups={groups}
+              participants={participants}
+              hostProfiles={hostProfiles}
+              onNotify={(type, message) => (type === "success" ? notifySuccess(message) : notifyError(message))}
+            />
           )}
 
           {resolvedAnswers.length > 0 && (
@@ -405,8 +436,13 @@ export default function LiveHostPage() {
 function PreparationForm({ onNotify }: { onNotify: Notify }) {
   const createLivePreparation = useLiveHostStore((s) => s.createLivePreparation);
   const fetchNextOfficialSequenceNumber = useLiveHostStore((s) => s.fetchNextOfficialSequenceNumber);
+  const setAccessRestricted = useLiveHostStore((s) => s.setAccessRestricted);
   const topicBank = useLiveHostStore((s) => s.topicBank);
   const [title, setTitle] = useState("");
+  // 第3段階：ステージングモードでは、知らない利用者が混ざらないよう既定で
+  // staging_testers限定にする（運営者が明示的にチェックを外せば誰でも参加できる、
+  // 通常の検証用ライブに戻せる）。
+  const [accessRestricted, setAccessRestrictedInput] = useState(isStagingMode());
   const [scheduledAt, setScheduledAt] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(15);
   const [groupCount, setGroupCount] = useState(3);
@@ -444,7 +480,7 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
     }
   }, [liveMode, nextAutoNumber, manualNumberTouched]);
 
-  const neededTopics = requiredTopicCount(groupCount, ROUNDS_PER_LIVE_DEFAULT);
+  const neededTopics = requiredTopicCount(groupCount, ROUNDS_PER_LIVE_INITIAL);
   const topicShortage =
     topicMode === "random"
       ? randomTopicShortageMessage(neededTopics, topicBank.length)
@@ -512,6 +548,15 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
           fetchNextOfficialSequenceNumber().then(setNextAutoNumber);
         }
       } else {
+        // 第3段階：ステージングモードでaccess_restrictedが有効な場合だけ、
+        // 作成直後にライブをstaging_testers限定にする（既定値はfalseのため、
+        // この呼び出しをしなければ誰でも参加できる通常のテストライブのまま）。
+        if (isStagingMode() && accessRestricted) {
+          const restrictResult = await setAccessRestricted(true);
+          if (!restrictResult.ok) {
+            onNotify("error", `ライブは作成されましたが、参加制限の設定に失敗しました：${restrictResult.reason ?? "不明なエラー"}`);
+          }
+        }
         onNotify("success", "ライブを準備しました。");
         setManualNumberInput("");
         setManualNumberTouched(false);
@@ -643,7 +688,7 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
 
         <div className="rounded border border-gray-200 p-2">
           <p className="text-xs font-bold text-gray-700">
-            お題の選び方（必要数：{neededTopics}件 ＝ {groupCount}組 × {ROUNDS_PER_LIVE_DEFAULT}周）
+            お題の選び方（必要数：{neededTopics}件 ＝ {groupCount}組 × {ROUNDS_PER_LIVE_INITIAL}周）
           </p>
           <div className="mt-1 flex gap-3 text-xs">
             <label className="flex items-center gap-1">
@@ -690,6 +735,17 @@ function PreparationForm({ onNotify }: { onNotify: Notify }) {
             </div>
           )}
         </div>
+
+        {isStagingMode() && (
+          <label className="flex items-center gap-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={accessRestricted}
+              onChange={(e) => setAccessRestrictedInput(e.target.checked)}
+            />
+            参加をstaging_testersの許可利用者に限定する（STAGING。推奨）
+          </label>
+        )}
 
         {!localError && topicShortage && <p className="text-xs text-red-600">{topicShortage}</p>}
         {localError && <p className="text-xs text-red-600">{localError}</p>}
@@ -1306,6 +1362,261 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
   );
 }
 
+// 第3段階（動的な周回追加）：awaiting_round_decisionの間だけ表示する、運営者の
+// 周回判断パネル。「次の周へ進む（組ごとに1件のお題を指定）」「ライブを終了する
+// （最終結果へ）」のどちらか一方だけが成立する（DB側のRPCが行ロック・期待フェーズ
+// 確認で直列化する）。既存の本番仕様＝1組1お題を維持するため、現在の組数に応じた
+// 入力欄を表示し、各入力はgroups.id（安定したDB識別子）をキーに持つ。
+function RoundDecisionPanel({
+  live,
+  groups,
+  participants,
+  hostProfiles,
+  onNotify,
+}: {
+  live: LiveRow;
+  groups: GroupRow[];
+  participants: ParticipantRow[];
+  hostProfiles: { id: string; display_name: string }[];
+  onNotify: Notify;
+}) {
+  const addNextRound = useLiveHostStore((s) => s.addNextRound);
+  const finishLiveFromRoundDecision = useLiveHostStore((s) => s.finishLiveFromRoundDecision);
+
+  const visibleGroups = useMemo(
+    () =>
+      groups
+        .filter((g) => g.group_order <= (live.planned_group_count ?? groups.length))
+        .sort((a, b) => a.group_order - b.group_order),
+    [groups, live.planned_group_count],
+  );
+
+  // groups.id をキーに持つ。周回判断待ちへ入り直す（rounds_per_liveが変わる）たびに
+  // 呼び出し元（この下のkey={live.rounds_per_live}）がこのコンポーネント自体を
+  // 再マウントするため、常に新しい周番号・現在の組構成からフォームが作り直される
+  // （古い入力は残らない。Reactの推奨パターン：effect+setStateでの同期ではなくkeyでリセットする）。
+  const [bodies, setBodies] = useState<Record<string, string>>(() =>
+    Object.fromEntries(visibleGroups.map((g) => [g.id, ""])),
+  );
+
+  const [adding, setAdding] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+
+  const atMaxRounds = live.rounds_per_live >= MAX_ROUNDS_PER_LIVE;
+  const allFilled =
+    visibleGroups.length > 0 &&
+    visibleGroups.every((g) => {
+      const body = bodies[g.id]?.trim() ?? "";
+      return body.length > 0 && body.length <= 200;
+    });
+
+  const playerNamesFor = (groupId: string): string => {
+    const names = participants
+      .filter((p) => p.group_id === groupId && p.role === "player")
+      .map((p) => hostProfiles.find((pr) => pr.id === p.user_id)?.display_name ?? "（名前未設定）");
+    return names.length > 0 ? names.join("・") : "（登壇者未確定）";
+  };
+
+  const handleAdd = async () => {
+    if (adding || finishing || !allFilled) return;
+    setAdding(true);
+    try {
+      const result = await addNextRound(
+        visibleGroups.map((g) => ({ groupId: g.id, topicBody: bodies[g.id] ?? "" })),
+      );
+      if (!result.ok) {
+        // 失敗時は入力を保持する（再入力させない）。
+        onNotify("error", result.reason ?? "次の周の追加に失敗しました。もう一度お試しください");
+        return;
+      }
+      onNotify("success", `第${live.rounds_per_live + 1}周へ進みました。`);
+      // 成功後はuseEffect（rounds_per_liveの変化）でフォームが再構築されるため、
+      // ここで明示的にクリアする必要はない。
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleFinish = async () => {
+    if (adding || finishing) return;
+    const confirmed = window.confirm(
+      `第${live.rounds_per_live}周で終了し、最終結果へ進みますか？この操作の後は周を追加できません。`,
+    );
+    if (!confirmed) return;
+    setFinishing(true);
+    try {
+      const result = await finishLiveFromRoundDecision();
+      if (!result.ok) onNotify("error", result.reason ?? "処理に失敗しました。もう一度お試しください");
+    } finally {
+      setFinishing(false);
+    }
+  };
+
+  return (
+    <AdminCard title={`周回の判断（現在${live.rounds_per_live}周終了）`}>
+      <p className="text-xs text-gray-600">
+        全組の結果が出ました。次の周へ進むか、ここでライブを終了するかを選んでください。
+      </p>
+
+      {atMaxRounds ? (
+        <p className="mt-2 text-xs font-bold text-orange-600">
+          周回数の上限（{MAX_ROUNDS_PER_LIVE}周）に達しているため、次の周へは進めません。終了のみ選択できます。
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="text-xs font-bold text-gray-700">
+            第{live.rounds_per_live + 1}周のお題（組ごとに1件）
+          </p>
+          {visibleGroups.map((g) => {
+            const body = bodies[g.id] ?? "";
+            const overLimit = body.length > 200;
+            return (
+              <label key={g.id} className="flex flex-col gap-1 rounded border border-gray-200 p-2 text-[10px] text-gray-600">
+                <span className="font-bold text-gray-800">
+                  第{live.rounds_per_live + 1}周・{g.group_order}組目
+                  <span className="ml-1 font-normal text-gray-500">（{playerNamesFor(g.id)}）</span>
+                </span>
+                <textarea
+                  value={body}
+                  disabled={adding || finishing}
+                  onChange={(e) =>
+                    setBodies((prev) => ({ ...prev, [g.id]: e.target.value }))
+                  }
+                  rows={2}
+                  placeholder={`${g.group_order}組目のお題`}
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-50"
+                />
+                <span className={overLimit ? "font-bold text-red-600" : "text-gray-400"}>
+                  {body.length}/200文字
+                  {overLimit && "（上限を超えています）"}
+                  {!body.trim() && body.length === 0 && "（未入力）"}
+                </span>
+              </label>
+            );
+          })}
+          <AdminButton
+            variant="primary"
+            disabled={adding || finishing || !allFilled}
+            onClick={handleAdd}
+            className="self-start"
+          >
+            {adding ? "処理中…" : `第${live.rounds_per_live + 1}周へ進む`}
+          </AdminButton>
+        </div>
+      )}
+
+      <div className="mt-3 border-t border-gray-200 pt-2">
+        <AdminButton variant="danger" disabled={adding || finishing} onClick={handleFinish}>
+          {finishing ? "処理中…" : "ライブを終了する（最終結果へ）"}
+        </AdminButton>
+      </div>
+    </AdminCard>
+  );
+}
+
+// 第3段階（ステージング参加制限）：staging_testersの許可・失効を行う運営パネル。
+// ステージングモードでのみ表示する。テスターのIDは、本人がログイン後に表示される
+// 利用者IDをSupabase Studio（profiles/auth.users）で運営が確認し、ここへ貼り付ける
+// 想定（平文のアクセスコードは発行しない。DBに保存するのは実在の利用者IDのみ）。
+type StagingTesterRow = { user_id: string; added_at: string; revoked_at: string | null };
+
+function StagingTestersPanel() {
+  const [testers, setTesters] = useState<StagingTesterRow[]>([]);
+  const [userIdInput, setUserIdInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const fetchTesters = async (): Promise<StagingTesterRow[] | null> => {
+    const { data, error } = await supabase
+      .from("staging_testers")
+      .select("user_id, added_at, revoked_at")
+      .order("added_at", { ascending: false });
+    return !error && data ? (data as StagingTesterRow[]) : null;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTesters().then((rows) => {
+      if (!cancelled && rows) setTesters(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleGrant = async () => {
+    const id = userIdInput.trim();
+    if (!id || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { error } = await supabase.rpc("host_grant_staging_tester", { p_user_id: id });
+      if (error) setMessage(`許可に失敗しました：${error.message}`);
+      else {
+        setMessage("許可しました。");
+        setUserIdInput("");
+        const rows = await fetchTesters();
+        if (rows) setTesters(rows);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRevoke = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { error } = await supabase.rpc("host_revoke_staging_tester", { p_user_id: id });
+      if (error) setMessage(`失効に失敗しました：${error.message}`);
+      else {
+        const rows = await fetchTesters();
+        if (rows) setTesters(rows);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AdminCard title="STAGING：テスター許可">
+      <p className="text-xs text-gray-600">
+        参加を限定したライブ（上の「参加をstaging_testersの許可利用者に限定する」）へは、ここで許可した利用者IDだけが参加できます。
+      </p>
+      <div className="mt-2 flex gap-2">
+        <input
+          type="text"
+          value={userIdInput}
+          onChange={(e) => setUserIdInput(e.target.value)}
+          placeholder="利用者ID（UUID）"
+          className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs"
+        />
+        <AdminButton variant="primary" disabled={busy || !userIdInput.trim()} onClick={handleGrant}>
+          許可する
+        </AdminButton>
+      </div>
+      {message && <p className="mt-1 text-xs text-gray-600">{message}</p>}
+      <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-700">
+        {testers.map((t) => (
+          <li key={t.user_id} className="flex items-center justify-between border-b border-gray-100 py-1 last:border-0">
+            <span className="truncate">
+              {t.user_id}
+              {t.revoked_at && <span className="ml-1 text-red-600">（失効済み）</span>}
+            </span>
+            {!t.revoked_at && (
+              <AdminButton disabled={busy} onClick={() => handleRevoke(t.user_id)} className="shrink-0">
+                失効する
+              </AdminButton>
+            )}
+          </li>
+        ))}
+        {testers.length === 0 && <li className="text-gray-400">まだ誰も許可していません</li>}
+      </ul>
+    </AdminCard>
+  );
+}
+
 // お題発表・回答・審査で使う必須素材（画像・BGM・SE）の事前読み込み進捗表示。
 // 2026-08-31: 以前はプレイヤー画面（OpeningView.tsx）に出していたが、
 // 一般参加者には見せる必要が無い内部的な情報のため、司会コンソール側にだけ出すようにした。
@@ -1344,7 +1655,8 @@ function LiveAssetPreloadCard({
 
 function CenterMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-svh w-full flex-col items-center justify-center bg-gray-50 px-4 text-center font-sans text-sm text-gray-600">
+    <div className="flex min-h-svh w-full flex-col items-center justify-center gap-4 bg-gray-50 px-4 text-center font-sans text-sm text-gray-600">
+      <StagingBanner />
       {children}
     </div>
   );

@@ -397,6 +397,7 @@ export default function LivePage() {
       live.current_phase === "topic_reveal" ||
       live.current_phase === "answering" ||
       live.current_phase === "group_result" ||
+      live.current_phase === "awaiting_round_decision" ||
       live.current_phase === "final_result");
 
   if (showImmersive && live) {
@@ -436,13 +437,14 @@ export default function LivePage() {
             ) : (
               <AudienceJoinPrompt key="join-prompt" />
             )
-          ) : live.current_phase === "group_result" ? (
+          ) : live.current_phase === "group_result" || live.current_phase === "awaiting_round_decision" ? (
             <ScreenShell key="group-result">
               {groupResult ? (
                 <GroupResultView
                   data={groupResult}
                   myParticipantId={myParticipant?.id ?? null}
                   participantAvatars={participantAvatars}
+                  waitingForNextRound={live.current_phase === "awaiting_round_decision"}
                 />
               ) : (
                 <p className="font-sans text-sm text-white/70">結果を集計中…</p>

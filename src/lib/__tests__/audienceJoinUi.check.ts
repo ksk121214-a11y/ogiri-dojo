@@ -57,6 +57,10 @@ assert.deepEqual(P("answering", false, false), { view: "join-prompt", panel: fal
 assert.deepEqual(P("topic_reveal", false, false), { view: "join-prompt", panel: false });
 assert.deepEqual(P("group_result", false, false), { view: "normal", panel: true });
 assert.deepEqual(P("final_result", false, false), { view: "normal", panel: true });
+// 第3段階：awaiting_round_decision（運営者の周回判断待ち）はgroup_resultと同じ出し分け
+assert.deepEqual(P("awaiting_round_decision", false, false), { view: "normal", panel: true });
+assert.deepEqual(P("awaiting_round_decision", false, true), { view: "normal", panel: false });
+assert.deepEqual(P("awaiting_round_decision", true, false), { view: "normal", panel: false });
 assert.deepEqual(P("opening", false, false), { view: "normal", panel: false }, "openingは既存の参加登録UI（OpeningView）を維持");
 assert.deepEqual(P("interlude", false, false), { view: "normal", panel: false });
 for (const ph of ["opening", "topic_reveal", "answering", "group_result", "final_result", "interlude", "scheduled", "closed"]) {

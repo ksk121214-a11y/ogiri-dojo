@@ -1,8 +1,27 @@
+import { networkInterfaces } from "os";
+
 import type { NextConfig } from "next";
 
 // 動画撮影用の開発サーバー（npm run dev:recording、LIVE_DEMO_RECORDING=1）のときだけ、
 // 左下の開発インジケーター（Nマーク）を消す。通常の npm run dev では従来どおり表示する。
 const isRecordingDev = process.env.LIVE_DEMO_RECORDING === "1";
+
+// 第3段階（ステージング運営環境）：スマホ実機から同一Wi-Fi経由でnext devへアクセス
+// できるよう、Macの現在のLANアドレスを起動時に自動検出してallowedDevOriginsへ追加する。
+// Wi-Fiを変えてIPが変わっても、このファイルを書き換える必要がない
+// （次回のnext dev起動時に新しいIPを自動検出する）。next devにのみ影響し、本番ビルドには影響しない。
+function currentLanIPv4Addresses(): string[] {
+  const nets = networkInterfaces();
+  const result: string[] = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] ?? []) {
+      if (net.family === "IPv4" && !net.internal) {
+        result.push(net.address);
+      }
+    }
+  }
+  return result;
+}
 
 const nextConfig: NextConfig = {
   trailingSlash: true,
@@ -15,8 +34,9 @@ const nextConfig: NextConfig = {
   // 開発サーバーをスマホ実機からLAN経由（IPアドレス）で確認できるようにする設定。
   // next devにのみ影響し、本番ビルドには影響しない。
   // 2026-10-06：同一Wi-Fi内のスマホから動画撮影モードを開けるよう、現在のMacのLANアドレスも許可する。
-  // Wi-Fiを変えてIPが変わったら、ここへ追記する（開発サーバーの設定のみ・本番ビルドには影響しない）。
-  allowedDevOrigins: ["192.168.10.13", "192.168.10.10"],
+  // 2026-10-08（第3段階）：固定IPの手動追記をやめ、起動時に自動検出したLAN
+  // アドレス（currentLanIPv4Addresses）を常に合成する。古い既知IPも後方互換のため残す。
+  allowedDevOrigins: ["192.168.10.13", "192.168.10.10", ...currentLanIPv4Addresses()],
 
   // 2026-08-29:「ライブ画面の必須素材が表示の瞬間に読み込み待ちにならないように」対応の一環。
   // public/配下の画像・音声は秘密でない共通ゲーム素材で、ビルドのたびに内容が変わる

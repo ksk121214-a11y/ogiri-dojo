@@ -1,13 +1,18 @@
--- 0084 回帰テスト：ライブを2周制にした挙動を検証する。
---  - 必要お題数は組数×2（不足・重複は拒否）
---  - begin_gameは2周分のターンを作る（同じ組・同じ順番、2周目は別のお題）
---  - 組結果後は周→組の順に次のターンへ進み、最後のターンの後だけfinal_resultへ進む
+-- 0084/0085 回帰テスト：ライブ作成時の「1周目分のお題」要件を検証する。
+--  - 必要お題数は組数×1（0085でライブ開始時点の必要数を組数×1へ変更した。
+--    2周目以降のお題は運営者がhost_add_next_round（0085_dynamic_rounds.test.sql）
+--    でその都度指定する）。不足・重複は拒否される。過剰（1周分を超える数）は、
+--    歴史的に組数×2（旧2周固定）のお題を渡す既存の呼び出し元を壊さないため、
+--    0085で「不足のみ拒否・超過分は先頭から必要数だけ使用」という、begin_gameの
+--    不足チェックと同じ方針に変更した（0084_create_live_entrypoints.test.sqlで検証）。
+--  - begin_gameは1周目分のターンだけを作る（同じ組・同じ順番）。
+-- 動的な周回追加・組結果後の進行（awaiting_round_decision等）の検証は
+-- 0085_dynamic_rounds.test.sqlで行う。
 -- 実行方法はsupabase/tests/run.sh参照（全*.test.sqlが同一DBを共有するため、
 -- 非closedのライブは先にclosedへ倒す）。
 
 \set ON_ERROR_STOP on
 
--- 非closedライブは全体で高々1件（lives_one_active_idx）。既存の残存ライブはclosedへ倒す。
 update public.lives set current_phase = 'closed' where current_phase <> 'closed';
 
 insert into auth.users (id, is_anonymous, raw_app_meta_data) values
@@ -27,56 +32,75 @@ insert into public.topic_bank (id, body, format, is_active) values
   ('f0850000-0000-0000-0000-000000000004', '2周テスト用お題4', 'text', true)
 on conflict do nothing;
 
--- テスト1：必要お題数は組数×2。不足・重複は拒否される。
+-- テスト1：必要お題数は組数×1。不足は拒否される。過剰（1周分を超える数）は、
+-- 歴史的に組数×2を渡す既存の呼び出し元を壊さないため拒否しない（先頭の必要数だけ使う）。
 do $$
 declare
   v_r record;
+  v_live uuid;
+  v_topic_count int;
 begin
   set local role authenticated;
   perform set_config('myapp.uid', 'f0850000-0000-0000-0000-00000000a001', true);
 
   select * into v_r from public.create_live_preparation(
-    now(), '2周テスト(不足)', 20, 2,
-    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000002', 'f0850000-0000-0000-0000-000000000003']::uuid[]
+    now(), '1周テスト(不足)', 20, 2,
+    array['f0850000-0000-0000-0000-000000000001']::uuid[]
   );
   reset role;
-  if v_r.ok is not false then raise exception 'FAIL: 2組に対しお題3件（必要4件）が受け付けられた'; end if;
-  if v_r.reason not like '%4件必要%' then raise exception 'FAIL: お題不足の理由に「4件必要」が無い(got=%)', v_r.reason; end if;
-  raise notice 'PASS: 2組のライブはお題4件が必要で、3件では作成が拒否され「4件必要」と表示される';
+  if v_r.ok is not false then raise exception 'FAIL: 2組に対しお題1件（必要2件）が受け付けられた'; end if;
+  if v_r.reason not like '%2件必要%' then raise exception 'FAIL: お題不足の理由に「2件必要」が無い(got=%)', v_r.reason; end if;
+  raise notice 'PASS: 2組のライブは1周目分のお題2件が必要で、1件では作成が拒否され「2件必要」と表示される';
 
   set local role authenticated;
   perform set_config('myapp.uid', 'f0850000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
-    now(), '2周テスト(重複)', 20, 2,
-    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000002', 'f0850000-0000-0000-0000-000000000003']::uuid[]
+    now(), '1周テスト(過剰)', 20, 2,
+    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000002', 'f0850000-0000-0000-0000-000000000003']::uuid[]
+  );
+  reset role;
+  if v_r.ok is not true then raise exception 'FAIL: 1周分を超えるお題3件を渡した作成が失敗した(reason=%)', v_r.reason; end if;
+  v_live := v_r.live_id;
+  select count(*) into v_topic_count from public.topics where live_id = v_live;
+  if v_topic_count <> 2 then raise exception 'FAIL: 過剰分を無視せず%件のtopicsが作られた（想定2件）', v_topic_count; end if;
+  update public.lives set current_phase = 'closed' where id = v_live;
+  raise notice 'PASS: 1周分(2件)を超えるお題を渡しても作成は拒否されず、先頭2件だけが使われる（2周目以降は運営者がhost_add_next_roundで指定する）';
+
+  set local role authenticated;
+  perform set_config('myapp.uid', 'f0850000-0000-0000-0000-00000000a001', true);
+  select * into v_r from public.create_live_preparation(
+    now(), '1周テスト(重複)', 20, 2,
+    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000001']::uuid[]
   );
   reset role;
   if v_r.ok is not false then raise exception 'FAIL: 同じお題の重複が受け付けられた'; end if;
   raise notice 'PASS: 同じお題を重複して選んだ場合は拒否される';
 end $$;
 
--- テスト2〜：2組・お題4件で作成し、参加・組分け・開始し、2周分のターンを検証する。
+-- テスト2：2組・お題2件（1周分）で作成し、参加・組分け・開始し、1周目分のターンを検証する。
 do $$
 declare
   v_live uuid;
   v_r record;
   v_turns int;
   v_distinct int;
-  v_first_round int;
   v_seq text;
   v_t record;
-  v_i int := 0;
-  v_expected_next text;
+  v_saved_rounds int;
 begin
   set local role authenticated;
   perform set_config('myapp.uid', 'f0850000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
-    now(), '2周テスト(本体)', 20, 2,
-    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000002', 'f0850000-0000-0000-0000-000000000003', 'f0850000-0000-0000-0000-000000000004']::uuid[]
+    now(), '1周テスト(本体)', 20, 2,
+    array['f0850000-0000-0000-0000-000000000001', 'f0850000-0000-0000-0000-000000000002']::uuid[]
   );
-  if v_r.ok is not true then raise exception 'FAIL: 2組・お題4件のライブ作成に失敗した(reason=%)', v_r.reason; end if;
+  if v_r.ok is not true then raise exception 'FAIL: 2組・お題2件のライブ作成に失敗した(reason=%)', v_r.reason; end if;
   v_live := v_r.live_id;
   reset role;
+
+  select rounds_per_live into v_saved_rounds from public.lives where id = v_live;
+  if v_saved_rounds <> 1 then raise exception 'FAIL: 新規作成のrounds_per_liveが1になっていない(got=%)', v_saved_rounds; end if;
+  raise notice 'PASS: 新規作成したライブはrounds_per_live=1（1周目分だけ）を保存する';
 
   update public.lives set current_phase = 'opening' where id = v_live;
   set local role authenticated;
@@ -95,11 +119,10 @@ begin
 
   select count(*), count(distinct topic_id) into v_turns, v_distinct
     from public.turns where live_id = v_live;
-  if v_turns <> 4 then raise exception 'FAIL: 2組×2周のターンが4件になっていない(got=%)', v_turns; end if;
-  if v_distinct <> 4 then raise exception 'FAIL: 周をまたいでお題が重複している(distinct=%)', v_distinct; end if;
-  raise notice 'PASS: 2組×2周で4ターンが作られ、4つのお題がすべて別々に割り当てられる';
+  if v_turns <> 2 then raise exception 'FAIL: 2組×1周のターンが2件になっていない(got=%)', v_turns; end if;
+  if v_distinct <> 2 then raise exception 'FAIL: 組ごとにお題が重複している(distinct=%)', v_distinct; end if;
+  raise notice 'PASS: 2組×1周で2ターンが作られ、2つのお題がそれぞれ別々に割り当てられる';
 
-  -- 1周目→2周目の順序：round=1の2組が先、その後round=2の2組（同じ組の順番）。
   v_seq := '';
   for v_t in
     select t.round, g.group_order from public.turns t join public.groups g on g.id = t.group_id
@@ -107,33 +130,8 @@ begin
   loop
     v_seq := v_seq || v_t.round || '-' || v_t.group_order || ' ';
   end loop;
-  if v_seq <> '1-1 1-2 2-1 2-2 ' then raise exception 'FAIL: ターンの周・組の順序が想定と違う(got=%)', v_seq; end if;
-  raise notice 'PASS: ターンは1周目(組1→組2)の後に2周目(組1→組2)の順で並ぶ';
+  if v_seq <> '1-1 1-2 ' then raise exception 'FAIL: ターンの周・組の順序が想定と違う(got=%)', v_seq; end if;
+  raise notice 'PASS: ターンは1周目(組1→組2)のみが作られる（2周目以降はまだ存在しない）';
 
-  -- 組結果→次のターン：最後のターン以外はtopic_revealへ、最後の組結果後だけfinal_resultへ進む。
-  set local role authenticated;
-  perform set_config('myapp.uid', 'f0850000-0000-0000-0000-00000000a001', true);
-  for v_t in
-    select t.id, t.round, g.group_order from public.turns t join public.groups g on g.id = t.group_id
-    where t.live_id = v_live order by t.round, g.group_order
-  loop
-    v_i := v_i + 1;
-    update public.lives
-      set current_phase = 'group_result', current_turn_id = v_t.id, phase_deadline = now() - interval '1 second'
-      where id = v_live;
-    update public.turns set status = 'done' where id = v_t.id;
-    select advanced_to into v_expected_next
-      from public.host_advance_group_result_to_next(v_live, v_t.id, 0);
-    if v_i < 4 then
-      if v_expected_next <> 'topic_reveal' then
-        raise exception 'FAIL: % 番目のターン(周%・組%)の後にtopic_revealへ進まなかった(got=%)', v_i, v_t.round, v_t.group_order, v_expected_next;
-      end if;
-    else
-      if v_expected_next <> 'final_result' then
-        raise exception 'FAIL: 2周目最後の組の後にfinal_resultへ進まなかった(got=%)', v_expected_next;
-      end if;
-    end if;
-  end loop;
-  reset role;
-  raise notice 'PASS: 1周目の最終組の後は2周目の第1組へ進み、2周目の最終組の後だけfinal_resultへ進む';
+  update public.lives set current_phase = 'closed' where id = v_live;
 end $$;

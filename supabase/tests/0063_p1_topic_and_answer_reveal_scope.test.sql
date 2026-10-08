@@ -39,9 +39,12 @@ begin
   set local role authenticated;
   perform set_config('myapp.uid', 'd1000000-0000-0000-0000-00000000000f', true);
 
+  -- 0085で開始時点の必要お題数が組数×1周へ変わったため、1周目分(2件)だけを渡す
+  -- （このテストが検証する「同じ周の未発表側トピックが漏れない」はround1の2組だけで
+  -- 再現できるため、残り2件(d2000000-...03/04)は使わない）。
   select live_id into v_live_id from public.create_live_preparation(
     now(), 'P1-8/9テスト', 20, 2,
-    array['d2000000-0000-0000-0000-000000000001', 'd2000000-0000-0000-0000-000000000002', 'd2000000-0000-0000-0000-000000000003', 'd2000000-0000-0000-0000-000000000004']::uuid[]
+    array['d2000000-0000-0000-0000-000000000001', 'd2000000-0000-0000-0000-000000000002']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 
@@ -598,9 +601,10 @@ begin
   set local role authenticated;
   perform set_config('myapp.uid', 'd1000000-0000-0000-0000-00000000000f', true);
 
+  -- 0085で開始時点の必要お題数が組数×1周へ変わったため、1周目分(2件)だけを渡す。
   select live_id into v_live_id from public.create_live_preparation(
     now(), 'P1-8/9追加テスト', 20, 2,
-    array['d2000000-0000-0000-0000-000000000011', 'd2000000-0000-0000-0000-000000000012', 'd2000000-0000-0000-0000-000000000013', 'd2000000-0000-0000-0000-000000000014']::uuid[]
+    array['d2000000-0000-0000-0000-000000000011', 'd2000000-0000-0000-0000-000000000012']::uuid[]
   );
   update public.lives set current_phase = 'opening' where id = v_live_id;
 

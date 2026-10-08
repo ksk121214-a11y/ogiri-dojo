@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:recording": "LIVE_DEMO_RECORDING=1 next dev -H 0.0.0.0 -p 3100",
+    "dev:staging": "NEXT_PUBLIC_APP_ENV=staging next dev -H 0.0.0.0 -p 3200",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

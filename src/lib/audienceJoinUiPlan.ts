@@ -18,6 +18,7 @@ export function planAudienceJoinUi(p: {
     case "topic_reveal":
       return { view: p.entering ? "normal" : "join-prompt", panel: false };
     case "group_result":
+    case "awaiting_round_decision":
     case "final_result":
       return { view: "normal", panel: !p.entering };
     default:

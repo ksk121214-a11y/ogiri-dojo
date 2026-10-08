@@ -98,8 +98,15 @@ export const REVEAL_SEQUENCE_MS =
   SCORE_REVEAL_DELAY_MS + LIVE_ROOM_TIMING.scoreDisplayMs + LIVE_ROOM_TIMING.gateTailMs;
 
 export const MAX_ANSWERS_PER_PLAYER = 5;
-// 2026-10-04改訂：1周→2周（初回本番ライブの結果を受けて）。DB側のbegin_game・create_live_preparationと必ず同じ値にする。
-export const ROUNDS_PER_LIVE_DEFAULT = 2;
+// 2026-10-08改訂（第3段階・動的な周回追加）：2周固定・自動進行から、運営者が
+// 周ごとに次へ進むか終了するかを選ぶ仕様へ変更した。ライブ作成時点で必要な
+// お題は1周目分だけ（この値）。2周目以降は運営者がhost_add_next_roundで
+// その都度お題を指定して追加する。DB側のbegin_game・create_live_preparationの
+// v_initial_roundsと必ず同じ値にすること。
+export const ROUNDS_PER_LIVE_INITIAL = 1;
+// 1ライブで追加できる周回数の安全上の上限。DB側のhost_add_next_roundの
+// v_max_roundsと必ず同じ値にすること。
+export const MAX_ROUNDS_PER_LIVE = 10;
 // ライブ本番の回答入力の文字数上限。入力欄自体に文字数カウンター等は出さず、
 // 上限を超えた状態で送信しようとした時だけエラーメッセージで知らせる。
 export const MAX_ANSWER_BODY_LENGTH = 50;

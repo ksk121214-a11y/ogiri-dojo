@@ -12,7 +12,7 @@
 import { create } from "zustand";
 
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
-import { getLiveRoomTiming, ROUNDS_PER_LIVE_DEFAULT } from "@/data/liveRoomTiming";
+import { getLiveRoomTiming, ROUNDS_PER_LIVE_INITIAL } from "@/data/liveRoomTiming";
 import { logAdminAction } from "@/lib/adminActionLog";
 import {
   botAnswerKey,
@@ -58,6 +58,7 @@ import {
 import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { createAnsweringAdvancer, tryAdvanceAnswering } from "@/lib/answeringAdvance";
 import { serverClock } from "@/lib/serverClockInstance";
+import { assertStagingOperationAllowed } from "@/lib/stagingEnv";
 import { supabase } from "@/lib/supabase";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
 import type {
@@ -101,7 +102,7 @@ export interface LivePreparationInput {
   scheduledAt: string; // ISO文字列
   maxPlayers: number | null;
   groupCount: number;
-  // お題の選び方："random"ならtopic_bankから必要数(groupCount×ROUNDS_PER_LIVE_DEFAULT)を
+  // お題の選び方："random"ならtopic_bankから必要数(groupCount×ROUNDS_PER_LIVE_INITIAL)を
   // 自動抽選、"manual"なら指定したtopic_bank行のIDをそのまま使う。
   topicSelection: { mode: "random" } | { mode: "manual"; topicBankIds: string[] };
   // 0068追加：「テスト／本番」の選択。初期値は必ず"test"（呼び出し元のUI側で
@@ -198,6 +199,16 @@ interface LiveHostState {
   // 呼び直す必要がある旨をUI側で案内する（ここでは列の更新のみ行う）。
   updateCapacity: (input: { maxPlayers: number | null; groupCount: number }) => Promise<{ ok: boolean; reason?: string }>;
   beginGame: () => Promise<{ ok: boolean; reason?: string }>; // 「ゲームを開始する」
+  // 第3段階（動的な周回追加）：awaiting_round_decisionから、組ごとに1件のお題を
+  // 指定して次の周へ進む（既存の本番仕様＝1組1お題を維持する）。groupIdは安定した
+  // DB識別子（groups.id）を使い、配列の並び順ではなくgroupIdで組と対応させる。
+  addNextRound: (
+    topics: { groupId: string; topicBody: string }[],
+  ) => Promise<{ ok: boolean; reason?: string }>;
+  // 第3段階：awaiting_round_decisionから、最終結果へ進んでライブを終える。
+  finishLiveFromRoundDecision: () => Promise<{ ok: boolean; reason?: string }>;
+  // 第3段階（ステージング参加制限）：このライブをstaging_testersの許可利用者限定にする/解除する。
+  setAccessRestricted: (restricted: boolean) => Promise<{ ok: boolean; reason?: string }>;
   // 2026-09-25（0079対応）：通常終了はfinal_resultからのみ実行できる
   // （report_applied等の報酬付与を伴う）。
   closeLive: () => Promise<{ ok: boolean; reason?: string }>;
@@ -1752,7 +1763,7 @@ async function advanceIfDue() {
 
     const advanceResult = advanceData as {
       updated: boolean;
-      advanced_to: "topic_reveal" | "final_result" | null;
+      advanced_to: "topic_reveal" | "awaiting_round_decision" | "final_result" | null;
       live: LiveRow | null;
     };
     if (advanceResult.live) {
@@ -2111,6 +2122,10 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 旧startLive()はここでinterludeとして直接insertしていたが、新設計では
   // 「準備中(scheduled)」として作成し、受付開始は別操作(openReception)に分離する。
   createLivePreparation: async (input) => {
+    // 第3段階（ステージング運営環境）：staging以外では常にok:true（既存挙動に影響しない）。
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const existingResult = await fetchActiveLive();
     if (!existingResult.ok) {
       // 既存ライブの有無を確認できないまま作成へ進むと、実際には進行中のライブが
@@ -2145,7 +2160,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     if (input.groupCount < 1) {
       return { ok: false, reason: "組数は1以上にしてください" };
     }
-    const neededTopics = input.groupCount * ROUNDS_PER_LIVE_DEFAULT;
+    const neededTopics = input.groupCount * ROUNDS_PER_LIVE_INITIAL;
 
     let entries: Pick<TopicBankRow, "id" | "body" | "format">[];
     if (input.topicSelection.mode === "random") {
@@ -2571,7 +2586,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 2026-09-03: 組数を後から増やしても、ライブ作成時に用意したお題の枚数は
   // 自動では増えず、「ゲームを開始する」の時点で初めて「お題の準備が不足して
   // います」と分かる不親切な作りだった。組数を変更するたびに必要枚数
-  // (groupCount×ROUNDS_PER_LIVE_DEFAULT)を再計算し、足りない分だけprepareLive()と
+  // (groupCount×ROUNDS_PER_LIVE_INITIAL)を再計算し、足りない分だけprepareLive()と
   // 同じ考え方(pickRandomTopicBankEntries)でtopic_bankから自動的に追加する。
   updateCapacity: async ({ maxPlayers, groupCount }) => {
     const { live } = get();
@@ -2584,7 +2599,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       .eq("live_id", live.id);
     if (fetchTopicsError) return { ok: false, reason: fetchTopicsError.message };
     const existingTopics = (existingTopicRows ?? []) as { topic_bank_id: string | null }[];
-    const neededTopics = groupCount * ROUNDS_PER_LIVE_DEFAULT;
+    const neededTopics = groupCount * ROUNDS_PER_LIVE_INITIAL;
     const shortfall = neededTopics - existingTopics.length;
     if (shortfall > 0) {
       const usedTopicBankIds = existingTopics
@@ -2626,6 +2641,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 作成済みのtopics（live_id紐づけ）とrandomizeGroupsで確定済みのgroups/participants
   // を使ってturnsを作成し、topic_revealへ遷移する。以降のゲーム進行は一切変更しない。
   beginGame: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
 
@@ -2701,6 +2719,93 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       set({ error: "ゲームは開始しましたが、組・ターン情報を取得できませんでした。しばらくすると自動的に再試行します。" });
     }
     await refreshAnswersForTurn(result.first_turn_id);
+    return { ok: true };
+  },
+
+  addNextRound: async (topics) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    if (topics.length === 0) return { ok: false, reason: "お題を入力してください" };
+
+    // 入力はここでは最小限の形だけ整える（trim・空要素拒否）。組の集合が現在のライブと
+    // 完全一致するか・重複が無いか等の本体検証はDB側（host_add_next_round）で行う
+    // （クライアント側の事前チェックはUIの早期フィードバック用で、権限の根拠にはしない）。
+    const normalized = topics.map((t) => ({ groupId: t.groupId, topicBody: t.topicBody.trim() }));
+    if (normalized.some((t) => !t.groupId || !t.topicBody)) {
+      return { ok: false, reason: "すべての組のお題を入力してください" };
+    }
+
+    const p_topics = normalized.map((t) => ({ group_id: t.groupId, topic_body: t.topicBody }));
+
+    const { data, error } = await supabase
+      .rpc("host_add_next_round", {
+        p_live_id: live.id,
+        p_expected_round: live.rounds_per_live + 1,
+        p_topics,
+      })
+      .single();
+    if (error) return { ok: false, reason: "次の周の追加に失敗しました。もう一度お試しください。" };
+
+    const result = data as {
+      ok: boolean;
+      reason: string | null;
+      live: LiveRow | null;
+      first_turn_id: string | null;
+    };
+    if (!result.ok || !result.live) {
+      return { ok: false, reason: result.reason ?? "次の周の追加に失敗しました" };
+    }
+
+    await logAdminAction({ action: "live_round_added", targetType: "lives", targetId: live.id });
+
+    applyAuthoritativeLive(result.live);
+    childrenGate.begin();
+    const childrenResult = await fetchLiveChildren(live.id);
+    if (childrenResult.ok) {
+      const profiles = await fetchProfilesFor(childrenResult.data.participants);
+      childrenGate.begin();
+      set({ ...childrenResult.data, childrenSnapshotLiveId: live.id, profiles });
+    }
+    if (result.first_turn_id) {
+      await refreshAnswersForTurn(result.first_turn_id);
+    }
+    return { ok: true };
+  },
+
+  finishLiveFromRoundDecision: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+
+    const { data, error } = await supabase
+      .rpc("host_finish_live_from_round_decision", { p_live_id: live.id })
+      .single();
+    if (error) return { ok: false, reason: error.message };
+
+    const result = data as { ok: boolean; reason: string | null; live: LiveRow | null };
+    if (!result.ok || !result.live) {
+      return { ok: false, reason: result.reason ?? "ライブの終了に失敗しました" };
+    }
+    applyAuthoritativeLive(result.live);
+    return { ok: true };
+  },
+
+  setAccessRestricted: async (restricted) => {
+    const { live } = get();
+    if (!live) return { ok: false, reason: "ライブがありません" };
+    const { data, error } = await supabase
+      .from("lives")
+      .update({ access_restricted: restricted })
+      .eq("id", live.id)
+      .select()
+      .single();
+    if (error) return { ok: false, reason: error.message };
+    applyAuthoritativeLive(data as LiveRow);
     return { ok: true };
   },
 

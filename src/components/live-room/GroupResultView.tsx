@@ -18,10 +18,14 @@ export default function GroupResultView({
   data,
   myParticipantId,
   participantAvatars = EMPTY_AVATARS,
+  waitingForNextRound = false,
 }: {
   data: GroupResultData;
   myParticipantId: string | null;
   participantAvatars?: Record<string, ParticipantAvatarInfo>;
+  // 第3段階：awaiting_round_decision（運営者の周回判断待ち）の間、この組結果の
+  // 表示はそのまま保ちつつ、下に「次の進行を準備しています」の案内を添える。
+  waitingForNextRound?: boolean;
 }) {
   // Strict Mode（開発時）はマウント直後のeffectを2回連続で実行するため、ガード無しだと
   // 音が二重に重なって鳴ってしまう。refで「もう鳴らした」を記録して2回目を防ぐ。
@@ -87,6 +91,12 @@ export default function GroupResultView({
       {laughCountLabel(data.laughCount) && (
         <p className="mt-4 text-center font-sans text-xs font-bold text-[#ff3b5b]">
           {laughCountLabel(data.laughCount)}
+        </p>
+      )}
+
+      {waitingForNextRound && (
+        <p className="mt-4 text-center font-sans text-xs text-[#6b6b90]">
+          次の進行を準備しています。しばらくお待ちください。
         </p>
       )}
     </div>

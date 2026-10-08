@@ -76,15 +76,18 @@ declare
   v_live_id uuid;
   v_result_a record;
   v_result_b record;
+  v_add record;
   v_group_count int;
   v_processed int := 0;
   v_guard int := 0;
+  v_rounds_added int := 0;
 begin
   select live_id into v_live_id from _t0068b_ctx;
   select count(*) into v_group_count from public.turns where live_id = v_live_id;
-  -- 2周制：3組×2周＝6ターン
-  if v_group_count <> 6 then
-    raise exception 'FAIL: begin_game後のturns件数が6（3組×2周）でない(got=%)', v_group_count;
+  -- 0085：begin_gameは1周目分だけを作る。3組×1周＝3ターン
+  -- （2周目は後述のループ内でhost_add_next_roundにより動的に追加する）。
+  if v_group_count <> 3 then
+    raise exception 'FAIL: begin_game後のturns件数が3（3組×1周）でない(got=%)', v_group_count;
   end if;
 
   set local role authenticated;
@@ -127,19 +130,40 @@ begin
     end if;
     v_processed := v_processed + 1;
 
-    if v_result_b.advanced_to = 'final_result' then
-      exit;
-    elsif v_result_b.advanced_to <> 'topic_reveal' then
+    if v_result_b.advanced_to = 'topic_reveal' then
+      -- 実際の司会画面(advanceIfDue)はtopic_reveal→answeringを単純なガード付き
+      -- UPDATEで行う（0065のRPC対象外）。次のループのためにここでも同様に進める。
+      update public.lives set current_phase = 'answering' where id = v_live_id;
+      continue;
+    end if;
+
+    if v_result_b.advanced_to <> 'awaiting_round_decision' then
       raise exception 'FAIL: 想定外のadvanced_to(%)', v_result_b.advanced_to;
     end if;
-    -- 実際の司会画面(advanceIfDue)はtopic_reveal→answeringを単純なガード付き
-    -- UPDATEで行う（0065のRPC対象外）。次のループのためにここでも同様に進める。
-    update public.lives set current_phase = 'answering' where id = v_live_id;
+
+    -- 0085：1周分（3組）が終わるとawaiting_round_decisionへ入る。1回だけ運営者が
+    -- 2周目を動的に追加し（host_add_next_round）、3組×2周ぶん歩かせたら終了する
+    -- （host_finish_live_from_round_decisionでfinal_resultへ進める）。
+    if v_rounds_added = 0 then
+      v_rounds_added := 1;
+      select * into v_add from public.host_add_next_round(v_live_id, 2, (
+        select jsonb_agg(jsonb_build_object('group_id', g.id, 'topic_body', '0068回帰テスト用2周目のお題（自動テスト）第' || g.group_order || '組'))
+        from public.groups g where g.live_id = v_live_id
+      ));
+      if v_add.ok is not true then
+        raise exception 'FAIL: host_add_next_roundによる2周目追加に失敗(reason=%)', v_add.reason;
+      end if;
+      update public.lives set current_phase = 'answering' where id = v_live_id;
+      continue;
+    end if;
+
+    perform public.host_finish_live_from_round_decision(v_live_id);
+    exit;
   end loop;
 
   reset role;
 
-  -- 2周制：3組×2周＝6ターンすべてを処理してからfinal_resultへ進む
+  -- 3組×2周＝6ターンすべてを処理してからfinal_resultへ進む
   if v_processed <> 6 then
     raise exception 'FAIL: 処理したターン数が6（3組×2周）でない(got=%)', v_processed;
   end if;

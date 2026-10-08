@@ -1851,9 +1851,9 @@ begin
   if v_resync_ok is not true then
     raise exception 'FAIL: resync_eligible_judge_countsが失敗した(reason=%)', v_resync_reason;
   end if;
-  -- 2周制：2組×2周＝4ターン
-  if v_updated_turns <> 4 then
-    raise exception 'FAIL: resync_eligible_judge_countsが更新したturns件数が想定と違う(想定=4、実際=%)', v_updated_turns;
+  -- 0085：begin_gameは1周目分だけを作る。2組×1周＝2ターン
+  if v_updated_turns <> 2 then
+    raise exception 'FAIL: resync_eligible_judge_countsが更新したturns件数が想定と違う(想定=2、実際=%)', v_updated_turns;
   end if;
   select eligible_judge_count into v_eligible1 from public.turns where id = v_turn1_id;
   if v_eligible1 <> 1 then

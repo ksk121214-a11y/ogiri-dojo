@@ -127,6 +127,7 @@ const baseLive: LiveRow = {
   emergency_close_reason: null,
   next_reveal_pending_at: null,
   timing_profile: "standard",
+  access_restricted: false,
 };
 
 const participants: ParticipantRow[] = [

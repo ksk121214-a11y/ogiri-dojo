@@ -9,6 +9,9 @@ export type LivePhase =
   | "topic_reveal"
   | "answering"
   | "group_result"
+  // 0085追加：その周の全組が終わった直後、運営者が次の周へ進むか終了するかを
+  // 選ぶまでの待機フェーズ（第3段階・動的な周回追加）。
+  | "awaiting_round_decision"
   | "final_result"
   | "closed";
 
@@ -71,6 +74,10 @@ export interface LiveRow {
   // (NEXT_PUBLIC_LIVE_TIMING_MODE)ではなくこの列を見て時間を決める
   // （src/data/liveRoomTiming.tsのgetLiveRoomTiming参照）。
   timing_profile: "standard" | "short_test";
+  // 0085追加（第3段階・ステージング参加制限）：trueの間はstaging_testersに
+  // 許可された利用者だけがjoin_liveできる。既定値falseは既存の挙動と同じ
+  // （誰でも参加できる）。
+  access_restricted: boolean;
 }
 
 export interface GroupRow {

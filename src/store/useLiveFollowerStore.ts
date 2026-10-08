@@ -625,7 +625,10 @@ export async function refreshTurnDerivedDetailed(
   // 関数の実行途中にRealtimeイベントが先に反映されていても正しく比較できる）。
 
   let groupResult: GroupResultData | null = null;
-  if (live.current_phase === "group_result" && turn && topic) {
+  // 0085：awaiting_round_decision（運営者の周回判断待ち）の間も、直前の組結果
+  // （group_resultの時点のturn/topic。current_turn_idは変更されない）を
+  // 表示し続けるため、group_resultと同じ条件でgroupResultを計算し続ける。
+  if ((live.current_phase === "group_result" || live.current_phase === "awaiting_round_decision") && turn && topic) {
     const { groups } = useLiveFollowerStore.getState();
     const groupOrder = groups.find((g) => g.id === turn.group_id)?.group_order ?? 0;
     const ranking = getGroupTurnRanking(
@@ -1255,6 +1258,10 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
         reason = "ゲストは観客として参加できます。プレイヤーで参加するにはXでログインしてください。";
       } else if (error.message.includes("INVALID_REFERRAL_SOURCE")) {
         reason = "参加できませんでした。時間をおいて再度お試しください。";
+      } else if (error.message.includes("STAGING_ACCESS_DENIED")) {
+        // 第3段階（ステージング参加制限）：access_restricted=trueのテストライブへ、
+        // staging_testersに許可されていない利用者が参加しようとした場合。
+        reason = "このテストライブへの参加は許可された利用者限定です。運営者にご自身の利用者IDをお伝えください。";
       } else {
         console.warn("[live] join_liveが想定外のエラーで失敗", error);
         reason = "参加できませんでした。時間をおいて再度お試しください。";

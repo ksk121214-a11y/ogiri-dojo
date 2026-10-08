@@ -1,10 +1,12 @@
--- 0084 回帰テスト：周回数の保存値（lives.rounds_per_live）と、0084で再定義したRPC・内部ヘルパーの
--- 実行権限（PUBLIC/anon/authenticated）を検証する。
---  - create_live_preparationは rounds_per_live=2 を明示的に保存する
---  - begin_gameは保存値が2でなければ開始しない（ターンも作らない）
---  - お題が1周分しかないライブは、begin_gameで2周分が揃わないため開始できない（多層防御）
+-- 0084/0085 回帰テスト：周回数の保存値（lives.rounds_per_live）と、0084で再定義したRPC・
+-- 内部ヘルパーの実行権限（PUBLIC/anon/authenticated）を検証する。
+--  - create_live_preparationは rounds_per_live=1（1周目分だけ）を明示的に保存する
+--    （0085で2周固定から動的な周回追加へ変更したため。2周目以降はhost_add_next_round）
+--  - begin_gameは保存値が1でなければ開始しない（ターンも作らない）
+--  - お題が足りないライブは、begin_gameでも1周分が揃わないため開始できない（多層防御）
 --  - 本番(standard)の回答時間は90秒、short_testは20秒のまま
 --  - 公開RPCはauthenticatedのみ、_apply_first_live_rewardは誰も直接実行できない
+-- host_add_next_round等の新規RPCの権限検証は0085_dynamic_rounds.test.sqlで行う。
 -- 実行方法はsupabase/tests/run.sh参照。
 
 \set ON_ERROR_STOP on
@@ -26,7 +28,7 @@ insert into public.topic_bank (id, body, format, is_active) values
   ('f0870000-0000-0000-0000-000000000004', '周回設定テスト用お題4', 'text', true)
 on conflict do nothing;
 
--- テスト1：新規作成は rounds_per_live=2 を明示的に保存する（テストライブ・本番ライブとも）
+-- テスト1：新規作成は rounds_per_live=1 を明示的に保存する（テストライブ・本番ライブとも）
 do $$
 declare
   v_r record;
@@ -39,34 +41,34 @@ begin
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
     now(), '周回設定(テスト)', 20, 2,
-    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002', 'f0870000-0000-0000-0000-000000000003', 'f0870000-0000-0000-0000-000000000004']::uuid[],
+    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002']::uuid[],
     'test', null, 'standard'
   );
   reset role;
-  if v_r.ok is not true then raise exception 'FAIL: テストライブ(2組・お題4件)の作成に失敗(reason=%)', v_r.reason; end if;
+  if v_r.ok is not true then raise exception 'FAIL: テストライブ(2組・お題2件)の作成に失敗(reason=%)', v_r.reason; end if;
   select rounds_per_live into v_saved from public.lives where id = v_r.live_id;
-  if v_saved is distinct from 2 then raise exception 'FAIL: 新規作成のlives.rounds_per_liveが2で保存されていない(got=%)', v_saved; end if;
+  if v_saved is distinct from 1 then raise exception 'FAIL: 新規作成のlives.rounds_per_liveが1で保存されていない(got=%)', v_saved; end if;
   update public.lives set current_phase = 'closed' where id = v_r.live_id;
-  raise notice 'PASS: 新規作成したライブはlives.rounds_per_live=2を明示的に保存する（テストライブ）';
+  raise notice 'PASS: 新規作成したライブはlives.rounds_per_live=1（1周目分だけ）を明示的に保存する（テストライブ）';
 
   -- 本番ライブも同じ保存値（開催番号は試験用の大きな値を使い、カウンターは後で元に戻す）
   set local role authenticated;
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
     now(), '周回設定(本番テスト)', 20, 2,
-    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002', 'f0870000-0000-0000-0000-000000000003', 'f0870000-0000-0000-0000-000000000004']::uuid[],
+    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002']::uuid[],
     'official', 982050, 'standard'
   );
   reset role;
-  if v_r.ok is not true then raise exception 'FAIL: 本番ライブ(2組・お題4件)の作成に失敗(reason=%)', v_r.reason; end if;
+  if v_r.ok is not true then raise exception 'FAIL: 本番ライブ(2組・お題2件)の作成に失敗(reason=%)', v_r.reason; end if;
   select rounds_per_live into v_saved from public.lives where id = v_r.live_id;
-  if v_saved is distinct from 2 then raise exception 'FAIL: 本番ライブのrounds_per_liveが2で保存されていない(got=%)', v_saved; end if;
+  if v_saved is distinct from 1 then raise exception 'FAIL: 本番ライブのrounds_per_liveが1で保存されていない(got=%)', v_saved; end if;
   update public.lives set current_phase = 'closed' where id = v_r.live_id;
   update public.official_live_counter set last_value = v_official_before where id = true;
-  raise notice 'PASS: 新規作成した本番ライブもlives.rounds_per_live=2を明示的に保存する';
+  raise notice 'PASS: 新規作成した本番ライブもlives.rounds_per_live=1を明示的に保存する';
 end $$;
 
--- テスト2：保存値が2でなければbegin_gameは開始せず、ターンも作らない
+-- テスト2：保存値が1でなければbegin_gameは開始せず、ターンも作らない
 do $$
 declare
   v_r record;
@@ -79,29 +81,29 @@ begin
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
     now(), '周回設定(開始拒否)', 20, 2,
-    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002', 'f0870000-0000-0000-0000-000000000003', 'f0870000-0000-0000-0000-000000000004']::uuid[],
+    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002']::uuid[],
     'test', null, 'standard'
   );
   reset role;
   v_live := v_r.live_id;
 
   update public.lives set current_phase = 'opening' where id = v_live;
-  update public.lives set rounds_per_live = 1 where id = v_live; -- 保存値を1周へ改ざんした状況を模擬
+  update public.lives set rounds_per_live = 2 where id = v_live; -- 保存値を2周へ改ざんした状況を模擬
   set local role authenticated;
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_begin from public.begin_game(v_live);
   reset role;
-  if v_begin.ok is not false then raise exception 'FAIL: 保存値が2でないのに開始できてしまった'; end if;
-  if v_begin.reason not like '%2周%' then raise exception 'FAIL: 周回数の不一致理由が出ていない(got=%)', v_begin.reason; end if;
+  if v_begin.ok is not false then raise exception 'FAIL: 保存値が1でないのに開始できてしまった'; end if;
+  if v_begin.reason not like '%1周目開始%' then raise exception 'FAIL: 周回数の不一致理由が出ていない(got=%)', v_begin.reason; end if;
   select count(*) into v_turns from public.turns where live_id = v_live;
   select current_phase into v_phase from public.lives where id = v_live;
   if v_turns <> 0 then raise exception 'FAIL: 拒否されたのにターンが作られている(%件)', v_turns; end if;
   if v_phase <> 'opening' then raise exception 'FAIL: 拒否されたのに進行フェーズが変わった(%)', v_phase; end if;
-  raise notice 'PASS: 保存された周回数が2でなければbegin_gameは開始せず、ターンも進行も変えない';
+  raise notice 'PASS: 保存された周回数が1でなければbegin_gameは開始せず、ターンも進行も変えない';
   update public.lives set current_phase = 'closed' where id = v_live;
 end $$;
 
--- テスト3：作成後にお題を減らされても（ライブは作られた後）、begin_gameは2周分が揃わなければ開始しない。
+-- テスト3：作成後にお題を減らされても（ライブは作られた後）、begin_gameは1周分が揃わなければ開始しない。
 -- 作成時点で拒否する本体の検証は0084_create_live_entrypointsで行う。これは多層防御の確認。
 do $$
 declare
@@ -112,11 +114,11 @@ begin
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_r from public.create_live_preparation(
     now(), '周回設定(お題不足の多層防御)', 20, 2,
-    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002', 'f0870000-0000-0000-0000-000000000003', 'f0870000-0000-0000-0000-000000000004']::uuid[],
+    array['f0870000-0000-0000-0000-000000000001', 'f0870000-0000-0000-0000-000000000002']::uuid[],
     'test', null, 'standard'
   );
   reset role;
-  if v_r.ok is not true then raise exception 'FAIL: 2組・お題4件の作成に失敗(reason=%)', v_r.reason; end if;
+  if v_r.ok is not true then raise exception 'FAIL: 2組・お題2件の作成に失敗(reason=%)', v_r.reason; end if;
   update public.lives set current_phase = 'opening' where id = v_r.live_id;
   insert into public.participants (live_id, user_id, role, preferred_role, is_guest, guest_number)
     values (v_r.live_id, 'f0870000-0000-0000-0000-00000000a011', 'player', 'player', false, null);
@@ -126,18 +128,18 @@ begin
   reset role;
   update public.participants set group_id = (select id from public.groups where live_id = v_r.live_id and group_order = 1)
     where live_id = v_r.live_id;
-  -- 作成後に登録お題を1周分（2件）へ減らした状態を模擬する
+  -- 作成後に登録お題を1件（1周分の2件未満）へ減らした状態を模擬する
   delete from public.topics where live_id = v_r.live_id and id in (
-    select id from public.topics where live_id = v_r.live_id order by created_at desc limit 2
+    select id from public.topics where live_id = v_r.live_id order by created_at desc limit 1
   );
   set local role authenticated;
   perform set_config('myapp.uid', 'f0870000-0000-0000-0000-00000000a001', true);
   select * into v_begin from public.begin_game(v_r.live_id);
   reset role;
-  if v_begin.ok is not false then raise exception 'FAIL: お題が1周分しか無いライブが2周として開始できてしまった'; end if;
+  if v_begin.ok is not false then raise exception 'FAIL: お題が1周分に満たないライブが開始できてしまった'; end if;
   if v_begin.reason not like '%お題%' then raise exception 'FAIL: お題不足の理由が出ていない(got=%)', v_begin.reason; end if;
   update public.lives set current_phase = 'closed' where id = v_r.live_id;
-  raise notice 'PASS: 作成後にお題が1周分へ減ったライブは、begin_gameでも2周分が揃わないため開始できない（多層防御）';
+  raise notice 'PASS: 作成後にお題が1周分に満たなくなったライブは、begin_gameでも開始できない（多層防御）';
 end $$;
 
 -- テスト4：短縮時間（short_test）は20秒のまま、本番(standard)の回答時間は90秒。他フェーズは据え置き。

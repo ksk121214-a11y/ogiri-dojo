@@ -257,6 +257,27 @@ else
 fi
 rm -rf "$HOST_CLOSE_DIR"
 
+# 第3段階修正：host_add_next_roundを「組ごとに1件のお題」仕様へ変更したことに伴う、
+# useLiveHostStore.addNextRoundのp_topics(group_id/topic_body対応)配線検証。専用tsconfig経由。
+HOST_ADD_ROUND_DIR="$(mktemp -d)"
+HOST_ADD_ROUND_TSCONFIG="$SCRIPT_DIR/store/tsconfig.hostAddNextRound.json"
+HOST_ADD_ROUND_ENTRY="$HOST_ADD_ROUND_DIR/src/lib/__tests__/store/useLiveHostStoreAddNextRound.check.js"
+
+echo "--- useLiveHostStoreAddNextRound.check.ts ---"
+if npx tsc -p "$HOST_ADD_ROUND_TSCONFIG" --outDir "$HOST_ADD_ROUND_DIR" && [ -f "$HOST_ADD_ROUND_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$HOST_ADD_ROUND_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$HOST_ADD_ROUND_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveHostStoreAddNextRound.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$HOST_ADD_ROUND_DIR"
+
 # src/lib/__tests__/store/useLiveFollowerStoreJoinReferral.check.ts も同じ理由
 # （useLiveFollowerStore.ts/useProfileStore.tsが"@/..."エイリアス・実際の
 # Supabaseクライアント生成を含む）で専用tsconfig経由にする。2026-09-22
@@ -305,6 +326,28 @@ else
   FAILED=1
 fi
 rm -rf "$FOLLOWER_ANSWER_SCORE_DIR"
+
+# src/lib/__tests__/store/stagingEnvDynamic.check.ts も同じ理由（src/lib/stagingEnv.tsが
+# "@/lib/supabase"を実際にimportする）で専用tsconfig経由にする。第3段階
+# （ステージング運営環境）：appEnv判定・Project Refの抜き出し・一致判定を実行して検証する。
+STAGING_ENV_DYNAMIC_DIR="$(mktemp -d)"
+STAGING_ENV_DYNAMIC_TSCONFIG="$SCRIPT_DIR/store/tsconfig.stagingEnvDynamic.json"
+STAGING_ENV_DYNAMIC_ENTRY="$STAGING_ENV_DYNAMIC_DIR/src/lib/__tests__/store/stagingEnvDynamic.check.js"
+
+echo "--- stagingEnvDynamic.check.ts ---"
+if npx tsc -p "$STAGING_ENV_DYNAMIC_TSCONFIG" --outDir "$STAGING_ENV_DYNAMIC_DIR" && [ -f "$STAGING_ENV_DYNAMIC_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$STAGING_ENV_DYNAMIC_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$STAGING_ENV_DYNAMIC_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: stagingEnvDynamic.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$STAGING_ENV_DYNAMIC_DIR"
 
 # src/lib/__tests__/store/useLiveFollowerStoreReactionQueue.check.ts も同じ理由
 # （useLiveFollowerStore.tsが"@/..."エイリアス・実際のSupabaseクライアント生成を

@@ -495,7 +495,10 @@ begin
 end $$;
 
 -- ============================================================
--- テスト8: 次ターンが無い場合（最後のターン）はfinal_resultへ進める。
+-- テスト8（0085で更新）: 次ターンが無い場合（1周目最後のターン）は、運営者の
+-- 周回判断待ち(awaiting_round_decision)へ進める（0085で2周固定自動進行から
+-- 変更したため、以前のfinal_result直行の期待値をawaiting_round_decisionへ更新した。
+-- 運営者が実際に次の周を追加・終了できることは0085_dynamic_rounds.test.sqlで検証する）。
 -- ============================================================
 do $$
 declare
@@ -504,7 +507,7 @@ declare
   v_result record;
 begin
   select live_id into v_live_id from _t0065_ctx;
-  -- 2周制：「最後のターン」は2周目の最後の組（周→組順の末尾）。
+  -- begin_gameは1周目分のターンだけを作るため、「最後のターン」は1周目の最後の組。
   select t.id into v_turn_b from public.turns t join public.groups g on g.id = t.group_id
     where t.live_id = v_live_id order by t.round desc, g.group_order desc limit 1;
 
@@ -520,17 +523,20 @@ begin
   if v_result.updated is not true then
     raise exception 'FAIL: 最後のターンからの遷移がupdated=trueにならなかった';
   end if;
-  if v_result.advanced_to <> 'final_result' then
-    raise exception 'FAIL: 次ターンが無いのにadvanced_toがfinal_resultになっていない(got=%)', v_result.advanced_to;
+  if v_result.advanced_to <> 'awaiting_round_decision' then
+    raise exception 'FAIL: 次ターンが無いのにadvanced_toがawaiting_round_decisionになっていない(got=%)', v_result.advanced_to;
   end if;
-  if (v_result.live).current_phase <> 'final_result' then
-    raise exception 'FAIL: livesのcurrent_phaseがfinal_resultになっていない';
+  if (v_result.live).current_phase <> 'awaiting_round_decision' then
+    raise exception 'FAIL: livesのcurrent_phaseがawaiting_round_decisionになっていない';
   end if;
   if (v_result.live).phase_deadline is not null then
-    raise exception 'FAIL: final_result遷移後もphase_deadlineがnullになっていない';
+    raise exception 'FAIL: awaiting_round_decision遷移後もphase_deadlineがnullになっていない';
+  end if;
+  if (v_result.live).current_turn_id <> v_turn_b then
+    raise exception 'FAIL: awaiting_round_decisionへ入った時点でcurrent_turn_idが変わってしまった';
   end if;
 
-  raise notice 'PASS: 次ターンが無い場合はfinal_resultへ正しく進む';
+  raise notice 'PASS: 次ターンが無い場合はawaiting_round_decision（運営者の周回判断待ち）へ正しく進む';
 end $$;
 
 -- ============================================================
