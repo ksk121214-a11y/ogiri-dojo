@@ -83,6 +83,10 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../authCallback.ts"
   "$SCRIPT_DIR/../authorLookupStatus.ts"
   "$SCRIPT_DIR/../calendarInitialMonth.ts"
+  "$SCRIPT_DIR/../answerSubmitCue.ts"
+  "$SCRIPT_DIR/../roundTopicCandidates.ts"
+  "$SCRIPT_DIR/../judgingDisplayState.ts"
+  "$SCRIPT_DIR/../judgingDisplayBackfill.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。

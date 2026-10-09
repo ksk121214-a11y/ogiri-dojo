@@ -15,6 +15,11 @@ import {
   randomTopicShortageMessage,
   requiredTopicCount,
 } from "@/lib/liveTopicRequirement";
+import {
+  candidatesForGroup as candidatesForGroupPure,
+  usedBodySet,
+  usedTopicBankIdSet,
+} from "@/lib/roundTopicCandidates";
 import type { LivePreparationInput } from "@/store/useLiveHostStore";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -1275,6 +1280,10 @@ function GroupingPanel({
 
 // よく使う運営メッセージの定型文。クリックすると入力欄にセットされ、その後は
 // 自由に書き換えられる（定型文のまま送ることも、一部だけ変えることもできる）。
+// 「次の周」はlive.rounds_per_live（現在までに存在する周数。host_add_next_roundの
+// p_expected_round計算と同じ基準）から次の周数を算出するため、固定文言ではなく
+// AnnouncementPanel内でlive依存のuseMemoとして組み立てる（下のANNOUNCEMENT_TEMPLATES
+// 自体は周数に依存しない部分だけを持つ）。
 const ANNOUNCEMENT_TEMPLATES = [
   { label: "開始前", text: "まもなくゲームを開始します" },
   { label: "少々お待ちを", text: "只今準備中です。少々お待ちください" },
@@ -1292,6 +1301,15 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
   const [scope, setScope] = useState<"player" | "all">("all");
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
+
+  // 「次の周」テンプレート：固定で「2周目」等と書くと3周目以降で誤案内になるため、
+  // live.rounds_per_live（現在までに存在する周数。host_add_next_roundのp_expected_round
+  // 計算と同じ基準）から次の周数を毎回算出する。
+  const templates = useMemo(() => {
+    const nextRound = (live?.rounds_per_live ?? 0) + 1;
+    const nextRoundTemplate = { label: "次の周", text: `まもなく第${nextRound}周に入ります` };
+    return [...ANNOUNCEMENT_TEMPLATES.slice(0, 3), nextRoundTemplate, ...ANNOUNCEMENT_TEMPLATES.slice(3)];
+  }, [live?.rounds_per_live]);
 
   const handleSend = async () => {
     if (sending || !message.trim()) return;
@@ -1323,7 +1341,7 @@ function AnnouncementPanel({ onNotify }: { onNotify: Notify }) {
 
   return (
     <AdminCard title="プレイヤー全員への運営メッセージ">
-      <AdminTemplateChips templates={ANNOUNCEMENT_TEMPLATES} onSelect={(t) => setMessage(t.text)} />
+      <AdminTemplateChips templates={templates} onSelect={(t) => setMessage(t.text)} />
       <div className="mt-2 flex gap-2">
         <input
           type="text"
@@ -1382,6 +1400,8 @@ function RoundDecisionPanel({
 }) {
   const addNextRound = useLiveHostStore((s) => s.addNextRound);
   const finishLiveFromRoundDecision = useLiveHostStore((s) => s.finishLiveFromRoundDecision);
+  const topicBank = useLiveHostStore((s) => s.topicBank);
+  const existingTopics = useLiveHostStore((s) => s.topics);
 
   const visibleGroups = useMemo(
     () =>
@@ -1395,8 +1415,11 @@ function RoundDecisionPanel({
   // 呼び出し元（この下のkey={live.rounds_per_live}）がこのコンポーネント自体を
   // 再マウントするため、常に新しい周番号・現在の組構成からフォームが作り直される
   // （古い入力は残らない。Reactの推奨パターン：effect+setStateでの同期ではなくkeyでリセットする）。
-  const [bodies, setBodies] = useState<Record<string, string>>(() =>
-    Object.fromEntries(visibleGroups.map((g) => [g.id, ""])),
+  // topicBankId：登録済みのお題から選んだ場合はそのID、手入力または選択後に本文を
+  // 書き換えた場合はnull（「微調整」も許可するが、本文を変えた時点でDB側の本文一致
+  // 検証に通らなくなるため、手入力として扱うのが安全で分かりやすい）。
+  const [selections, setSelections] = useState<Record<string, { topicBankId: string | null; body: string }>>(() =>
+    Object.fromEntries(visibleGroups.map((g) => [g.id, { topicBankId: null, body: "" }])),
   );
 
   const [adding, setAdding] = useState(false);
@@ -1406,9 +1429,22 @@ function RoundDecisionPanel({
   const allFilled =
     visibleGroups.length > 0 &&
     visibleGroups.every((g) => {
-      const body = bodies[g.id]?.trim() ?? "";
+      const body = selections[g.id]?.body?.trim() ?? "";
       return body.length > 0 && body.length <= 200;
     });
+
+  // お題の重複防止（詳細はsrc/lib/roundTopicCandidates.ts参照）。
+  const usedTopicBankIds = useMemo(() => usedTopicBankIdSet(existingTopics), [existingTopics]);
+  const usedBodies = useMemo(() => usedBodySet(existingTopics), [existingTopics]);
+  const candidatesForGroup = (groupId: string) => {
+    const pickedByOtherGroups = new Set(
+      Object.entries(selections)
+        .filter(([gid]) => gid !== groupId)
+        .map(([, v]) => v.topicBankId)
+        .filter((id): id is string => id !== null),
+    );
+    return candidatesForGroupPure(topicBank, usedTopicBankIds, usedBodies, pickedByOtherGroups);
+  };
 
   const playerNamesFor = (groupId: string): string => {
     const names = participants
@@ -1422,7 +1458,11 @@ function RoundDecisionPanel({
     setAdding(true);
     try {
       const result = await addNextRound(
-        visibleGroups.map((g) => ({ groupId: g.id, topicBody: bodies[g.id] ?? "" })),
+        visibleGroups.map((g) => ({
+          groupId: g.id,
+          topicBody: selections[g.id]?.body ?? "",
+          topicBankId: selections[g.id]?.topicBankId ?? null,
+        })),
       );
       if (!result.ok) {
         // 失敗時は入力を保持する（再入力させない）。
@@ -1468,30 +1508,58 @@ function RoundDecisionPanel({
             第{live.rounds_per_live + 1}周のお題（組ごとに1件）
           </p>
           {visibleGroups.map((g) => {
-            const body = bodies[g.id] ?? "";
+            const selection = selections[g.id] ?? { topicBankId: null, body: "" };
+            const body = selection.body;
             const overLimit = body.length > 200;
+            const candidates = candidatesForGroup(g.id);
             return (
-              <label key={g.id} className="flex flex-col gap-1 rounded border border-gray-200 p-2 text-[10px] text-gray-600">
+              <div key={g.id} className="flex flex-col gap-1 rounded border border-gray-200 p-2 text-[10px] text-gray-600">
                 <span className="font-bold text-gray-800">
                   第{live.rounds_per_live + 1}周・{g.group_order}組目
                   <span className="ml-1 font-normal text-gray-500">（{playerNamesFor(g.id)}）</span>
                 </span>
+                <label className="flex flex-col gap-0.5">
+                  登録済みのお題から選ぶ
+                  <select
+                    value={selection.topicBankId ?? ""}
+                    disabled={adding || finishing}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (!id) {
+                        setSelections((prev) => ({ ...prev, [g.id]: { topicBankId: null, body: prev[g.id]?.body ?? "" } }));
+                        return;
+                      }
+                      const entry = topicBank.find((tb) => tb.id === id);
+                      if (!entry) return;
+                      setSelections((prev) => ({ ...prev, [g.id]: { topicBankId: entry.id, body: entry.body } }));
+                    }}
+                    className="w-full rounded border border-gray-300 px-2 py-1 text-xs disabled:opacity-50"
+                  >
+                    <option value="">（手入力）</option>
+                    {candidates.map((tb) => (
+                      <option key={tb.id} value={tb.id}>
+                        {tb.body.length > 40 ? `${tb.body.slice(0, 40)}…` : tb.body}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <textarea
                   value={body}
                   disabled={adding || finishing}
                   onChange={(e) =>
-                    setBodies((prev) => ({ ...prev, [g.id]: e.target.value }))
+                    setSelections((prev) => ({ ...prev, [g.id]: { topicBankId: null, body: e.target.value } }))
                   }
                   rows={2}
-                  placeholder={`${g.group_order}組目のお題`}
+                  placeholder={`${g.group_order}組目のお題（手入力、または上で選んでから微調整）`}
                   className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-50"
                 />
                 <span className={overLimit ? "font-bold text-red-600" : "text-gray-400"}>
                   {body.length}/200文字
                   {overLimit && "（上限を超えています）"}
                   {!body.trim() && body.length === 0 && "（未入力）"}
+                  {selection.topicBankId && "（登録済みのお題を使用）"}
                 </span>
-              </label>
+              </div>
             );
           })}
           <AdminButton

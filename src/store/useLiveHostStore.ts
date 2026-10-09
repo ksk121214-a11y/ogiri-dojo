@@ -203,7 +203,7 @@ interface LiveHostState {
   // 指定して次の周へ進む（既存の本番仕様＝1組1お題を維持する）。groupIdは安定した
   // DB識別子（groups.id）を使い、配列の並び順ではなくgroupIdで組と対応させる。
   addNextRound: (
-    topics: { groupId: string; topicBody: string }[],
+    topics: { groupId: string; topicBody: string; topicBankId?: string | null }[],
   ) => Promise<{ ok: boolean; reason?: string }>;
   // 第3段階：awaiting_round_decisionから、最終結果へ進んでライブを終える。
   finishLiveFromRoundDecision: () => Promise<{ ok: boolean; reason?: string }>;
@@ -2733,12 +2733,23 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
     // 入力はここでは最小限の形だけ整える（trim・空要素拒否）。組の集合が現在のライブと
     // 完全一致するか・重複が無いか等の本体検証はDB側（host_add_next_round）で行う
     // （クライアント側の事前チェックはUIの早期フィードバック用で、権限の根拠にはしない）。
-    const normalized = topics.map((t) => ({ groupId: t.groupId, topicBody: t.topicBody.trim() }));
+    // topicBankId：登録済みのお題から選んだ場合はそのID、手入力の場合はnull/未指定
+    // （0086でtopic_bank_idの出典保持に対応。省略時はnullとして送るため、この引数を
+    // 渡さない既存の呼び出し方との後方互換性も保たれる）。
+    const normalized = topics.map((t) => ({
+      groupId: t.groupId,
+      topicBody: t.topicBody.trim(),
+      topicBankId: t.topicBankId ?? null,
+    }));
     if (normalized.some((t) => !t.groupId || !t.topicBody)) {
       return { ok: false, reason: "すべての組のお題を入力してください" };
     }
 
-    const p_topics = normalized.map((t) => ({ group_id: t.groupId, topic_body: t.topicBody }));
+    const p_topics = normalized.map((t) => ({
+      group_id: t.groupId,
+      topic_body: t.topicBody,
+      topic_bank_id: t.topicBankId,
+    }));
 
     const { data, error } = await supabase
       .rpc("host_add_next_round", {

@@ -98,18 +98,49 @@ async function main() {
     assert.equal(result.ok, true, "正常な追加が失敗した");
     assert.equal(rpcCalls.length, 1, "RPC呼び出しが1回でない");
     assert.equal(rpcCalls[0].fn, "host_add_next_round", "呼んでいるRPC名が違う");
-    const args = rpcCalls[0].args as { p_live_id: string; p_expected_round: number; p_topics: { group_id: string; topic_body: string }[] };
+    const args = rpcCalls[0].args as {
+      p_live_id: string;
+      p_expected_round: number;
+      p_topics: { group_id: string; topic_body: string; topic_bank_id: string | null }[];
+    };
     assert.equal(args.p_live_id, "live-1");
     assert.equal(args.p_expected_round, 3, "p_expected_roundがrounds_per_live+1になっていない");
     assert.deepEqual(
       args.p_topics,
       [
-        { group_id: "group-b", topic_body: "2組目のお題" },
-        { group_id: "group-a", topic_body: "1組目のお題" },
+        { group_id: "group-b", topic_body: "2組目のお題", topic_bank_id: null },
+        { group_id: "group-a", topic_body: "1組目のお題", topic_bank_id: null },
       ],
-      "p_topicsのgroup_id/topic_bodyの対応、または渡した順序が変わっている",
+      "p_topicsのgroup_id/topic_bodyの対応、または渡した順序が変わっている（topicBankId省略時はnullになるはず）",
     );
-    console.log("PASS: addNextRoundは渡したgroupId/topicBodyの対応を保ったままp_topicsとしてRPCへ渡し、p_expected_roundを正しく計算する");
+    console.log("PASS: addNextRoundは渡したgroupId/topicBodyの対応を保ったままp_topicsとしてRPCへ渡し、p_expected_roundを正しく計算する（topicBankId省略時はnull）");
+  }
+
+  // ---- 1b) 正常系：topicBankId（登録済みのお題から選んだ出典ID）を渡すとp_topics.topic_bank_idへそのまま入る ----
+  {
+    reset();
+    useLiveHostStore.setState({ live: makeLiveRow({ rounds_per_live: 1 }) });
+    nextRpcResult = {
+      data: { ok: true, reason: null, live: makeLiveRow({ rounds_per_live: 2, current_phase: "topic_reveal" }), first_turn_id: "turn-new" },
+      error: null,
+    };
+    const result = await useLiveHostStore.getState().addNextRound([
+      { groupId: "group-a", topicBody: "登録済みのお題", topicBankId: "bank-001" },
+      { groupId: "group-b", topicBody: "手入力のお題" },
+    ]);
+    assert.equal(result.ok, true, "topicBankId混在の正常な追加が失敗した");
+    const args = rpcCalls[0].args as {
+      p_topics: { group_id: string; topic_body: string; topic_bank_id: string | null }[];
+    };
+    assert.deepEqual(
+      args.p_topics,
+      [
+        { group_id: "group-a", topic_body: "登録済みのお題", topic_bank_id: "bank-001" },
+        { group_id: "group-b", topic_body: "手入力のお題", topic_bank_id: null },
+      ],
+      "topicBankIdを渡した組はtopic_bank_idへそのまま入り、省略した組はnullになるはず",
+    );
+    console.log("PASS: topicBankId（登録済みのお題の出典ID）を渡すと、その組だけp_topics.topic_bank_idへそのまま渡り、省略した組はnullになる");
   }
 
   // ---- 2) 空配列ではRPCを呼ばない ----

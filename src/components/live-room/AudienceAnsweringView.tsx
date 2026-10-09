@@ -2,14 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { initialAnswerCueState, nextAnswerCueState } from "@/lib/answerSubmitCue";
 import AudienceAnsweringPresentation from "@/components/live-room/AudienceAnsweringPresentation";
 import type { ScoreEvent } from "@/components/live-demo/ScoringPhysicsBoard";
 import { TSUKKOMI_TEMPLATES } from "@/data/liveDemoData";
 import { getLiveRoomTiming, SCORE_REVEAL_DELAY_MS } from "@/data/liveRoomTiming";
 import { confirmedPerfectFor, maxBallsFor } from "@/lib/liveRoomPresentation";
+import { selectJudgingDisplayBackfillCandidate } from "@/lib/judgingDisplayBackfill";
 import { useJudgingDisplay } from "@/lib/useJudgingDisplay";
 import { answeringRemaining, judgingRemaining } from "@/lib/liveRemaining";
-import { playSfx } from "@/lib/sfx";
 import { useServerClockState } from "@/lib/useServerNow";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
 
@@ -37,7 +38,20 @@ export default function AudienceAnsweringView() {
   const clock = useServerClockState(150);
   const [scoreError, setScoreError] = useState<{ answerId: string; message: string } | null>(null);
 
-  const displayedAnswer = useJudgingDisplay(activeAnswer, turnAnswers, timing.revealGraceMs);
+  // 2026-10-09追加：クライアントの初回取得・購読確立が遅れ、revealed→resolvedの
+  // 短い遷移を一度も観測できなかった回答を、安全な条件下でのみ一度だけ表示補完する
+  // （詳細はsrc/lib/judgingDisplayBackfill.ts参照）。
+  const judgingDisplayBackfillCandidate = selectJudgingDisplayBackfillCandidate(
+    turnAnswers,
+    live?.reveal_sequence_until ?? null,
+    clock,
+  );
+  const displayedAnswer = useJudgingDisplay(
+    activeAnswer,
+    turnAnswers,
+    timing.revealGraceMs,
+    judgingDisplayBackfillCandidate,
+  );
 
   const [seatScores, setSeatScores] = useState<Record<string, number>>({});
   const prevActiveIdRef = useRef<string | null>(null);
@@ -84,19 +98,24 @@ export default function AudienceAnsweringView() {
     setBoardRoundId(activeAnswer.id);
   }
   const boardAnswer = boardRoundId ? turnAnswers.find((a) => a.id === boardRoundId) ?? null : null;
-  const spotlightSeenRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (boardRoundId && boardRoundId !== spotlightSeenRef.current) {
-      spotlightSeenRef.current = boardRoundId;
-      playSfx("spotlightIn");
-    }
-  }, [boardRoundId]);
 
+  // 回答送信音の合図：answering_cues.busyがfalse/null→trueになった「立ち上がり」だけを
+  // cueIdの変化として扱う（詳細はsrc/lib/answerSubmitCue.ts参照）。
   const cueForCurrentTurn = pendingCue?.turnId === currentTurn?.id ? pendingCue : null;
-  const answerSubmitCue =
-    cueForCurrentTurn?.busy && currentTurn
-      ? { cueId: `${currentTurn.id}:${cueForCurrentTurn.revision}` }
-      : null;
+  const busyNow = cueForCurrentTurn?.busy ?? false;
+  const cueTurnId = currentTurn?.id ?? null;
+  const cueRevision = cueForCurrentTurn?.revision ?? null;
+  // boardRoundId（直前）と同じ「レンダー中にstateを直接更新して即座に再レンダーさせる」
+  // パターン（Reactが推奨する派生state更新。effect+setStateの非同期更新を使わない）。
+  const [answerCueState, setAnswerCueState] = useState(() => initialAnswerCueState(busyNow));
+  const computedAnswerCueState = nextAnswerCueState(answerCueState, busyNow, cueTurnId, cueRevision);
+  if (
+    computedAnswerCueState.wasBusy !== answerCueState.wasBusy ||
+    computedAnswerCueState.cueId !== answerCueState.cueId
+  ) {
+    setAnswerCueState(computedAnswerCueState);
+  }
+  const answerSubmitCue = busyNow && answerCueState.cueId ? { cueId: answerCueState.cueId } : null;
 
   const scoreEvents: ScoreEvent[] = useMemo(
     () =>
