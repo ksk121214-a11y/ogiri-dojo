@@ -81,8 +81,23 @@ const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
   assert.match(host, /function RoundDecisionPanel/, "RoundDecisionPanelが定義されていない");
   assert.match(host, /live\.current_phase === "awaiting_round_decision" && \(\s*<RoundDecisionPanel/, "awaiting_round_decisionでRoundDecisionPanelが表示されていない");
   assert.match(host, /function StagingTestersPanel/, "StagingTestersPanelが定義されていない");
-  assert.match(host, /host_grant_staging_tester/, "StagingTestersPanelがhost_grant_staging_testerを呼んでいない");
-  assert.match(host, /host_revoke_staging_tester/, "StagingTestersPanelがhost_revoke_staging_testerを呼んでいない");
+  // 2026-10-10（ステージング誤接続防止の対象拡大）：host_grant/revoke_staging_testerの
+  // 実RPC呼び出しと安全確認は、Reactの描画なしで実際に呼び出すテストが書けるよう
+  // src/lib/stagingTesterActions.tsへ分離した。page.tsx側は結果(ok/message)を
+  // 受けてbusy/messageを更新するだけになる。
+  assert.match(
+    host,
+    /import \{ grantStagingTester, revokeStagingTester \} from "@\/lib\/stagingTesterActions";/,
+    "StagingTestersPanelがstagingTesterActionsから許可/失効関数をimportしていない",
+  );
+  assert.doesNotMatch(
+    host,
+    /"host_grant_staging_tester"|"host_revoke_staging_tester"/,
+    "host console側で直接host_grant/revoke_staging_testerを呼んでいる（stagingTesterActions.tsへ分離したはず）",
+  );
+  const actions = read("src/lib/stagingTesterActions.ts");
+  assert.match(actions, /host_grant_staging_tester/, "stagingTesterActionsがhost_grant_staging_testerを呼んでいない");
+  assert.match(actions, /host_revoke_staging_tester/, "stagingTesterActionsがhost_revoke_staging_testerを呼んでいない");
   console.log("PASS: host console(/live/host)にSTAGINGバナー・周回判断パネル・テスター許可パネルが配線されている（既存の/live/hostをそのまま拡張。/live-demoは別ファイルで複製していない）");
 }
 

@@ -33,6 +33,7 @@ import { phaseRemainingSeconds } from "@/lib/liveRemaining";
 import { useServerClockState } from "@/lib/useServerNow";
 import { MAX_ROUNDS_PER_LIVE } from "@/data/liveRoomTiming";
 import { getConfiguredProjectRef, isStagingMode } from "@/lib/stagingEnv";
+import { grantStagingTester, revokeStagingTester } from "@/lib/stagingTesterActions";
 import { supabase } from "@/lib/supabase";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -1618,14 +1619,15 @@ function StagingTestersPanel() {
     setBusy(true);
     setMessage(null);
     try {
-      const { error } = await supabase.rpc("host_grant_staging_tester", { p_user_id: id });
-      if (error) setMessage(`許可に失敗しました：${error.message}`);
-      else {
-        setMessage("許可しました。");
-        setUserIdInput("");
-        const rows = await fetchTesters();
-        if (rows) setTesters(rows);
+      const result = await grantStagingTester(id);
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
       }
+      setMessage("許可しました。");
+      setUserIdInput("");
+      const rows = await fetchTesters();
+      if (rows) setTesters(rows);
     } finally {
       setBusy(false);
     }
@@ -1636,12 +1638,13 @@ function StagingTestersPanel() {
     setBusy(true);
     setMessage(null);
     try {
-      const { error } = await supabase.rpc("host_revoke_staging_tester", { p_user_id: id });
-      if (error) setMessage(`失効に失敗しました：${error.message}`);
-      else {
-        const rows = await fetchTesters();
-        if (rows) setTesters(rows);
+      const result = await revokeStagingTester(id);
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
       }
+      const rows = await fetchTesters();
+      if (rows) setTesters(rows);
     } finally {
       setBusy(false);
     }

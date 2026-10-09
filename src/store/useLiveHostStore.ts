@@ -904,6 +904,11 @@ async function processRevealQueue(tickGeneration: number, tickLiveId: string | n
   // 補助tick（useLiveFollowerStore.ts）も同じRPCを呼ぶため、司会ブラウザが
   // 落ちていても誰かが画面を開いていれば未発表回答の表示から先へ進める。
   if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  const revealStagingCheck = await assertStagingOperationAllowed();
+  if (!revealStagingCheck.ok) {
+    console.error("[live] ステージング安全確認に失敗したため自動進行の書き込みを中止", revealStagingCheck.reason);
+    return;
+  }
   const { data: revealData, error: revealError } = await supabase
     .rpc("reveal_next_answer_if_due", {
       p_live_id: live.id,
@@ -1001,6 +1006,14 @@ async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
 
   resolvingAnswerIds.add(active.id);
   try {
+    const resolveStagingCheck = await assertStagingOperationAllowed();
+    if (!resolveStagingCheck.ok) {
+      console.error(
+        "[live] ステージング安全確認に失敗したため自動進行の書き込みを中止",
+        resolveStagingCheck.reason,
+      );
+      return;
+    }
     const { data: resolveData, error: resolveError } = await supabase
       .rpc("resolve_answer_if_due", { p_answer_id: active.id })
       .single();
@@ -1106,6 +1119,11 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
   // 再計算するため、複数タブ・順序逆転・同時実行でも矛盾した状態にならない。
   // is_host()を要求しないため、観客・回答者側からの補助tickでも呼べる。
   if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  const pauseStagingCheck = await assertStagingOperationAllowed();
+  if (!pauseStagingCheck.ok) {
+    console.error("[live] ステージング安全確認に失敗したため自動進行の書き込みを中止", pauseStagingCheck.reason);
+    return;
+  }
   const { data: pauseData, error: pauseError } = await supabase
     .rpc("sync_answering_pause_if_due", {
       p_live_id: live.id,
@@ -1140,6 +1158,26 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
 
   const bots = useLiveBotStore.getState().bots;
   const now = Date.now();
+  // 2026-10-10（追加レビュー対応）：以前はボットが1体以上いるだけで、書き込みが
+  // 実際に発生するかに関わらず毎tick（500ms）ごとに安全確認(DBへのSELECT)を行っていた。
+  // ここでは「tsukkomi送信／回答insert／採点insertのいずれかの分岐へ実際に入った
+  // 時点」でのみ確認し、1回のrunBotBehavior呼び出し内では結果をPromiseとして
+  // 使い回す（最大1回）。このキャッシュはローカル変数なのでこの呼び出しが終われば
+  // 消え、次tick・次の操作へは一切持ち越さない。
+  let botStagingCheckPromise: Promise<{ ok: boolean; reason?: string }> | null = null;
+  let botStagingFailureLogged = false;
+  const ensureBotStagingAllowed = async (): Promise<boolean> => {
+    if (!botStagingCheckPromise) botStagingCheckPromise = assertStagingOperationAllowed();
+    const result = await botStagingCheckPromise;
+    if (!result.ok && !botStagingFailureLogged) {
+      botStagingFailureLogged = true;
+      console.error(
+        "[live] ステージング安全確認に失敗したためボットの自動書き込みを中止",
+        result.reason,
+      );
+    }
+    return result.ok;
+  };
   const activeAnswer = answers.find((a) => a.revealed_at && !a.resolved);
   // scores同期中（表示中の回答のscoresSnapshotが未確認）は、古いscoresを根拠に
   // ボット採点しない。active answerに一致するscoresSnapshotが確認済みのときだけ許可。
@@ -1190,17 +1228,17 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
           ? ["stamp", "爆笑"]
           : ["clap", "👏"];
     const senderBot = bots[Math.floor(Math.random() * bots.length)];
-    void senderBot.client
-      .rpc("send_tsukkomi", {
+    void (async () => {
+      if (!(await ensureBotStagingAllowed())) return;
+      const { error } = await senderBot.client.rpc("send_tsukkomi", {
         p_live_id: live.id,
         p_kind: kind,
         p_text: text,
-      })
-      .then(({ error }) => {
-        // RPC失敗（レート制限・フェーズ変化・通信エラー等）でも進行は止めない。
-        // 生のPostgres/Supabaseエラーは画面へ出さず、コンソール警告に留める。
-        if (error) console.warn("[tsukkomi] ボット反応の送信に失敗", error);
       });
+      // RPC失敗（レート制限・フェーズ変化・通信エラー等）でも進行は止めない。
+      // 生のPostgres/Supabaseエラーは画面へ出さず、コンソール警告に留める。
+      if (error) console.warn("[tsukkomi] ボット反応の送信に失敗", error);
+    })();
   }
 
   // 送信可能な時間帯（busyでない期間）を追跡する。時刻はサーバー同期時計のみ。
@@ -1251,12 +1289,20 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
     const seq = myAnswerCount + 1;
     const key = botAnswerKey(turn.id, bot.participantId, seq);
     // INSERT直前の再確認：凍結していない・同じlive/turn・今もbusyでない。
-    if (!stillOnThisTurn()) return;
-    const sNow = useLiveHostStore.getState();
-    if (isAnsweringBusy(sNow.answers, sNow.live)) return;
+    const answerInsertChecksPass = () => {
+      if (!stillOnThisTurn()) return false;
+      const s = useLiveHostStore.getState();
+      return !isAnsweringBusy(s.answers, s.live);
+    };
+    if (!answerInsertChecksPass()) return;
     if (nowFresh === null || !tryBeginBotAnswer(botAnswerGuard, key, nowFresh)) return;
     let outcome: BotAnswerInsertOutcome = "transient";
     try {
+      if (!(await ensureBotStagingAllowed())) return;
+      // 2026-10-10（レビュー対応）：安全確認(assertStagingOperationAllowed)の待機中に
+      // live/turn/回答状態が変わっている可能性があるため、INSERT直前に同じ条件を
+      // 再度確認する（待機前の確認だけでは古い状態のままINSERTしてしまう恐れがある）。
+      if (!answerInsertChecksPass()) return;
       const { error } = await bot.client.from("answers").insert({
         turn_id: turn.id,
         participant_id: bot.participantId,
@@ -1295,14 +1341,18 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
     const isPerfectRound = answerPerfectRoundIds.get(activeAnswer.id) ?? false;
     // insert 直前の再確認（P2）：凍結していない・同じ live/turn・表示中の回答が
     // 今も activeAnswer のまま・その scoresSnapshot が確認済み。
-    if (!stillOnThisTurn()) return;
-    const sNow = useLiveHostStore.getState();
-    if (!sNow.answers.some((a) => a.id === activeAnswer.id && a.revealed_at && !a.resolved)) {
-      return;
-    }
-    if (!scoresSnapshotMatches(sNow.scoresSnapshot, live.id, turn.id, activeAnswer.id)) {
-      return;
-    }
+    const scoreInsertChecksPass = () => {
+      if (!stillOnThisTurn()) return false;
+      const s = useLiveHostStore.getState();
+      if (!s.answers.some((a) => a.id === activeAnswer.id && a.revealed_at && !a.resolved)) return false;
+      return scoresSnapshotMatches(s.scoresSnapshot, live.id, turn.id, activeAnswer.id);
+    };
+    if (!scoreInsertChecksPass()) return;
+    if (!(await ensureBotStagingAllowed())) return;
+    // 2026-10-10（レビュー対応）：安全確認(assertStagingOperationAllowed)の待機中に
+    // live/turn/回答・採点状態が変わっている可能性があるため、INSERT直前に同じ条件を
+    // 再度確認する。
+    if (!scoreInsertChecksPass()) return;
     const { error } = await bot.client.from("scores").insert({
       answer_id: activeAnswer.id,
       judge_participant_id: bot.participantId,
@@ -1706,6 +1756,14 @@ async function advanceIfDue() {
       live: useLiveHostStore.getState().live,
       isFrozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true),
       callRpc: async (l) => {
+        const stagingCheck = await assertStagingOperationAllowed();
+        if (!stagingCheck.ok) {
+          console.error(
+            "[live] ステージング安全確認に失敗したため自動進行の書き込みを中止",
+            stagingCheck.reason,
+          );
+          return { data: null, error: stagingCheck.reason };
+        }
         const { data, error } = await supabase
           .rpc("host_advance_answering_to_group_result", {
             p_live_id: l.id,
@@ -1748,6 +1806,14 @@ async function advanceIfDue() {
     // 2026-09-25（0079対応）：締切はduration_msから生成させ、is_host()も
     // 要求しない（詳細は上のhost_advance_answering_to_group_result呼び出しの
     // コメント参照）。
+    const groupResultStagingCheck = await assertStagingOperationAllowed();
+    if (!groupResultStagingCheck.ok) {
+      console.error(
+        "[live] ステージング安全確認に失敗したため自動進行の書き込みを中止",
+        groupResultStagingCheck.reason,
+      );
+      return;
+    }
     const { data: advanceData, error: advanceError } = await supabase
       .rpc("host_advance_group_result_to_next", {
         p_live_id: live.id,
@@ -1793,6 +1859,14 @@ async function advanceIfDue() {
     // UPDATE、締切超過のサーバー確認なし）だった。締切をDBのnow()から生成し、
     // 締切超過をサーバー側で確認するSECURITY DEFINER RPCに置き換えた。
     // is_host()を要求しないため、観客・回答者側からの補助tickでも進められる。
+    const topicRevealStagingCheck = await assertStagingOperationAllowed();
+    if (!topicRevealStagingCheck.ok) {
+      console.error(
+        "[live] ステージング安全確認に失敗したため自動進行の書き込みを中止",
+        topicRevealStagingCheck.reason,
+      );
+      return;
+    }
     const { data: revealData, error: revealError } = await supabase
       .rpc("host_advance_topic_reveal_to_answering", {
         p_live_id: live.id,
@@ -1816,6 +1890,14 @@ async function advanceIfDue() {
     // 2026-09-25（0079対応）：以前は生のupdateLive（期待フェーズの確認すら無い
     // 単純UPDATE）だった。締切をDBのnow()から生成し、締切超過をサーバー側で
     // 確認するSECURITY DEFINER RPCに置き換えた。
+    const interludeStagingCheck = await assertStagingOperationAllowed();
+    if (!interludeStagingCheck.ok) {
+      console.error(
+        "[live] ステージング安全確認に失敗したため自動進行の書き込みを中止",
+        interludeStagingCheck.reason,
+      );
+      return;
+    }
     const { data: openingData, error: openingError } = await supabase
       .rpc("host_advance_interlude_to_opening", {
         p_live_id: live.id,
@@ -2294,6 +2376,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 「ライブの状態が別の操作によって変更されています」を返すだけでエラーには
   // ならない）。
   openReception: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live || live.current_phase !== "scheduled") {
       return {
@@ -2328,6 +2413,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 「（もう一度）ランダムに振り分ける」：旧confirmGroupingAndBeginの前半部分
   // （組分けのみ）。お題選定・turns作成・フェーズ遷移は行わない（beginGameへ分離）。
   randomizeGroups: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
 
@@ -2370,6 +2458,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
 
   // 参加者一覧の組選択プルダウンから呼ぶ、個別の手動組変更。即時保存。
   setParticipantGroup: async (participantId, groupId) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     // 2026-09-05:「参加者とグループを更新するRPC側にも
     // participant.live_idとgroup.live_idが同じという不変条件を追加する」対応。
     // 従来はここで直接participantsをupdateしており、DB側には別ライブの
@@ -2410,6 +2501,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 選んだ1件のtopic_bank行をここに渡す）。locked=true（既にturnsに紐づいて
   // 参加者へ公開済み）の場合の確認ダイアログはUI側の責務とする。
   changeTopicAssignment: async (topicId, entry) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { error } = await supabase
       .from("topics")
       .update({ body: entry.body, format: entry.format, topic_bank_id: entry.id })
@@ -2433,6 +2527,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   sendAnnouncement: async (message, scope) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const trimmed = message.trim();
@@ -2456,6 +2553,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   clearAnnouncement: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { error } = await updateLive(live.id, { announcement_message: null });
@@ -2469,6 +2569,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // 経由にし、送信時のadmin_action_logs記録もRPC内（同一トランザクション）で
   // 行うようにしたため、ここでのlogAdminAction呼び出しは不要になった。
   sendPrivateMessage: async (participantId, message) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const trimmed = message.trim();
@@ -2484,6 +2587,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   clearPrivateMessage: async (participantId) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { error } = await supabase.rpc("admin_set_participant_message", {
@@ -2497,6 +2603,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   kickParticipant: async (participantId) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     // 2026-09-04:「kick/unkickとeligible_judge_count更新を原子的にする」対応。
@@ -2529,6 +2638,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   unkickParticipant: async (participantId) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { data, error } = await supabase.rpc("unkick_participant", {
@@ -2558,6 +2670,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // から実際に再計算して書き換える（kick/unkickは原子化済みなので通常は不要だが、
   // 過去の不整合が残っている場合の修復用）。
   resyncEligibleJudgeCounts: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { data, error } = await supabase
@@ -2589,6 +2704,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   // (groupCount×ROUNDS_PER_LIVE_INITIAL)を再計算し、足りない分だけprepareLive()と
   // 同じ考え方(pickRandomTopicBankEntries)でtopic_bankから自動的に追加する。
   updateCapacity: async ({ maxPlayers, groupCount }) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     if (groupCount < 1) return { ok: false, reason: "組数は1以上にしてください" };
@@ -2807,6 +2925,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   setAccessRestricted: async (restricted) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: false, reason: "ライブがありません" };
     const { data, error } = await supabase
@@ -2821,6 +2942,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   closeLive: async () => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: true };
     // 2026-09-03:「closeLiveのポイント取りこぼし」対策。以前はlives更新と
@@ -2934,6 +3058,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   emergencyCloseLive: async (reason) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { live } = get();
     if (!live) return { ok: true };
     // 2026-09-25追加：進行中の任意フェーズから終了できる（final_resultへ
@@ -3033,6 +3160,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   },
 
   retryRankRewards: async (liveId: string) => {
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) return { ok: false, reason: stagingCheck.reason };
+
     const { data, error } = await supabase.rpc("retry_live_rank_rewards", { p_live_id: liveId }).single();
     if (error) return { ok: false, reason: error.message };
     const result = data as { rewards_applied: boolean; rewards_error: string | null };

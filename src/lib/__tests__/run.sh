@@ -261,6 +261,92 @@ else
 fi
 rm -rf "$HOST_CLOSE_DIR"
 
+# ステージング誤接続時の運営操作防止(assertStagingOperationAllowed)を、
+# useLiveHostStoreの全運営書き込み（openReception/setAccessRestricted/closeLive/
+# emergencyCloseLive/自動進行のtick）へ実際に呼び出して検証する。専用tsconfig経由。
+HOST_STAGING_GUARD_DIR="$(mktemp -d)"
+HOST_STAGING_GUARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.hostStagingGuard.json"
+HOST_STAGING_GUARD_ENTRY="$HOST_STAGING_GUARD_DIR/src/lib/__tests__/store/useLiveHostStoreStagingGuard.check.js"
+
+echo "--- useLiveHostStoreStagingGuard.check.ts ---"
+if npx tsc -p "$HOST_STAGING_GUARD_TSCONFIG" --outDir "$HOST_STAGING_GUARD_DIR" && [ -f "$HOST_STAGING_GUARD_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$HOST_STAGING_GUARD_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$HOST_STAGING_GUARD_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveHostStoreStagingGuard.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$HOST_STAGING_GUARD_DIR"
+
+# ステージング誤接続時の運営操作防止：useLiveFollowerStore.tsの観客側補助tick
+# （tickIfNeeded→advance_live_progress_if_due）へ実際に呼び出して検証する。専用tsconfig経由。
+FOLLOWER_STAGING_GUARD_DIR="$(mktemp -d)"
+FOLLOWER_STAGING_GUARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.followerStagingGuard.json"
+FOLLOWER_STAGING_GUARD_ENTRY="$FOLLOWER_STAGING_GUARD_DIR/src/lib/__tests__/store/useLiveFollowerStoreStagingGuard.check.js"
+
+echo "--- useLiveFollowerStoreStagingGuard.check.ts ---"
+if npx tsc -p "$FOLLOWER_STAGING_GUARD_TSCONFIG" --outDir "$FOLLOWER_STAGING_GUARD_DIR" && [ -f "$FOLLOWER_STAGING_GUARD_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$FOLLOWER_STAGING_GUARD_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$FOLLOWER_STAGING_GUARD_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveFollowerStoreStagingGuard.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$FOLLOWER_STAGING_GUARD_DIR"
+
+# ステージング誤接続時の運営操作防止：useLiveBotStore.addBots（ボットのログイン・
+# プロフィール更新・参加RPC）へ実際に呼び出して検証する。専用tsconfig経由。
+BOT_STAGING_GUARD_DIR="$(mktemp -d)"
+BOT_STAGING_GUARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.botStagingGuard.json"
+BOT_STAGING_GUARD_ENTRY="$BOT_STAGING_GUARD_DIR/src/lib/__tests__/store/useLiveBotStoreStagingGuard.check.js"
+
+echo "--- useLiveBotStoreStagingGuard.check.ts ---"
+if npx tsc -p "$BOT_STAGING_GUARD_TSCONFIG" --outDir "$BOT_STAGING_GUARD_DIR" && [ -f "$BOT_STAGING_GUARD_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$BOT_STAGING_GUARD_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$BOT_STAGING_GUARD_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveBotStoreStagingGuard.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$BOT_STAGING_GUARD_DIR"
+
+# ステージング誤接続時の運営操作防止：/live/host StagingTestersPanelが使う
+# grantStagingTester/revokeStagingTester（src/lib/stagingTesterActions.ts）へ
+# 実際に呼び出して検証する。専用tsconfig経由。
+TESTER_STAGING_GUARD_DIR="$(mktemp -d)"
+TESTER_STAGING_GUARD_TSCONFIG="$SCRIPT_DIR/store/tsconfig.stagingTesterActions.json"
+TESTER_STAGING_GUARD_ENTRY="$TESTER_STAGING_GUARD_DIR/src/lib/__tests__/store/stagingTesterActionsStagingGuard.check.js"
+
+echo "--- stagingTesterActionsStagingGuard.check.ts ---"
+if npx tsc -p "$TESTER_STAGING_GUARD_TSCONFIG" --outDir "$TESTER_STAGING_GUARD_DIR" && [ -f "$TESTER_STAGING_GUARD_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$TESTER_STAGING_GUARD_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$TESTER_STAGING_GUARD_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: stagingTesterActionsStagingGuard.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$TESTER_STAGING_GUARD_DIR"
+
 # 第3段階修正：host_add_next_roundを「組ごとに1件のお題」仕様へ変更したことに伴う、
 # useLiveHostStore.addNextRoundのp_topics(group_id/topic_body対応)配線検証。専用tsconfig経由。
 HOST_ADD_ROUND_DIR="$(mktemp -d)"

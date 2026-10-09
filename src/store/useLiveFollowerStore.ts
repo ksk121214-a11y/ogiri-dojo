@@ -19,6 +19,7 @@ import {
 } from "@/lib/liveRoomSelectors";
 import { isGuestUser } from "@/lib/guestStatus";
 import { runSingleFlight, type SingleFlightLock } from "@/lib/singleFlight";
+import { assertStagingOperationAllowed } from "@/lib/stagingEnv";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { supabase } from "@/lib/supabase";
@@ -1065,6 +1066,14 @@ export const useLiveFollowerStore = create<LiveFollowerState>()((set, get) => ({
       if (!isMyGenCurrent()) return;
       const live = useLiveFollowerStore.getState().live;
       if (!live) return;
+      // ステージング誤接続防止：観客側の補助tickも運営操作に準じる自動書き込み
+      // （advance_live_progress_if_due）のため、本体RPCの前に確認する。参加・回答・
+      // 採点等の通常のユーザー操作は対象に含めない（この関数はそれらを呼ばない）。
+      const tickStagingCheck = await assertStagingOperationAllowed();
+      if (!tickStagingCheck.ok) {
+        console.warn("[live] ステージング安全確認に失敗したため補助tickを中止", tickStagingCheck.reason);
+        return;
+      }
       let result: AdvanceLiveProgressResult | null = null;
       try {
         const { data, error } = await supabase

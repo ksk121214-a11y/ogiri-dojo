@@ -199,12 +199,36 @@ const count = (needle: string) => src.split(needle).length - 1;
     "runBotBehavior が botScoringAllowed（scores同期中はボット採点しない）を使っていない",
   );
   assert.ok(/if \(!activeAnswer \|\| !botScoringOk\) return;/.test(fn[0]), "ボット採点分岐が botScoringOk でガードされていない");
+  // 2026-10-10（レビュー対応）：ensureBotStagingAllowed()（ステージング誤接続防止の
+  // 安全確認）の待機中にlive/turn/回答状態が変わる可能性があるため、再確認は
+  // answerInsertChecksPass/scoreInsertChecksPassという関数へまとめ、ガード前
+  // （tryBeginBotAnswer等の同期的な排他確保の前）とガード後（INSERT直前）の
+  // 両方で呼ぶ構成に変更した。以前の「if (!stillOnThisTurn()) return;」という
+  // 単発の直書きは、この2関数の定義内（それぞれ1箇所ずつ、returnはfalse）に
+  // 置き換わっている。
   assert.ok(
-    /if \(!stillOnThisTurn\(\)\) return;/.test(fn[0]) && count("if (!stillOnThisTurn()) return;") >= 2,
-    "Promise.all 内の insert 直前に stillOnThisTurn()（insertGuardPasses）再確認が無い",
+    /const answerInsertChecksPass = \(\) => \{[\s\S]*?if \(!stillOnThisTurn\(\)\) return false;/.test(fn[0]),
+    "answerInsertChecksPassがstillOnThisTurn()で再確認していない",
   );
   assert.ok(
-    /if \(\s*\n?\s*!scoresSnapshotMatches\(sNow\.scoresSnapshot, live\.id, turn\.id, activeAnswer\.id\)\s*\n?\s*\)/.test(fn[0]),
+    /const scoreInsertChecksPass = \(\) => \{[\s\S]*?if \(!stillOnThisTurn\(\)\) return false;/.test(fn[0]),
+    "scoreInsertChecksPassがstillOnThisTurn()で再確認していない",
+  );
+  const answerChecksCallCount = (fn[0].match(/answerInsertChecksPass\(\)/g) ?? []).length;
+  assert.equal(
+    answerChecksCallCount,
+    2,
+    `answerInsertChecksPass()の呼び出しが2回（安全確認の前と、INSERT直前の再確認）の想定と異なる(${answerChecksCallCount}回)`,
+  );
+  const scoreChecksCallCount = (fn[0].match(/scoreInsertChecksPass\(\)/g) ?? []).length;
+  assert.equal(
+    scoreChecksCallCount,
+    2,
+    `scoreInsertChecksPass()の呼び出しが2回（安全確認の前と、INSERT直前の再確認）の想定と異なる(${scoreChecksCallCount}回)`,
+  );
+  assert.ok(
+    /if \(\s*\n?\s*!scoresSnapshotMatches\(s\.scoresSnapshot, live\.id, turn\.id, activeAnswer\.id\)\s*\n?\s*\)/.test(fn[0]) ||
+      /return scoresSnapshotMatches\(s\.scoresSnapshot, live\.id, turn\.id, activeAnswer\.id\);/.test(fn[0]),
     "ボット採点 insert 直前の scoresSnapshot 再確認が無い（必須10）",
   );
   console.log("PASS: 配線-9（runBotBehavior: 同期中は回答/採点insertしない＋insert直前の再確認）");

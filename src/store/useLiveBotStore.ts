@@ -7,6 +7,7 @@ import { BOT_NAMES } from "@/data/liveDemoData";
 import { createBotClient, type BotSession } from "@/lib/liveBotClients";
 import type { ParticipantRow } from "@/lib/liveRoomTypes";
 import { getParticipantAvatarColor, getParticipantAvatarIconId } from "@/lib/participantAvatar";
+import { assertStagingOperationAllowed } from "@/lib/stagingEnv";
 
 // ライブ終了処理を止めないための、ボットのログアウト待ちの上限。
 export const BOT_LOGOUT_TIMEOUT_MS = 2_000;
@@ -31,6 +32,14 @@ export const useLiveBotStore = create<LiveBotState>()((set, get) => ({
 
   addBots: async (liveId, credentials) => {
     set({ loading: true, error: null });
+    // ステージング誤接続防止：ボットのログイン・プロフィール更新・参加RPCは
+    // いずれも運営操作に準じる書き込みのため、最初の書き込み（ログイン）より
+    // 前に確認する。失敗時はログイン・プロフィール更新・参加登録を一切行わない。
+    const stagingCheck = await assertStagingOperationAllowed();
+    if (!stagingCheck.ok) {
+      set({ loading: false, error: stagingCheck.reason ?? "ステージング安全確認に失敗しました" });
+      return;
+    }
     const usedNames = new Set(get().bots.map((b) => b.displayName));
     const availableNames = BOT_NAMES.filter((n) => !usedNames.has(n));
     const newBots: BotSession[] = [];
