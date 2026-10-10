@@ -58,8 +58,13 @@ export default function SnsLiveResultsFeedList() {
           </p>
           {summary.podiumNames.length > 0 && (
             <p className="flex flex-wrap gap-x-3 font-sans text-sm text-[var(--ink)]/85">
-              {summary.podiumNames.map(({ rank, name }) => (
-                <span key={rank}>
+              {/* 同順位タイで複数人いる場合にkeyが重複しないよう、rankだけでなく
+                  participantId（本人識別用）も組み合わせる。通常のデータでは同じ
+                  参加者が複数の順位に出ることは無い想定だが、運営の差し替えや
+                  データ不整合が起きた場合でもkeyの衝突を構造的に防ぐため、
+                  participantId単独ではなく`${rank}:${participantId}`を使う。 */}
+              {summary.podiumNames.map(({ rank, participantId, name }) => (
+                <span key={`${rank}:${participantId}`}>
                   {rank}位：{name}
                 </span>
               ))}

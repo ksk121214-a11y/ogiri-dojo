@@ -23,11 +23,17 @@ export const ENACTED_ON = "2026年9月25日";
 // terms_consentsに実際の同意記録があるため、改定なし扱いにはしない。TERMS_VERSIONも
 // 同時に更新しConsentRequiredGateが既存利用者・既存ゲストへ再同意を促す、
 // supabase/migrations/0083のcurrent_legal_document_versions参照）。
-export const TERMS_LAST_REVISED_ON: string | null = "2026年9月28日";
+// 2026-10-10：第6条（ライブ結果へのコメントを本人が削除できるようにする実質改定）
+// に伴い、利用規約もこの回から改定日を更新する（本人削除機能なし→ありへの変更。
+// supabase/migrations/0088のcurrent_legal_document_versions参照）。
+export const TERMS_LAST_REVISED_ON: string | null = "2026年10月10日";
 // 2026-09-28（プロフィール公開情報の説明改定に続く2回目の改定）：公式SNS等への
 // 掲載対象・目的・利用態様の拡張に伴い、プライバシーポリシーも同日付であわせて
 // 改定する（利用規約と同じ改定なので同じ日付を使う）。
-export const PRIVACY_LAST_REVISED_ON: string | null = "2026年9月28日";
+// 2026-10-10：保存期間セクション（ライブ結果コメントの本人削除機能追加）に伴い、
+// プライバシーポリシーもこの回から改定日を更新する（利用規約と同じ改定なので
+// 同じ日付を使う）。
+export const PRIVACY_LAST_REVISED_ON: string | null = "2026年10月10日";
 
 // mailtoリンクに件名を付ける場合、日本語件名は必ずencodeURIComponentで
 // パーセントエンコードしてからクエリに載せる（生の日本語文字列をURLへ
@@ -50,10 +56,13 @@ export const ACCOUNT_DELETION_MAIL_SUBJECT = "爆笑スタジアム アカウン
 // 再同意が必要かどうかの判定に使う。src/store/useConsentGateStore.ts参照）。
 // 2026-09-28：第8条（公式SNS等への掲載）を公式Xアカウントのみから公式SNS・動画
 // 配信サービスへの短尺動画掲載まで広げる実質改定に伴い更新。
-// supabase/migrations/0083のcurrent_legal_document_versions()と必ず同じ値にする
-// （src/lib/__tests__/legalPagesWiring.check.tsが一致を検査する）。
-export const TERMS_VERSION = "2026-09-28-v2";
+// 2026-10-10：ライブ結果コメントを本人が削除できるようにする実質改定に伴いさらに
+// 更新。supabase/migrations/0088のcurrent_legal_document_versions()と必ず同じ値にする
+// （src/lib/__tests__/legalPagesWiring.check.tsが一致を検査する。0083自身の定義は
+// 当時の値のまま編集していない）。
+export const TERMS_VERSION = "2026-10-10-v3";
 // 2026-09-28：プロフィール公開情報の説明改定（v2）に続き、公式SNS等への掲載対象・
 // 目的・利用態様の拡張に伴いさらに更新。
-// supabase/migrations/0083のcurrent_legal_document_versions()と必ず同じ値にする。
-export const PRIVACY_VERSION = "2026-09-28-v3";
+// 2026-10-10：ライブ結果コメントを本人が削除できるようにする実質改定に伴いさらに
+// 更新。supabase/migrations/0088のcurrent_legal_document_versions()と必ず同じ値にする。
+export const PRIVACY_VERSION = "2026-10-10-v4";

@@ -9,6 +9,7 @@ import XShareButton from "@/components/app/XShareButton";
 import { HeartGlyph } from "@/components/home/icons";
 import stadiumStyles from "@/components/home/StadiumHome.module.css";
 import SnsAuthorBadge from "@/components/sns/SnsAuthorBadge";
+import LiveResultCommentDeleteButton from "@/components/sns/LiveResultCommentDeleteButton";
 import { isOwnAuthorId, reportTargetAuthorId } from "@/lib/reportSubmit";
 import { APP_NAME } from "@/lib/appInfo";
 import { useSnsAccess } from "@/lib/useSnsAccess";
@@ -74,9 +75,29 @@ export default function SnsLiveResultBody({
         <section className="flex flex-col gap-3">
           <h2 className="font-sans text-sm font-bold text-[var(--ink)]">1〜3位 最高得点回答</h2>
           {detail.podium.map((group) => (
-            <div key={group.rank} className="flex flex-col gap-2">
-              {group.cards.map((card) => (
-                <LiveResultCard key={card.resultAnswerId} card={card} rank={group.rank} readOnly={readOnly} />
+            <div key={group.rank} className="flex flex-col gap-3">
+              {/* 参加者ブロックの境界：2人目以降は上に区切り線を入れて、同順位タイの
+                  複数参加者が混ざらないことを画面上でも分かるようにする。 */}
+              {group.participants.map((participant, participantIndex) => (
+                <div
+                  key={participant.participantId}
+                  className={`flex flex-col gap-2 ${
+                    participantIndex > 0 ? "border-t border-dashed border-[var(--ink)]/15 pt-3" : ""
+                  }`}
+                >
+                  {/* お題ブロックの境界：同じ参加者が複数のお題を持つ場合、2つ目以降に
+                      小さな上マージンを入れる（お題が混ざらないことの最小限の視覚区切り）。 */}
+                  {participant.topics.map((topicGroup, topicIndex) => (
+                    <div
+                      key={topicGroup.topicId ?? `no-topic-${topicIndex}`}
+                      className={`flex flex-col gap-2 ${topicIndex > 0 ? "mt-1" : ""}`}
+                    >
+                      {topicGroup.cards.map((card) => (
+                        <LiveResultCard key={card.resultAnswerId} card={card} rank={group.rank} readOnly={readOnly} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
               ))}
             </div>
           ))}
@@ -131,8 +152,17 @@ function LiveResultCard({
   const [commentBody, setCommentBody] = useState("");
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  // カード本文クリックでコメント欄を開閉できるようにする（item 4）。いいね・
+  // コメントボタン・投稿者プロフィール・通報・削除・textarea・コメント送信等の
+  // 操作部品は、それぞれ自前でe.stopPropagation()するため、ここまでは伝播しない。
+  const handleCardClick = () => {
+    if (readOnly) return;
+    setCommentsOpen((v) => !v);
+  };
+
   const handleToggleLike = async (e: MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     if (readOnly || likePending) return;
     setLikePending(true);
     setLikeError(null);
@@ -158,9 +188,10 @@ function LiveResultCard({
 
   return (
     <div
+      onClick={readOnly ? undefined : handleCardClick}
       className={`${stadiumStyles.surfaceLight} relative flex flex-col gap-2 p-4 text-[var(--ink)] sm:p-5 ${
         rank ? RANK_BORDER[rank] : ""
-      }`}
+      } ${readOnly ? "" : "cursor-pointer"}`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
         {card.labels.map((label) => (
@@ -173,7 +204,10 @@ function LiveResultCard({
         ))}
         <span className="ml-auto font-sans text-xs font-bold text-[var(--ink)]/70">{card.score}点</span>
       </div>
-      <SnsAuthorBadge authorId={card.authorId} hideReportButton />
+      {/* 投稿者プロフィールへのリンクを踏んだ場合にカードの開閉を誤発火させない。 */}
+      <div onClick={(e) => e.stopPropagation()} className="contents">
+        <SnsAuthorBadge authorId={card.authorId} hideReportButton />
+      </div>
       {card.topicBody && (
         <p className="w-fit rounded-full bg-[var(--ink)]/10 px-2.5 py-1 font-sans text-[10px] font-bold text-[var(--ink)]">
           お題：{card.topicBody}
@@ -216,16 +250,24 @@ function LiveResultCard({
             )}
             <button
               type="button"
-              onClick={() => setCommentsOpen((v) => !v)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCommentsOpen((v) => !v);
+              }}
               className="font-sans text-xs font-bold text-[var(--ink)]/70 hover:text-[var(--ink)]"
             >
-              コメント {card.commentCount}件
+              {/* 2026-10-10：card.commentCountは取得時点の固定値のため、コメント追加/削除を
+                  即時反映できるよう、キャッシュから数え直した件数(cardComments.length)を表示する。 */}
+              コメント {cardComments.length}件
             </button>
             {likeError && <span className="font-sans text-[11px] font-bold text-[var(--accent-on-light)]">{likeError}</span>}
           </div>
 
           {commentsOpen && (
-            <div className="flex flex-col gap-2 border-t border-[var(--ink)]/10 pt-2">
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="flex flex-col gap-2 border-t border-[var(--ink)]/10 pt-2"
+            >
               {cardComments.length === 0 && (
                 <p className="font-sans text-[11px] text-[var(--ink)]/75">まだコメントがありません。</p>
               )}
@@ -241,7 +283,14 @@ function LiveResultCard({
                     </span>
                   </div>
                   <p className="font-sans text-sm text-[var(--ink)]">{comment.body}</p>
-                  {!isOwnAuthorId(comment.authorId) && (
+                  {isOwnAuthorId(comment.authorId) ? (
+                    // 自分のコメントだけにゴミ箱の削除ボタンを表示する（他人のコメントには
+                    // 従来どおり通報ボタンを表示する。下のelse分岐）。
+                    <LiveResultCommentDeleteButton
+                      className="absolute right-2 top-1/2 -translate-y-1/2"
+                      commentId={comment.id}
+                    />
+                  ) : (
                     <ReportButton
                       className="absolute right-2 top-1/2 -translate-y-1/2"
                       targetType="live_result_comment"

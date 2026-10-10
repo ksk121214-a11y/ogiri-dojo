@@ -79,8 +79,19 @@ async function main() {
   assert.ok(/この内容はすでに通報済みです。/.test(btn) && /result === "duplicate"[\s\S]*?setReported\(true\)/.test(btn), "23505の表示・通報済み化がない");
   assert.ok(/mounted\.current/.test(btn) && /aria-busy=\{submitting\}/.test(btn), "アンマウント対策または送信中表示がない");
   const body = readFileSync(join(process.cwd(), "src", "components", "sns", "SnsLiveResultBody.tsx"), "utf8");
-  assert.ok(/!isOwnAuthorId\(comment\.authorId\) && \(\s*<ReportButton/.test(body), "自分のライブ結果コメントに通報ボタンが出る");
-  assert.ok(!/DeleteButton/.test(body), "ライブ結果コメントに削除ボタンを追加してはいけない");
+  // 2026-10-10（仕様変更）：ライブ結果コメントも本人は削除できるようになった。
+  // 「本人は削除ボタン、他人は通報ボタン」の出し分けを確認する（旧仕様の
+  // 「削除ボタンを追加してはいけない」検査は、新仕様に合わせて削除した）。
+  assert.ok(
+    /import LiveResultCommentDeleteButton from "@\/components\/sns\/LiveResultCommentDeleteButton";/.test(body),
+    "SnsLiveResultBody.tsxがLiveResultCommentDeleteButtonをimportしていない",
+  );
+  assert.ok(
+    /isOwnAuthorId\(comment\.authorId\)\s*\?\s*\(\s*(?:\/\/[^\n]*\n\s*)*<LiveResultCommentDeleteButton/.test(body),
+    "自分のライブ結果コメントに削除ボタンが出ない",
+  );
+  assert.ok(/\)\s*:\s*\(\s*<ReportButton/.test(body), "他人のライブ結果コメントに通報ボタンが出ない");
+  console.log("PASS: ライブ結果コメントは本人なら削除ボタン・他人なら通報ボタンが出る");
   console.log("PASS: 通報送信（重複クリック1回・23505は通報済み・通常エラーは再試行可・例外でもロック解除）とtarget_author_idのUUID検査");
 }
 main().catch((e) => {

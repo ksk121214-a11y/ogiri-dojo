@@ -21,7 +21,9 @@ import type {
   SnsLiveResultComment,
   SnsLiveResultDetail,
   SnsLiveResultLabel,
+  SnsLiveResultParticipantGroup,
   SnsLiveResultSummary,
+  SnsLiveResultTopicGroup,
 } from "@/types/snsLiveResults";
 
 const PAGE_SIZE = 10;
@@ -112,9 +114,45 @@ interface LiveResultAnswerRow {
   rank: 1 | 2 | 3 | null;
   included: boolean;
   likes: number;
+  created_at: string;
 }
 
 type ActionResult = { ok: true } | { ok: false; message?: string };
+
+// 結果データに記録された保存順（created_at）で安定ソートする。同じcreated_atの
+// 場合はidで最終的に安定化する（Supabaseの暗黙の返却順には依存しない）。
+function stableSortByCreatedAt<T extends { id: string; created_at: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
+// 指定したresultAnswerIdのカードを構造的に持つ（podium/managerBest/perfectの
+// いずれかに実際に含む）detailのliveResultId(=detail.id)を探す。addComment/
+// deleteComment成功時に、どのsummary.commentCountを更新すべきかを決めるために使う。
+// detail.comments（コメント一覧）は複数のdetailへ同じresultAnswerId宛てで
+// ブロードキャストされる場合があるため、「どのdetailのcommentsに値が入っているか」
+// ではなく「どのdetailが実際にそのカードを持っているか」で判定する（同じ回答が
+// 順位・運営ベスト・満点に重複表示されても、カードの実体は1つのdetailにしか
+// 属さないため、二重集計にならない）。
+function findOwningLiveResultId(
+  details: Record<string, SnsLiveResultDetail>,
+  resultAnswerId: string,
+): string | null {
+  for (const detail of Object.values(details)) {
+    for (const group of detail.podium) {
+      for (const participant of group.participants) {
+        for (const topic of participant.topics) {
+          if (topic.cards.some((c) => c.resultAnswerId === resultAnswerId)) return detail.id;
+        }
+      }
+    }
+    if (detail.managerBest?.resultAnswerId === resultAnswerId) return detail.id;
+    if (detail.perfect.some((c) => c.resultAnswerId === resultAnswerId)) return detail.id;
+  }
+  return null;
+}
 
 interface SnsLiveResultsState {
   summaries: SnsLiveResultSummary[];
@@ -128,6 +166,9 @@ interface SnsLiveResultsState {
   likedResultAnswerIds: string[];
   likePending: Record<string, boolean>;
   commentPending: Record<string, boolean>;
+  // 削除中のコメントID（連打・二重実行防止用。commentIdキー＝1つのコメントに
+  // 対し同時に1本だけRPCを実行する）。
+  commentDeletePending: Record<string, boolean>;
   // 2026-09-13（再々レビュー対応）：認証userIdが変わるたびに+1する世代カウンター。
   // detailsのauthorId="me"変換・commentsの「me」判定・likedResultAnswerIdsは
   // 「誰が見ているか」に依存する値のため、取得中に別の利用者へ切り替わっていたら
@@ -141,6 +182,8 @@ interface SnsLiveResultsState {
   fetchDetail: (liveResultId: string, force?: boolean) => Promise<void>;
   toggleLike: (resultAnswerId: string) => Promise<ActionResult>;
   addComment: (resultAnswerId: string, body: string) => Promise<ActionResult>;
+  // 自分のライブ結果コメントだけを削除できる（寄合帳のsns_commentsと同じ論理削除）。
+  deleteComment: (commentId: string) => Promise<ActionResult>;
 }
 
 // 公開済みライブ一覧（ended_at降順）をPAGE_SIZE件取得し、sns_live_results・要約値
@@ -183,10 +226,12 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
 
   const { data: raData } = await supabase
     .from("sns_live_result_answers")
-    .select("id, live_result_id, answer_id, rank, included, likes")
+    .select("id, live_result_id, answer_id, rank, included, likes, created_at")
     .eq("included", true)
-    .in("live_result_id", resultIds);
-  const resultAnswers = (raData ?? []) as LiveResultAnswerRow[];
+    .in("live_result_id", resultIds)
+    .order("created_at", { ascending: true });
+  // Supabaseの暗黙の返却順には依存せず、結果データの保存順(created_at→id)で明示的に安定化する。
+  const resultAnswers = stableSortByCreatedAt((raData ?? []) as LiveResultAnswerRow[]);
   const answerIds = resultAnswers.map((ra) => ra.answer_id);
 
   const { data: answersData } = answerIds.length
@@ -194,9 +239,9 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
     : { data: [] as { id: string; participant_id: string; judge_count: number; top_score_votes: number }[] };
   const answerById = new Map((answersData ?? []).map((a) => [a.id, a]));
 
-  // 1〜3位の代表回答のプレイヤー名解決用。rankが同じ行は必ず同一プレイヤーのため
-  // （タイは「そのプレイヤー自身の複数回答が同点」の意味で、順位を複数人が共有することはない）、
-  // 順位ごとに代表行を1つ選べば十分。
+  // 1〜3位の代表回答のプレイヤー名解決用。同じrankを複数の異なる参加者が共有する
+  // （同順位タイ）ことは実際にあり得るため、rankごとの行を全て対象にする
+  // （以前はrankごとに最初の1行しか見ておらず、タイの一部が一覧から漏れていた）。
   const podiumRows = resultAnswers.filter((ra) => ra.rank !== null);
   const podiumParticipantIds = [
     ...new Set(podiumRows.map((ra) => answerById.get(ra.answer_id)?.participant_id).filter((v): v is string => !!v)),
@@ -241,14 +286,21 @@ async function fetchSummaryPage(beforeEndedAt: string | null): Promise<{
       const result = results.find((r) => r.live_id === live.id);
       if (!result) return null;
       const ownRows = resultAnswers.filter((ra) => ra.live_result_id === result.id);
-      const podiumNames = ([1, 2, 3] as const)
-        .map((rank) => {
-          const row = ownRows.find((ra) => ra.rank === rank);
-          const participantId = row ? answerById.get(row.answer_id)?.participant_id : undefined;
-          if (!participantId) return null;
-          return { rank, name: nameOfParticipant(participantId) };
-        })
-        .filter((v): v is { rank: 1 | 2 | 3; name: string } => v !== null);
+      // 1〜3位に該当する全参加者を表示する（同順位タイも全員）。同じ参加者の代表回答が
+      // 複数件あっても、参加者名は1回だけ（最初に出現した行の分だけ）表示する。
+      // ownRowsは既にresultAnswers（stableSortByCreatedAt済み）のfilterなので、
+      // ここでの出現順＝結果データに記録された安定した保存順のまま。
+      const podiumNames: { rank: 1 | 2 | 3; participantId: string; name: string }[] = [];
+      for (const rank of [1, 2, 3] as const) {
+        const seenParticipantIds = new Set<string>();
+        for (const ra of ownRows) {
+          if (ra.rank !== rank) continue;
+          const participantId = answerById.get(ra.answer_id)?.participant_id;
+          if (!participantId || seenParticipantIds.has(participantId)) continue;
+          seenParticipantIds.add(participantId);
+          podiumNames.push({ rank, participantId, name: nameOfParticipant(participantId) });
+        }
+      }
       const perfectCount = ownRows.filter((ra) => {
         const a = answerById.get(ra.answer_id);
         return a && a.judge_count > 0 && a.top_score_votes === a.judge_count;
@@ -286,6 +338,7 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
   likedResultAnswerIds: [],
   likePending: {},
   commentPending: {},
+  commentDeletePending: {},
   generation: 0,
 
   init: async () => {
@@ -359,10 +412,12 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
 
     const { data: raData } = await supabase
       .from("sns_live_result_answers")
-      .select("id, live_result_id, answer_id, rank, included, likes")
+      .select("id, live_result_id, answer_id, rank, included, likes, created_at")
       .eq("live_result_id", liveResultId)
-      .eq("included", true);
-    const resultAnswers = (raData ?? []) as LiveResultAnswerRow[];
+      .eq("included", true)
+      .order("created_at", { ascending: true });
+    // Supabaseの暗黙の返却順には依存せず、結果データの保存順(created_at→id)で明示的に安定化する。
+    const resultAnswers = stableSortByCreatedAt((raData ?? []) as LiveResultAnswerRow[]);
     const answerIds = resultAnswers.map((ra) => ra.answer_id);
 
     const { data: answersData } = answerIds.length
@@ -444,13 +499,17 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
     const buildCard = (ra: LiveResultAnswerRow, labels: SnsLiveResultLabel[]): SnsLiveResultAnswerCard | null => {
       const answer = answerById.get(ra.answer_id);
       if (!answer) return null;
+      const topicId = topicIdByTurnId.get(answer.turn_id) ?? null;
       return {
         resultAnswerId: ra.id,
         answerId: ra.answer_id,
         authorId: authorIdOf(answer.participant_id),
-        topicBody: topicBodyById.get(topicIdByTurnId.get(answer.turn_id) ?? "") ?? null,
+        participantId: answer.participant_id,
+        topicId,
+        topicBody: topicId ? topicBodyById.get(topicId) ?? null : null,
         body: answer.body,
         score: answer.score_total,
+        createdAt: ra.created_at,
         labels,
         likes: ra.likes,
         liked: likedIds.includes(ra.id),
@@ -463,21 +522,58 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
       return !!a && a.judge_count > 0 && a.top_score_votes === a.judge_count;
     };
 
-    const podium: { rank: 1 | 2 | 3; cards: SnsLiveResultAnswerCard[] }[] = [1, 2, 3]
-      .map((rank) => {
-        const rows = resultAnswers.filter((ra) => ra.rank === rank);
-        const cards = rows
-          .map((ra) => {
-            const labels: SnsLiveResultLabel[] = [
-              rank === 1 ? "rank1" : rank === 2 ? "rank2" : "rank3",
-            ];
-            if (isPerfect(ra)) labels.push("perfect");
-            return buildCard(ra, labels);
-          })
-          .filter((c): c is SnsLiveResultAnswerCard => c !== null);
-        return { rank: rank as 1 | 2 | 3, cards };
-      })
-      .filter((g) => g.cards.length > 0);
+    // 「1〜3位 最高得点回答」の表示順：順位(1→2→3) → 参加者ごとのブロック →
+    // お題ごとのブロック(合計点の高い順) → ブロック内はscore降順、の階層で組み立てる。
+    // resultAnswersは既にcreated_at→idで安定ソート済みのため、以下のMapへの
+    // 挿入順（＝最初に出現した順）そのものが「結果データに記録された安定した順序」になる。
+    const podium: { rank: 1 | 2 | 3; participants: SnsLiveResultParticipantGroup[] }[] = [];
+    for (const rank of [1, 2, 3] as const) {
+      const label: SnsLiveResultLabel = rank === 1 ? "rank1" : rank === 2 ? "rank2" : "rank3";
+      const rankRows = resultAnswers.filter((ra) => ra.rank === rank);
+      if (rankRows.length === 0) continue;
+
+      const rowsByParticipant = new Map<string, LiveResultAnswerRow[]>();
+      for (const ra of rankRows) {
+        const answer = answerById.get(ra.answer_id);
+        if (!answer) continue;
+        const list = rowsByParticipant.get(answer.participant_id);
+        if (list) list.push(ra);
+        else rowsByParticipant.set(answer.participant_id, [ra]);
+      }
+
+      const participants: SnsLiveResultParticipantGroup[] = [];
+      for (const [participantId, rows] of rowsByParticipant) {
+        const rowsByTopic = new Map<string | null, LiveResultAnswerRow[]>();
+        for (const ra of rows) {
+          const answer = answerById.get(ra.answer_id);
+          const topicId = answer ? topicIdByTurnId.get(answer.turn_id) ?? null : null;
+          const list = rowsByTopic.get(topicId);
+          if (list) list.push(ra);
+          else rowsByTopic.set(topicId, [ra]);
+        }
+
+        const topics: SnsLiveResultTopicGroup[] = [];
+        for (const [topicId, topicRows] of rowsByTopic) {
+          const cards = topicRows
+            .map((ra) => buildCard(ra, isPerfect(ra) ? [label, "perfect"] : [label]))
+            .filter((c): c is SnsLiveResultAnswerCard => c !== null)
+            // score降順。Array.sortは安定ソートのため、同点時は元の(created_at→id)順を保つ。
+            .sort((a, b) => b.score - a.score);
+          if (cards.length === 0) continue;
+          topics.push({
+            topicId,
+            topicBody: cards[0].topicBody,
+            totalScore: cards.reduce((sum, c) => sum + c.score, 0),
+            cards,
+          });
+        }
+        if (topics.length === 0) continue;
+        // お題ブロックは合計点の高い順。同点時は出現順（結果データの保存順）を保つ。
+        topics.sort((a, b) => b.totalScore - a.totalScore);
+        participants.push({ participantId, authorId: topics[0].cards[0].authorId, topics });
+      }
+      if (participants.length > 0) podium.push({ rank, participants });
+    }
 
     const managerBestRow = result.manager_best_answer_id
       ? resultAnswers.find((ra) => ra.answer_id === result.manager_best_answer_id)
@@ -551,9 +647,15 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
               ...detail,
               podium: detail.podium.map((g) => ({
                 ...g,
-                cards: g.cards.map((c) =>
-                  c.resultAnswerId === resultAnswerId ? { ...c, likes: Math.max(0, c.likes + delta) } : c,
-                ),
+                participants: g.participants.map((p) => ({
+                  ...p,
+                  topics: p.topics.map((t) => ({
+                    ...t,
+                    cards: t.cards.map((c) =>
+                      c.resultAnswerId === resultAnswerId ? { ...c, likes: Math.max(0, c.likes + delta) } : c,
+                    ),
+                  })),
+                })),
               })),
               managerBest:
                 detail.managerBest?.resultAnswerId === resultAnswerId
@@ -663,7 +765,78 @@ export const useSnsLiveResultsStore = create<SnsLiveResultsState>()((set, get) =
           comments: { ...detail.comments, [resultAnswerId]: [...list, comment] },
         };
       }
-      return { details };
+      // 一覧(summaries)のcommentCountも、詳細のcardComments.lengthと同じ数へ即時
+      // 同期させる（1回の投稿につき1回だけ+1。カードがpodium/managerBest/perfectに
+      // 重複表示されていても、所属するlive結果は1つなので二重に増えない）。
+      const liveResultId = findOwningLiveResultId(s.details, resultAnswerId);
+      const summaries = liveResultId
+        ? s.summaries.map((sum) =>
+            sum.id === liveResultId ? { ...sum, commentCount: sum.commentCount + 1 } : sum,
+          )
+        : s.summaries;
+      return { details, summaries };
+    });
+    return { ok: true };
+  },
+
+  deleteComment: async (commentId) => {
+    const authUser = useAuthStore.getState().user;
+    if (!authUser?.id) return { ok: false, message: "削除するにはログインが必要です。" };
+    // 連打・二重実行防止：同じコメントIDに対して同時に1本だけRPCを実行する。
+    if (get().commentDeletePending[commentId]) return { ok: false };
+    // await中に別ユーザーへ切り替わっていたら、遅れて届いたこの削除結果を
+    // 新しい利用者のstateへ反映しない（addComment/toggleLikeと同じ世代ガード）。
+    const myGeneration = get().generation;
+    set((s) => ({ commentDeletePending: { ...s.commentDeletePending, [commentId]: true } }));
+
+    const { error } = await supabase.rpc("delete_own_sns_live_result_comment", { p_comment_id: commentId });
+
+    if (get().generation !== myGeneration) {
+      // 所有権（世代）を失った処理は、pendingの解除も含めて一切stateを変更しない
+      // （resetForUserSwitch側で既にcommentDeletePendingは空にされている）。
+      return { ok: false };
+    }
+
+    set((s) => {
+      const rest = { ...s.commentDeletePending };
+      delete rest[commentId];
+      return { commentDeletePending: rest };
+    });
+
+    if (error) {
+      console.warn("[snsLiveResults] コメントの削除に失敗", error);
+      return { ok: false, message: "削除に失敗しました。もう一度お試しください。" };
+    }
+
+    // 成功時だけ、キャッシュ済みの全detailsから対象コメントを即時除去する
+    // （失敗時はここに到達しないため、表示・件数は変更されない）。
+    set((s) => {
+      const details = { ...s.details };
+      // 対象コメントが実際にどのresultAnswerId宛てだったかを記録する（ローカル
+      // stateに存在しなかった場合はnullのまま＝一覧のcommentCountも減らさない）。
+      let foundResultAnswerId: string | null = null;
+      for (const [id, detail] of Object.entries(details)) {
+        let changed = false;
+        const comments = { ...detail.comments };
+        for (const [raId, list] of Object.entries(comments)) {
+          if (!list.some((c) => c.id === commentId)) continue;
+          comments[raId] = list.filter((c) => c.id !== commentId);
+          changed = true;
+          foundResultAnswerId = raId;
+        }
+        if (changed) details[id] = { ...detail, comments };
+      }
+      // 一覧(summaries)のcommentCountも、1件削除につき1回だけ-1する（0未満にはしない。
+      // ローカルに存在しなかった場合はfoundResultAnswerIdがnullのまま＝変更しない）。
+      const liveResultId = foundResultAnswerId
+        ? findOwningLiveResultId(s.details, foundResultAnswerId)
+        : null;
+      const summaries = liveResultId
+        ? s.summaries.map((sum) =>
+            sum.id === liveResultId ? { ...sum, commentCount: Math.max(0, sum.commentCount - 1) } : sum,
+          )
+        : s.summaries;
+      return { details, summaries };
     });
     return { ok: true };
   },
@@ -707,6 +880,7 @@ if (typeof window !== "undefined") {
       likedResultAnswerIds: [],
       likePending: {},
       commentPending: {},
+      commentDeletePending: {},
     }));
   };
 

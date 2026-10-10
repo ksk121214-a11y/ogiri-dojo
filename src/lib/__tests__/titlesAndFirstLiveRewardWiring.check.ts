@@ -61,8 +61,6 @@ const scoreRevealToast = readFileSync(
   join(process.cwd(), "src", "components", "live-room", "ScoreRevealToast.tsx"),
   "utf8",
 );
-const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.ts"), "utf8");
-
 // 1: TitleSelectModalは、未所有の限定称号を選択肢に出さない（kind==='normal'か、
 //    本人が所有している限定称号だけをフィルタする）。
 {
@@ -782,27 +780,21 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
   console.log("PASS: プライバシーポリシーの文言は「限定アイコン」へ一般化され、0082は法務バージョンに触れておらず、0081（編集禁止）は当時の値のまま残っている");
 }
 
-// 28b（第8条の実質改定：TERMS_VERSION/PRIVACY_VERSIONの最終値と0083の整合性）：
-//     0082リリース後にさらに第8条（公式SNS等への掲載範囲の拡張）を実質改定したため、
-//     今度はTERMS_VERSION・PRIVACY_VERSIONの両方を更新し、0081ではなく新規の0083が
-//     current_legal_document_versions()を再度create or replaceしていることを確認する
-//     （0081・0082のいずれもこの再定義には関与しない）。
+// 28b（第8条の実質改定：0083は当時の値のまま、0081・0082は関与しない）：
+//     0082リリース後にさらに第8条（公式SNS等への掲載範囲の拡張）を実質改定した際、
+//     0081ではなく新規の0083がcurrent_legal_document_versions()を再度
+//     create or replaceした。current_legal_document_versions()の「現在の最終値」が
+//     src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致することの確認は、
+//     その後さらに0088（ライブ結果コメント自己削除機能）で再度create or replaceされた
+//     ことに伴い、legalPagesWiring.check.tsのチェック41へ一本化した（最終定義を
+//     持つマイグレーション番号が改定のたびに変わるため、こちら側では0083という
+//     特定の番号を「最終」と決め打ちしない）。ここでは、0083自身が当時のまま
+//     編集されていないこと、及び0083が称号表示機能(0082)や称号関連の関数には
+//     一切触れていないことだけを確認する。
 {
   const migration0083 = readFileSync(
     join(process.cwd(), "supabase", "migrations", "0083_legal_short_video_consent.sql"),
     "utf8",
-  );
-  assert.ok(
-    /export const TERMS_VERSION = "2026-09-28-v2";/.test(legalInfoSrc),
-    "TERMS_VERSIONが第8条の実質改定後の値になっていない",
-  );
-  assert.ok(
-    /export const PRIVACY_VERSION = "2026-09-28-v3";/.test(legalInfoSrc),
-    "PRIVACY_VERSIONが第8条の実質改定後の値になっていない",
-  );
-  assert.ok(
-    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年9月28日";/.test(legalInfoSrc),
-    "TERMS_LAST_REVISED_ONが第8条の実質改定に伴う改定日になっていない",
   );
   assert.ok(
     !migration0083.includes("drop function if exists public.sns_author_names") &&
@@ -816,9 +808,9 @@ const legalInfoSrc = readFileSync(join(process.cwd(), "src", "lib", "legalInfo.t
   );
   assert.ok(
     migration0083.includes(`select '2026-09-28-v2'::text, '2026-09-28-v3'::text;`),
-    "0083のcurrent_legal_document_versions()の値が、legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致しない",
+    "0083のcurrent_legal_document_versions()の値が、当時(第8条実質改定時点)の値のまま変わっていない（0083は本番適用済みのため編集禁止）",
   );
-  console.log("PASS: 第8条の実質改定に伴いTERMS_VERSION/PRIVACY_VERSIONが更新され、0081・0082ではなく新規の0083がcurrent_legal_document_versions()を再定義している");
+  console.log("PASS: 0083（第8条実質改定時点）は当時の値のまま編集されておらず、0081・0082・称号関連の機能には触れていない（現在の最終値との一致はチェック41で確認）");
 }
 
 console.log("ALL TITLES AND FIRST LIVE REWARD WIRING CHECKS PASSED");

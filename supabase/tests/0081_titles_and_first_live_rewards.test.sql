@@ -1230,11 +1230,16 @@ end $$;
 -- x2(a003)は削除されておらず利用可能。
 -- 2026-09-28（0083追加対応）：run.shは0001〜全マイグレーションを先に適用してから
 -- 全テストファイルを実行するため、この時点でcurrent_legal_document_versions()は
--- 0081ではなく0083の最終定義（terms_version・privacy_versionとも更に更新された値）を
--- 返す。0081自体（このマイグレーションファイル）は編集していないが、このテストが
--- 検証する「最終的なDBの挙動」は0083適用後の値を反映する必要があるため、期待値のみを
--- 0083の値に更新する（0083自身の専用テストはsupabase/tests/0083_legal_short_video_
--- consent.test.sqlを参照）。
+-- 0081ではなく、その時点の最新マイグレーションの最終定義（terms_version・
+-- privacy_versionとも更に更新された値）を返す。0081自体（このマイグレーション
+-- ファイル）は編集していないが、このテストが検証する「最終的なDBの挙動」は
+-- 最新マイグレーション適用後の値を反映する必要があるため、期待値のみをその都度
+-- 更新する（各マイグレーション自身の専用テストはsupabase/tests/0083_legal_
+-- short_video_consent.test.sql・0088_delete_own_sns_live_result_comment.test.sql
+-- を参照）。
+-- 2026-10-10（0088追加対応）：ライブ結果コメント自己削除機能に伴う規約改定で
+-- current_legal_document_versions()が0088でさらにcreate or replaceされたため、
+-- 期待値を0088の最終値へ更新した。
 -- ============================================================
 do $$
 declare
@@ -1243,13 +1248,13 @@ declare
 begin
   select terms_version, privacy_version into v_terms, v_privacy
     from public.current_legal_document_versions();
-  if v_terms <> '2026-09-28-v2' then
-    raise exception 'FAIL: terms_versionが0083で想定した新しい値になっていない(got=%)', v_terms;
+  if v_terms <> '2026-10-10-v3' then
+    raise exception 'FAIL: terms_versionが現在の最終値になっていない(got=%)', v_terms;
   end if;
-  if v_privacy <> '2026-09-28-v3' then
-    raise exception 'FAIL: privacy_versionが0083で想定した新しい値になっていない(got=%)', v_privacy;
+  if v_privacy <> '2026-10-10-v4' then
+    raise exception 'FAIL: privacy_versionが現在の最終値になっていない(got=%)', v_privacy;
   end if;
-  raise notice 'PASS: current_legal_document_versions()は（0083適用後の最終状態として）利用規約・プライバシーポリシーとも最新の値を返す';
+  raise notice 'PASS: current_legal_document_versions()は（最新マイグレーション適用後の最終状態として）利用規約・プライバシーポリシーとも最新の値を返す';
 end $$;
 
 -- 0081時点までの現在バージョンで既に同意済みだった状態を模す（本番で実際に起こりうる
@@ -1264,7 +1269,7 @@ begin
   -- ConsentRequiredGateと同じ条件（現在バージョンに完全一致する行があるか）で確認する。
   select count(*) into v_count from public.terms_consents
     where user_id = 'f0810000-0000-0000-0000-00000000a003'
-      and terms_version = '2026-09-28-v2' and privacy_version = '2026-09-28-v3';
+      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
   if v_count <> 0 then
     raise exception 'FAIL: 旧バージョンの同意記録が新バージョンの判定に誤ってヒットしている';
   end if;
@@ -1280,7 +1285,7 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', 'f0810000-0000-0000-0000-00000000a003', true);
-  perform public.record_terms_consent_v2('2026-09-28-v2', '2026-09-28-v3');
+  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
 end $$;
 reset role;
 
@@ -1291,7 +1296,7 @@ declare
 begin
   select count(*) into v_new_count from public.terms_consents
     where user_id = 'f0810000-0000-0000-0000-00000000a003'
-      and terms_version = '2026-09-28-v2' and privacy_version = '2026-09-28-v3';
+      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
   select count(*) into v_total_count from public.terms_consents
     where user_id = 'f0810000-0000-0000-0000-00000000a003';
   if v_new_count <> 1 then
@@ -1308,8 +1313,8 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', 'f0810000-0000-0000-0000-00000000a003', true);
-  perform public.record_terms_consent_v2('2026-09-28-v2', '2026-09-28-v3');
-  perform public.record_terms_consent_v2('2026-09-28-v2', '2026-09-28-v3');
+  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
 end $$;
 reset role;
 
@@ -1319,7 +1324,7 @@ declare
 begin
   select count(*) into v_count from public.terms_consents
     where user_id = 'f0810000-0000-0000-0000-00000000a003'
-      and terms_version = '2026-09-28-v2' and privacy_version = '2026-09-28-v3';
+      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
   if v_count <> 1 then
     raise exception 'FAIL: 同じ現在バージョンへの再同意の複数回呼び出しで重複行ができている(count=%)', v_count;
   end if;

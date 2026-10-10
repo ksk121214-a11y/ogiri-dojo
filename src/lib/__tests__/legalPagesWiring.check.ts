@@ -864,14 +864,20 @@ console.log("PASS: 利用規約第1条・LegalConsentNoteのいずれからも�
 //    v2 RPC・旧RPCの互換停止・エラーメッセージ変換の各配線を確認する）。
 //    2026-09-28（第8条の実質改定対応）：current_legal_document_versions()は0076で
 //    定義された後、0081（プライバシーポリシーの称号・限定アイコン追記）で
-//    create or replaceされ、さらに今回0083（第8条：公式SNS等への掲載範囲拡張）で
-//    再度create or replaceされ現在の値を返す。0076・0081はいずれも本番適用済み・
-//    編集禁止のため、当時のままの値で変わっていないことも併せて確認する
+//    create or replaceされ、0083（第8条：公式SNS等への掲載範囲拡張）で再度
+//    create or replaceされた。0076・0081・0083はいずれも本番適用済み・編集禁止の
+//    ため、当時のままの値で変わっていないことも併せて確認する
 //    （0082は称号表示機能の追加のみでこの関数には触れない）。
+//    2026-10-10（ライブ結果コメント自己削除機能に伴う規約改定対応）：今回は0088で
+//    さらにcreate or replaceし、現在の最終値を返すようにした。0083はもう最終定義
+//    ではないため、0083自身は当時の値（'2026-09-28-v2'/'2026-09-28-v3'）を保持して
+//    いることだけを確認し、「現在のTERMS_VERSION/PRIVACY_VERSIONと一致すること」の
+//    検証は0088へ移した。
 {
   const migration0076 = read("supabase", "migrations", "0076_terms_consent.sql");
   const migration0081 = read("supabase", "migrations", "0081_titles_and_first_live_rewards.sql");
   const migration0083 = read("supabase", "migrations", "0083_legal_short_video_consent.sql");
+  const migration0088 = read("supabase", "migrations", "0088_delete_own_sns_live_result_comment.sql");
   assert.ok(
     migration0076.includes("select '2026-09-25-v1'::text, '2026-09-25-v1'::text;"),
     "supabase/migrations/0076_terms_consent.sqlのcurrent_legal_document_versions()の元の定義が変更されている（0076は編集禁止）",
@@ -886,29 +892,35 @@ console.log("PASS: 利用規約第1条・LegalConsentNoteのいずれからも�
     "0081のcurrent_legal_document_versions()（当時の再定義）が変更されている（0081は本番適用済みのため編集禁止）",
   );
   assert.ok(
-    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0083),
-    "0083がcurrent_legal_document_versions()をcreate or replaceしていない（第8条の実質改定がDB側の現在バージョン判定に反映されていない）",
+    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0083) &&
+      migration0083.includes("select '2026-09-28-v2'::text, '2026-09-28-v3'::text;"),
+    "0083のcurrent_legal_document_versions()（当時の再定義）が変更されている（0083は本番適用済みのため編集禁止）",
   );
   assert.ok(
-    migration0083.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
-    `supabase/migrations/0083のcurrent_legal_document_versions()（最終定義）が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}/${PRIVACY_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
+    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0088),
+    "0088がcurrent_legal_document_versions()をcreate or replaceしていない（ライブ結果コメント自己削除機能に伴う実質改定がDB側の現在バージョン判定に反映されていない）",
+  );
+  assert.ok(
+    migration0088.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
+    `supabase/migrations/0088のcurrent_legal_document_versions()（現在の最終定義）が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}/${PRIVACY_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
   );
 }
-console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値（0083の最終定義）はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している。0076・0081自体は編集されていない");
+console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値（0088の最終定義）はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している。0076・0081・0083自体は編集されていない（当時の値のまま）");
 
 // 41b（利用規約とプライバシーポリシーの最終改定日の分離）：0082リリース時点では
-//    プライバシーポリシーだけを改定していたが、今回（第8条の実質改定）は
-//    利用規約・プライバシーポリシーの両方を改定するため、文書ごとに独立した
-//    定数のうち、今回は両方が同じ改定日を持つことを確認する（引き続き共通の
-//    1つのLAST_REVISED_ONへは戻していないこと自体は、変数名の使い分けで確認する）。
+//    プライバシーポリシーだけを改定していたが、0083（第8条の実質改定）・0088
+//    （ライブ結果コメント自己削除機能）はいずれも利用規約・プライバシーポリシーの
+//    両方を改定するため、文書ごとに独立した定数のうち、両方が同じ改定日を持つ
+//    ことを確認する（引き続き共通の1つのLAST_REVISED_ONへは戻していないこと自体は、
+//    変数名の使い分けで確認する）。2026-10-10：最新の改定日へ更新した。
 {
   const legalInfoSrc = read("src", "lib", "legalInfo.ts");
   assert.ok(
-    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年9月28日";/.test(legalInfoSrc),
+    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年10月10日";/.test(legalInfoSrc),
     "利用規約を今回改定したのに、TERMS_LAST_REVISED_ONが今回の改定日になっていない",
   );
   assert.ok(
-    /export const PRIVACY_LAST_REVISED_ON: string \| null = "2026年9月28日";/.test(legalInfoSrc),
+    /export const PRIVACY_LAST_REVISED_ON: string \| null = "2026年10月10日";/.test(legalInfoSrc),
     "プライバシーポリシーの最終改定日(PRIVACY_LAST_REVISED_ON)が今回の改定日になっていない",
   );
   assert.ok(termsPage.includes("TERMS_LAST_REVISED_ON"), "利用規約ページがTERMS_LAST_REVISED_ONを表示していない（共通のLAST_REVISED_ONを使い続けている可能性）");
@@ -1056,21 +1068,29 @@ console.log("PASS: admin_update_account_deletion_requestが、同じstatusへの
 }
 console.log("PASS: 管理画面のステータス変更ボタンは、現在と同じ状態の場合disabledになる");
 
-// 47（最終整合性チェック対応：ライブ結果コメントを利用者コンテンツに含める）：
+// 47（最終整合性チェック対応：ライブ結果コメントを利用者コンテンツに含める。
+//    2026-10-10：delete_own_sns_live_result_comment(0088)で本人削除が可能になった
+//    ことに伴い、「本人による削除機能が無い」旨の記載を「本人が削除できる」旨へ
+//    更新した）：
 //    ライブ結果コメントが、利用規約（サービス内容・投稿削除ルール）・
 //    プライバシーポリシー（取得する情報・保存期間・アカウント削除）の両方に
-//    追加され、本人による削除機能が無いこと、問い合わせによる削除依頼、
-//    運営による非表示・削除、親のライブ結果・回答削除に伴う連動削除、及び
-//    アカウント削除時は寄合帳の投稿とは異なり物理削除される旨が説明されている。
+//    追加され、本人による削除（アイコンから削除可能・寄合券の返還という概念が
+//    無い旨）、運営による非表示・削除、親のライブ結果・回答削除に伴う連動削除、
+//    及びアカウント削除時は寄合帳の投稿とは異なり物理削除される旨が説明されている。
 {
   assert.ok(termsPage.includes("ライブ結果に対するコメントの投稿機能"), "利用規約第2条にライブ結果コメント機能の記載がない");
   const postingRulesBody3 = sectionBody(termsPage, "posting-rules");
   assert.ok(
-    postingRulesBody3.includes("ライブ結果へのコメントについては、利用者自身が画面から削除する機能を提供していません"),
-    "利用規約第6条に、ライブ結果コメントを本人が削除できない旨の記載がない",
+    postingRulesBody3.includes("ライブ結果へのコメントは、投稿した利用者自身が画面上のアイコンから削除できます"),
+    "利用規約第6条に、ライブ結果コメントを本人が削除できる旨の記載がない",
   );
   assert.ok(
-    postingRulesBody3.includes("コメントの投稿先であるライブ結果又は回答が削除された場合、当該コメントも削除されることがあります"),
+    postingRulesBody3.includes("寄合券を使用しない"),
+    "利用規約第6条に、ライブ結果コメントは寄合券を使用しない（＝削除しても返還という概念が無い）旨の記載がない",
+  );
+  assert.ok(
+    postingRulesBody3.includes("コメントの投稿先であるライブ結果又は回答が削除された場合、当該コメントも削除されることが") &&
+      postingRulesBody3.includes("あります"),
     "利用規約第6条に、親のライブ結果・回答削除に伴うコメントの連動削除についての記載がない",
   );
 
@@ -1080,8 +1100,8 @@ console.log("PASS: 管理画面のステータス変更ボタンは、現在と�
   );
   const retentionBody3 = sectionBody(privacyPage, "retention");
   assert.ok(
-    retentionBody3.includes("ライブ結果へのコメントについては、寄合帳の投稿とは異なり、利用者自身が画面から削除する機能を"),
-    "プライバシーポリシーの保存期間セクションに、ライブ結果コメントの削除ルールの記載がない",
+    retentionBody3.includes("ライブ結果へのコメントは、投稿した利用者自身が画面上のアイコンから削除できます"),
+    "プライバシーポリシーの保存期間セクションに、ライブ結果コメントを本人が削除できる旨の記載がない",
   );
   const accountDeletionBody5 = sectionBody(privacyPage, "account-deletion");
   assert.ok(
@@ -1090,7 +1110,7 @@ console.log("PASS: 管理画面のステータス変更ボタンは、現在と�
     "プライバシーポリシーのアカウント削除セクションに、ライブ結果コメントが物理削除される旨の記載がない",
   );
 }
-console.log("PASS: ライブ結果コメントが利用者コンテンツとして規約・ポリシーに追加され、本人削除不可・問い合わせ削除・運営非表示削除・親削除連動・アカウント削除時の物理削除という実装どおりの扱いが説明されている");
+console.log("PASS: ライブ結果コメントが利用者コンテンツとして規約・ポリシーに追加され、本人削除可能・運営非表示削除・親削除連動・アカウント削除時の物理削除という実装どおりの扱いが説明されている");
 
 // 48（最終整合性チェック対応：取得情報・利用目的・外部サービス・公開情報・
 //    運営者表示の追加修正）：同意管理情報・アカウント削除申請情報・お問い合わせ
@@ -1486,10 +1506,13 @@ console.log("PASS: 動画配信サービスへの短尺動画掲載の適用条�
       thirdPartyServicesBody2.includes("Instagram（MetaPlatforms"),
     "プライバシーポリシーの国外処理事業者の説明に、Google（YouTube）・TikTok・Instagram（Meta）が反映されていない",
   );
-  // バージョン・改定日は今回（第8条実質改定ラウンド）から更に変更していないことも
-  // あわせて確認する（外部サービス欄の追加だけを理由に再度バージョンを上げていない）。
-  assert.equal(TERMS_VERSION, "2026-09-28-v2", "外部サービス欄の追加に伴いTERMS_VERSIONが意図せず変更されている");
-  assert.equal(PRIVACY_VERSION, "2026-09-28-v3", "外部サービス欄の追加に伴いPRIVACY_VERSIONが意図せず変更されている");
+  // バージョンは、外部サービス欄の追加（このブロックの検証対象）だけを理由に
+  // 独自に上げていないことを確認する。2026-10-10：ライブ結果コメント自己削除
+  // 機能の追加で別の理由からバージョンが更に進んだため、期待値もその現在の
+  // 最終値（src/lib/legalInfo.ts）へ更新した（この外部サービス欄の追加自体は
+  // 今回も版を進める理由になっていない）。
+  assert.equal(TERMS_VERSION, "2026-10-10-v3", "外部サービス欄の追加に伴いTERMS_VERSIONが意図せず変更されている");
+  assert.equal(PRIVACY_VERSION, "2026-10-10-v4", "外部サービス欄の追加に伴いPRIVACY_VERSIONが意図せず変更されている");
 }
 console.log("PASS: プライバシーポリシーの外部サービス欄にGoogle（Gmail・YouTube）・TikTok・Instagramが公式プライバシーポリシーへのリンク付きで追加され、Xも公式投稿の掲載先である旨が追記され、SDK組み込みと誤解されない説明と国外処理事業者への反映があり、バージョン・改定日はさらに変更されていない");
 

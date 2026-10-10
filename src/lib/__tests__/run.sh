@@ -648,6 +648,50 @@ else
 fi
 rm -rf "$SNS_LIVE_RESULTS_SWITCH_DIR"
 
+# src/lib/__tests__/store/useSnsLiveResultsStoreRanking.check.ts：ライブ結果一覧の
+# 同順位タイ表示、及び詳細画面の順位→参加者→お題→回答の階層ソートを、本番と同じ
+# 実装(init()/fetchDetail())へ実際に呼び出して検証する。専用tsconfig経由。
+SNS_LIVE_RESULTS_RANKING_DIR="$(mktemp -d)"
+SNS_LIVE_RESULTS_RANKING_TSCONFIG="$SCRIPT_DIR/store/tsconfig.snsLiveResultsRanking.json"
+SNS_LIVE_RESULTS_RANKING_ENTRY="$SNS_LIVE_RESULTS_RANKING_DIR/src/lib/__tests__/store/useSnsLiveResultsStoreRanking.check.js"
+
+echo "--- useSnsLiveResultsStoreRanking.check.ts ---"
+if npx tsc -p "$SNS_LIVE_RESULTS_RANKING_TSCONFIG" --outDir "$SNS_LIVE_RESULTS_RANKING_DIR" && [ -f "$SNS_LIVE_RESULTS_RANKING_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$SNS_LIVE_RESULTS_RANKING_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$SNS_LIVE_RESULTS_RANKING_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useSnsLiveResultsStoreRanking.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$SNS_LIVE_RESULTS_RANKING_DIR"
+
+# src/lib/__tests__/store/useSnsLiveResultsStoreCommentDelete.check.ts：ライブ結果
+# コメントの自己削除(deleteComment)を、本番と同じ実装へ実際に呼び出して検証する。
+# 専用tsconfig経由。
+SNS_LIVE_RESULTS_COMMENT_DELETE_DIR="$(mktemp -d)"
+SNS_LIVE_RESULTS_COMMENT_DELETE_TSCONFIG="$SCRIPT_DIR/store/tsconfig.snsLiveResultsCommentDelete.json"
+SNS_LIVE_RESULTS_COMMENT_DELETE_ENTRY="$SNS_LIVE_RESULTS_COMMENT_DELETE_DIR/src/lib/__tests__/store/useSnsLiveResultsStoreCommentDelete.check.js"
+
+echo "--- useSnsLiveResultsStoreCommentDelete.check.ts ---"
+if npx tsc -p "$SNS_LIVE_RESULTS_COMMENT_DELETE_TSCONFIG" --outDir "$SNS_LIVE_RESULTS_COMMENT_DELETE_DIR" && [ -f "$SNS_LIVE_RESULTS_COMMENT_DELETE_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$SNS_LIVE_RESULTS_COMMENT_DELETE_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$SNS_LIVE_RESULTS_COMMENT_DELETE_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useSnsLiveResultsStoreCommentDelete.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$SNS_LIVE_RESULTS_COMMENT_DELETE_DIR"
+
 # src/lib/__tests__/store/useSnsStoreMutationRace.check.ts も同じ理由で専用
 # tsconfig経由にする。2026-09-13再々レビュー2回目対応：addTopic/addAnswer/
 # addComment/deleteTopic/deleteAnswer/deleteCommentが、Supabase待機中に
