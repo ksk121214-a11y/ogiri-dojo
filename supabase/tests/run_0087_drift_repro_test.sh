@@ -39,7 +39,10 @@
 #      global（defaclnamespace=0）・public schema固有の両方について、
 #      aclitem文字列の先頭一致ではなくaclexplode()でPUBLICのEXECUTEが
 #      含まれないことを確認する
-#  12. 0087をもう一度適用し、再実行しても例外なく完走することを確認する
+#  12. 0087をもう一度適用し、再実行しても例外なく完走すること、及び再適用後も
+#      scoresのUPDATE不可・default privileges・全関数ACLの期待値完全一致が保たれる
+#      ことを確認する（0089以降の正規権限を剥がさないよう、再実行確認はこの
+#      0087までの独立DBだけで行う）
 # を行う。安全対策はsupabase/tests/run.shと同じ考え方を踏襲する。
 # 本番のSupabaseプロジェクトに対しては絶対に実行しないこと。
 #
@@ -518,6 +521,72 @@ SQL
 
 echo "==> 0087をもう一度適用（再実行安全性の確認）"
 psql "${PSQL_ARGS[@]}" -f "$MIGRATION_0087" >/dev/null
+
+# 2026-10-12（0089対応）：再実行安全性の確認は、以前は通常フロー（0001〜最新を全適用
+# したDB）の0087_fix_forward_production_drift.test.sql末尾でも行っていたが、0087の
+# anon許可リストは0087時点のハードコードのため、後続マイグレーション（0089の
+# get_client_policy_v1等）が正規に付与したanon EXECUTEまで剥がしてしまう。そのため
+# 再実行確認は、0087までだけを適用したこの独立DBへ一本化し、「例外なく完走する」
+# だけでなく、再適用後も期待状態（scoresのUPDATE不可・default privileges・
+# public schema全関数ACLの0001〜0086直後スナップショットとの完全一致）が保たれる
+# ことまで確認する（通常フロー側にあった確認より弱めない）。
+echo "==> 0087再適用後も期待状態が保たれていることを確認"
+psql "${PSQL_ARGS[@]}" <<'SQL'
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.scores', 'UPDATE') then
+    raise exception 'FAIL: 0087再適用後にscoresのUPDATE権限が復活している';
+  end if;
+  raise notice 'PASS: 0087を再適用してもscoresはUPDATE不可のまま';
+end $$;
+
+create function public._driftcheck_new_fn_after_0087_rerun() returns int language sql as $fn$ select 1 $fn$;
+do $$
+begin
+  if has_function_privilege('public', 'public._driftcheck_new_fn_after_0087_rerun()'::regprocedure, 'EXECUTE') then
+    raise exception 'FAIL: 0087再適用後に新規関数がPUBLIC実行可になっている';
+  end if;
+  raise notice 'PASS: 0087再適用後も新規関数はPUBLIC実行可にならない';
+end $$;
+drop function public._driftcheck_new_fn_after_0087_rerun();
+
+create table public._audit_fn_acl_after_rerun as
+select p.oid::regprocedure::text as sig,
+       has_function_privilege('public', p.oid, 'EXECUTE') as pub,
+       has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') as auth
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public';
+
+do $$
+declare
+  v_diff_count int;
+  v_diff_detail text;
+begin
+  select count(*), string_agg(
+    format(
+      'sig=%s  expected(pub=%s,anon=%s,auth=%s)  actual(pub=%s,anon=%s,auth=%s)',
+      coalesce(e.sig, a.sig), e.pub, e.anon, e.auth, a.pub, a.anon, a.auth
+    ),
+    E'\n    '
+  )
+  into v_diff_count, v_diff_detail
+  from public._audit_fn_acl_expected e
+  full outer join public._audit_fn_acl_after_rerun a on a.sig = e.sig
+  where e.sig is null
+     or a.sig is null
+     or e.pub is distinct from a.pub
+     or e.anon is distinct from a.anon
+     or e.auth is distinct from a.auth;
+
+  if v_diff_count <> 0 then
+    raise exception 'FAIL: 0087再適用後のACLが0001〜0086直後の期待ACLと完全一致しない（%件）:
+    %', v_diff_count, v_diff_detail;
+  end if;
+  raise notice 'PASS: 0087再適用後も、public schema内の全関数ACLが0001〜0086直後の期待状態と完全一致';
+end $$;
+SQL
 psql "${PSQL_ARGS[@]}" -c "select '0087 DRIFT REPRO TEST PASSED' as result;"
 
 echo "==> 完了：0087がA-R2で検出した本番ドリフト（6件）を正しく収束させ、public schema内の全関数ACLが0001〜0086直後の期待状態と完全一致することを確認しました。"

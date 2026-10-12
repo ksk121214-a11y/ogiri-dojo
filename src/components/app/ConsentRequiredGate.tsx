@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { checkConsentForUser, GenerationGuard } from "@/lib/consentCheck";
 import { CONSENT_VERSION_RELOAD_MESSAGE, isConsentVersionMismatchError } from "@/lib/consentVersionError";
 import { TERMS_VERSION, PRIVACY_VERSION } from "@/lib/legalInfo";
+import { isPublicSupportPath } from "@/lib/publicSupportPaths";
 import { recordTermsConsentOnce, waitForConsentInFlight } from "@/lib/termsConsentRecorder";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -20,8 +21,9 @@ import { LegalLinksRow } from "@/components/legal/LegalLinks";
 
 // ログイン中（Xログイン・ゲストいずれも）のセッションに対し、現在の
 // TERMS_VERSION/PRIVACY_VERSIONへの同意記録（terms_consents）があるかを確認し、
-// 無ければ同意を求める。/terms・/privacyは同意前でも常に閲覧できるよう、この
-// ゲート自体を素通りさせる。
+// 無ければ同意を求める。公開サポートページ（/terms・/privacy・/contact・
+// /account-deletion、src/lib/publicSupportPaths.ts）は同意前でも常に閲覧できるよう、
+// このゲート自体を素通りさせる。
 //
 // 2026-09-25（再監査対応）：以前はneedsConsentの初期値がfalseで、DB確認前から
 // childrenを描画・マウントしていたため、未同意/旧バージョンの既存ユーザーでも
@@ -113,7 +115,9 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
 
   const isAnonymousUser = authUser?.is_anonymous === true;
 
-  const isLegalPage = pathname === "/terms" || pathname === "/privacy";
+  // 2026-10-12：/terms・/privacyに加え、/contact・/account-deletionも同意ゲートの外に
+  // する（判定はsrc/lib/publicSupportPaths.tsの完全一致に一本化）。
+  const isPublicSupportPage = isPublicSupportPath(pathname);
 
   const runCheck = useCallback(async (uid: string, myGeneration: number, isAnonymous: boolean) => {
     const result = await checkConsentForUser(uid, {
@@ -220,8 +224,9 @@ export default function ConsentRequiredGate({ children }: { children: React.Reac
     }
   };
 
-  // /terms・/privacyは、認証確認中・未同意・エラー中でも常に閲覧できる。
-  if (isLegalPage) {
+  // 公開サポートページ（/terms・/privacy・/contact・/account-deletion）は、
+  // 認証確認中・未同意・エラー中でも常に閲覧できる。
+  if (isPublicSupportPage) {
     return <>{children}</>;
   }
 

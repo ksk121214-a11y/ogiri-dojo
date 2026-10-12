@@ -700,8 +700,12 @@ console.log("PASS: signInWithX/signInAsGuestの全呼び出し箇所が共通の
   assert.ok(consentRequiredGate.includes("record_terms_consent"), "ConsentRequiredGateがrecord_terms_consent RPCを呼んでいない");
   assert.ok(rootLayout.includes("ConsentRequiredGate"), "ルートレイアウトにConsentRequiredGateが組み込まれていない");
   assert.ok(rootLayout.includes("ConsentGateModal"), "ルートレイアウトにConsentGateModalが組み込まれていない");
+  // 2026-10-12：除外判定はsrc/lib/publicSupportPaths.tsのisPublicSupportPath（完全一致）へ
+  // 一本化した。/terms・/privacyが実際に除外されることの実行時判定は
+  // publicSupportPages.check.tsで行う。
   assert.ok(
-    consentRequiredGate.includes('pathname === "/terms"') && consentRequiredGate.includes('pathname === "/privacy"'),
+    consentRequiredGate.includes("isPublicSupportPath(pathname)") &&
+      read("src", "lib", "publicSupportPaths.ts").includes('"/terms", "/privacy"'),
     "ConsentRequiredGateが/terms・/privacyを同意ゲートの対象から除外していない（同意前でも常に閲覧可能にする要件を満たさない）",
   );
 }

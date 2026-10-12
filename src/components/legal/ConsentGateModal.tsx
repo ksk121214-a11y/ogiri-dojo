@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 
+import { isPublicSupportPath } from "@/lib/publicSupportPaths";
 import { useConsentGateStore } from "@/store/useConsentGateStore";
 
 import { LegalLinksRow } from "@/components/legal/LegalLinks";
@@ -18,8 +20,12 @@ export default function ConsentGateModal() {
   const cancel = useConsentGateStore((s) => s.cancel);
   const [checked, setChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const pathname = usePathname();
 
-  if (!pendingModal) return null;
+  // 2026-10-12：公開サポートページ（/terms・/privacy・/contact・/account-deletion）の
+  // 本文はモーダルで覆わない（保留中のpendingModalはそのまま残し、他の画面へ戻った時に
+  // 再表示される）。
+  if (!pendingModal || isPublicSupportPath(pathname)) return null;
 
   const actionLabel = pendingModal.kind === "guest" ? "ゲストとして参加を続ける" : "同意してXログインへ進む";
 

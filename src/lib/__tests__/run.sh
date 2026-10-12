@@ -71,6 +71,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../botAnswerPolicy.ts"
   "$SCRIPT_DIR/../termsConsentRecorder.ts"
   "$SCRIPT_DIR/../audioRoutes.ts"
+  "$SCRIPT_DIR/../publicSupportPaths.ts"
   "$SCRIPT_DIR/../snsAccess.ts"
   "$SCRIPT_DIR/../uuid.ts"
   "$SCRIPT_DIR/../reportSubmit.ts"

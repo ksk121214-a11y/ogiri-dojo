@@ -2,8 +2,9 @@
 -- このファイルはsupabase/tests/run.shの通常フロー（0001〜最新を順に適用した「正常な」
 -- DB）に対して実行されるため、「正常なDBへ0087を適用しても壊れない」こと、および
 -- 「0087適用後に期待状態になっている」ことの両方を兼ねて確認する。
--- 「0087を再実行しても壊れない」ことは、このファイルの末尾で実際に0087自身を
--- 再適用して確認する。
+-- 「0087を再実行しても壊れない」ことは、0001〜0087だけを適用した独立DBを使う
+-- 専用スクリプトsupabase/tests/run_0087_drift_repro_test.shで確認する（このファイル
+-- 末尾のテスト7の説明参照）。
 -- 「5件のドリフト状態を再現したDBへ0087を適用すると期待状態になる」ことは、
 -- 別の使い捨てDBが必要なため、専用スクリプト
 -- supabase/tests/run_0087_drift_repro_test.sh で確認する（run.shから自動実行）。
@@ -310,17 +311,18 @@ end $$;
 drop function public._driftcheck_normal_flow_new_fn();
 
 -- ============================================================
--- テスト7: 0087自身を再度適用しても例外なく完走する（再実行安全性）。
+-- テスト7（移設）：0087自身の再実行安全性は、ここ（0001〜最新を全適用したDB）では
+-- 確認しない。supabase/tests/run_0087_drift_repro_test.sh（0001〜0087だけを適用した
+-- 独立した使い捨てDB）で、再適用後の例外なし完走・scoresのUPDATE不可・public schema
+-- 全関数ACLの期待値との完全一致まで確認する。
+--
+-- 2026-10-12（0089対応）：以前はここで0087を\irで再適用していたが、0087の関数EXECUTE
+-- 一括収束処理は0087時点のanon許可リスト（is_host/sns_author_names/
+-- sns_result_participant_user_ids）をハードコードしているため、0089以降の
+-- マイグレーションが正規に付与したanon EXECUTE（get_client_policy_v1）まで剥がして
+-- しまい、後続の0089テストを壊していた。過去マイグレーションの再実行が将来の
+-- マイグレーションの権限を壊さない構造にするため、再実行確認は0087までのDBへ分離した
+-- （0087自体は適用済みの履歴のため編集しない）。
 -- ============================================================
-\echo '--- 0087を再適用（再実行安全性の確認） ---'
-\ir ../migrations/0087_fix_forward_production_drift.sql
-
-do $$
-begin
-  if has_table_privilege('authenticated', 'public.scores', 'UPDATE') then
-    raise exception 'FAIL: 0087再適用後にscoresのUPDATE権限が復活している';
-  end if;
-  raise notice 'PASS: 0087を再適用しても期待状態が保たれる';
-end $$;
 
 select '0087 ALL TESTS PASSED' as result;
