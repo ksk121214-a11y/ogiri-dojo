@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { supabase } from "@/lib/supabase";
 import type { LiveRow } from "@/lib/liveRoomTypes";
-import { useLiveHostStore } from "@/store/useLiveHostStore";
+import { startHostAutoProgress, useLiveHostStore } from "@/store/useLiveHostStore";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -393,12 +393,13 @@ async function main() {
     console.log("PASS: emergencyCloseLive - 正しいステージング接続では既存処理が1回だけ実行される");
   }
 
-  // ===== 5) 自動進行（advanceIfDue経由のtick）：init()→500ms tick→host_advance_* =====
+  // ===== 5) 自動進行（advanceIfDue経由のtick）：init()＋writer ticket→500ms tick→host_advance_* =====
   {
     // 5a) Project Ref不一致：init()→tickを経ても自動進行のRPCが一切呼ばれない。
     resetState({ live: { ...liveRow, current_phase: "topic_reveal" } });
     await withEnv({ ...STAGING_ENV, NEXT_PUBLIC_STAGING_SUPABASE_PROJECT_REF: "different-ref" }, async () => {
       useLiveHostStore.getState().init();
+      startHostAutoProgress(1, (t) => t === 1); // writerに選ばれた状態でもRef不一致なら書き込まない
       await delay(1_200); // hydrate完了＋1tick(500ms)以上
       const advanceCalls = writeLog.filter((w) => w === "rpc:host_advance_topic_reveal_to_answering");
       assert.equal(
@@ -415,6 +416,9 @@ async function main() {
     markerMode = "staging-row";
     await withEnv(STAGING_ENV, async () => {
       useLiveHostStore.getState().init();
+      // 2026-10-15（2A.2b-W1）：自動進行はWeb Locksでwriterに選ばれたタブだけが動かす。
+      // ここではwriterに選ばれた状態（有効なticket）を直接与える。
+      startHostAutoProgress(1, (t) => t === 1);
       await delay(1_200);
       const advanceCalls = writeLog.filter((w) => w === "rpc:host_advance_topic_reveal_to_answering");
       assert.ok(

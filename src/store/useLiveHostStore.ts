@@ -58,6 +58,7 @@ import {
 import { pickRandomTopicBankEntries } from "@/lib/liveRoomLogic";
 import { createAnsweringAdvancer, tryAdvanceAnswering } from "@/lib/answeringAdvance";
 import { serverClock } from "@/lib/serverClockInstance";
+import type { HostAutoWriterStatus } from "@/lib/hostAutoWriter";
 import { assertStagingOperationAllowed } from "@/lib/stagingEnv";
 import { supabase } from "@/lib/supabase";
 import { useLiveBotStore } from "@/store/useLiveBotStore";
@@ -224,9 +225,25 @@ interface LiveHostState {
   // 以後古い（stopされる前の）init()呼び出しが後から完了してもタイマー・
   // channelを再作成しないようにする（世代番号で判定。詳細はinit()参照）。
   stopHostProgress: () => void;
+  // 2026-10-15（2A.2b-W1）：このタブの自動進行の担当状態（画面表示専用。
+  // src/lib/hostAutoWriter.ts の HostAutoWriterStatus）。
+  autoProgressStatus: HostAutoWriterStatus;
 }
 
+// 2026-10-15（2A.2b-W1）：tickTimerは「読み取り側の維持」専用になった（全adminタブで動く。
+// 未確認スライスの読み取り再試行・完全復旧への合流だけを行い、DBへは書き込まない）。
+// 自動進行（advanceIfDue）は、Web Locksでwriterに選ばれたタブだけが
+// autoProgressTimer で動かす（src/lib/hostAutoWriter.ts参照）。
 let tickTimer: ReturnType<typeof setInterval> | null = null;
+let autoProgressTimer: ReturnType<typeof setInterval> | null = null;
+// 現在このタブが保持している自動進行writerのticket（nullなら自動書き込み不可）と、
+// そのticketが今も有効かをlock側へ問い合わせる関数。
+let autoWriterTicket: number | null = null;
+let autoWriterIsValid: (ticket: number) => boolean = () => false;
+// 実行中の自動書き込み（RPC・ボットのinsert）の件数。lock解放時はこれが0になるのを
+// 待ってからlockを返す（handoff中にwriterが2件にならないようにする）。
+let autoWritesInFlight = 0;
+let autoWritesIdleWaiters: (() => void)[] = [];
 // 2026-09-09（再レビュー対応）：stopHostProgress()を呼ぶたびに+1する世代番号。
 // init()の非同期処理は開始時点の世代を覚えておき、要所（特にtickTimer/Realtime
 // channelを作る直前）で現在の世代と比較する。ずれていれば、そのinit()呼び出しは
@@ -386,12 +403,79 @@ function channelSleep(ms: number): Promise<void> {
 // そのまま使う（clear→再作成でtickを1回落とさない）。tickTimer が非nullになるのは
 // 現在世代のみ（stopHostProgress が clear ＋ 世代+1、ensureTickTimer は古い世代なら
 // 作らない）。
+// 2026-10-15（2A.2b-W1）：このtimerは読み取り側の維持(maintainHostSnapshots)だけを行い、
+// 自動進行のDB書き込みはしない（全adminタブで動いてよい）。
 function ensureTickTimer(generation: number) {
   if (generation !== progressGeneration) return;
   if (tickTimer) return;
   tickTimer = setInterval(() => {
-    void advanceIfDue();
+    maintainHostSnapshots();
   }, 500);
+}
+
+// このタブが今も自動進行writerか（tick開始時に受け取ったticketと照合する）。
+// lock解放・visibility変更・logout・isHost剥奪・unmountでfalseになる。
+function autoWriterTicketValid(ticket: number): boolean {
+  return autoWriterTicket !== null && ticket === autoWriterTicket && autoWriterIsValid(ticket);
+}
+
+// 自動進行のDB書き込み1件を実行する。直前にticketを再照合し、無効なら送らずnullを返す。
+// 実行中の件数を数え、lock解放時の完了待ち(waitHostAutoWritesIdle)に使う。
+async function runAutoWrite<T>(ticket: number, write: () => PromiseLike<T>): Promise<T | null> {
+  if (!autoWriterTicketValid(ticket)) return null;
+  autoWritesInFlight += 1;
+  try {
+    return await write();
+  } finally {
+    autoWritesInFlight -= 1;
+    if (autoWritesInFlight === 0) {
+      const waiters = autoWritesIdleWaiters;
+      autoWritesIdleWaiters = [];
+      for (const resolve of waiters) resolve();
+    }
+  }
+}
+
+// lockを取得したタブだけが呼ぶ。ticketが有効な間だけ自動進行timerを1本動かす。
+// 同じticketで既に動いていれば何もしない（init・focus・pageshow等が重なっても1本）。
+export function startHostAutoProgress(ticket: number, isValid: (ticket: number) => boolean) {
+  if (!isValid(ticket)) return;
+  if (autoProgressTimer && autoWriterTicket === ticket) return;
+  stopHostAutoProgress();
+  autoWriterTicket = ticket;
+  autoWriterIsValid = isValid;
+  autoProgressTimer = setInterval(() => {
+    void advanceIfDue(ticket);
+  }, 500);
+}
+
+// 自動進行timerを止め、ticketを無効化する（実行中のtickもRPC直前の照合で止まる）。
+export function stopHostAutoProgress() {
+  autoWriterTicket = null;
+  autoWriterIsValid = () => false;
+  if (autoProgressTimer) {
+    clearInterval(autoProgressTimer);
+    autoProgressTimer = null;
+  }
+}
+
+// 実行中の自動書き込みが0件になったら解決する。
+export function waitHostAutoWritesIdle(): Promise<void> {
+  if (autoWritesInFlight === 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    autoWritesIdleWaiters.push(resolve);
+  });
+}
+
+// 新leaderが自動進行を始める前に、最新状態を取り直す（古いローカルstateだけで進めない）。
+export async function catchUpHostAutoProgress(): Promise<boolean> {
+  const result = await useLiveHostStore.getState().refresh();
+  return result.ok;
+}
+
+// 検証用：このタブで動いているtimerの有無（ID等は含まない）。
+export function hostProgressTimerState(): { readTimer: boolean; autoTimer: boolean } {
+  return { readTimer: tickTimer !== null, autoTimer: autoProgressTimer !== null };
 }
 
 // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
@@ -867,13 +951,17 @@ async function updateLive(id: string, patch: Partial<LiveRow>) {
 
 // 現在のターンの回答キューを処理する：表示中(revealed)の回答が無く、
 // 未表示の回答があれば、一呼吸(revealDelayMs)置いてから1件だけrevealする。
-async function processRevealQueue(tickGeneration: number, tickLiveId: string | null) {
+async function processRevealQueue(
+  tickGeneration: number,
+  tickLiveId: string | null,
+  tickLeaderTicket: number,
+) {
   const state = useLiveHostStore.getState();
   const { answers, live } = state;
   // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が今の対象に
   // ついて確認済みで、進行環境も確立済みのときだけ reveal 更新へ進む（多層防御。
   // advanceIfDue 側でも同じガードをしているが、await をまたいだ呼び出しにも効かせる）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return;
   if (!live || !answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) return;
   const active = answers.find((a) => a.revealed_at && !a.resolved);
   if (active) return; // 既に表示中の回答があるので何もしない
@@ -903,18 +991,24 @@ async function processRevealQueue(tickGeneration: number, tickLiveId: string | n
   // 自体もlives.next_reveal_pending_at（DB時刻）で管理する。観客・回答者側の
   // 補助tick（useLiveFollowerStore.ts）も同じRPCを呼ぶため、司会ブラウザが
   // 落ちていても誰かが画面を開いていれば未発表回答の表示から先へ進める。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御
   const revealStagingCheck = await assertStagingOperationAllowed();
   if (!revealStagingCheck.ok) {
     console.error("[live] ステージング安全確認に失敗したため自動進行の書き込みを中止", revealStagingCheck.reason);
     return;
   }
-  const { data: revealData, error: revealError } = await supabase
-    .rpc("reveal_next_answer_if_due", {
-      p_live_id: live.id,
-      p_expected_turn_id: live.current_turn_id,
-    })
-    .single();
+  // 2A.2b-W1：安全確認の待機中にleadershipを失っていれば送らない（runAutoWriteが照合）。
+  const revealRes = await runAutoWrite(tickLeaderTicket, () =>
+    supabase
+      .rpc("reveal_next_answer_if_due", {
+        p_live_id: live.id,
+        p_expected_turn_id: live.current_turn_id,
+      })
+      .single(),
+  );
+  // 送らなかった／実行中にleadershipを失った：遅い結果は反映しない。
+  if (!revealRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+  const { data: revealData, error: revealError } = revealRes;
   if (revealError) {
     console.error("reveal_next_answer_if_due failed", revealError);
     return;
@@ -952,11 +1046,15 @@ async function processRevealQueue(tickGeneration: number, tickLiveId: string | n
 }
 
 // 表示中の回答の採点が出揃った、または締切(judgeMs+judgeGraceMs)を過ぎていれば確定する。
-async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
+async function resolveIfDue(
+  tickGeneration: number,
+  tickLiveId: string | null,
+  tickLeaderTicket: number,
+) {
   const state = useLiveHostStore.getState();
   // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が確認済みで
   // 進行環境も確立済みのときだけ確定処理へ進む（多層防御）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return;
   if (
     !state.live ||
     !answersSnapshotMatches(state.answersSnapshot, state.live.id, state.live.current_turn_id)
@@ -1002,7 +1100,7 @@ async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
   // resolve_answer_if_due自身がDBのnow()で行うため、ここでは毎tick常にRPCを
   // 呼び、締切前なら安全にupdated=falseが返るだけにする（クライアント時計へ
   // の依存を無くす）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御
 
   resolvingAnswerIds.add(active.id);
   try {
@@ -1014,9 +1112,11 @@ async function resolveIfDue(tickGeneration: number, tickLiveId: string | null) {
       );
       return;
     }
-    const { data: resolveData, error: resolveError } = await supabase
-      .rpc("resolve_answer_if_due", { p_answer_id: active.id })
-      .single();
+    const resolveRes = await runAutoWrite(tickLeaderTicket, () =>
+      supabase.rpc("resolve_answer_if_due", { p_answer_id: active.id }).single(),
+    );
+    if (!resolveRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+    const { data: resolveData, error: resolveError } = resolveRes;
     if (resolveError) {
       console.error("resolve_answer_if_due failed", resolveError);
       return;
@@ -1097,7 +1197,11 @@ function isAnsweringBusy(answers: AnswerRow[], live: LiveRow | null): boolean {
 }
 
 // 審査サイクル中は持ち時間を一時停止し、サイクルが終わったら残り時間から再開する。
-async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | null) {
+async function syncAnsweringPause(
+  tickGeneration: number,
+  tickLiveId: string | null,
+  tickLeaderTicket: number,
+) {
   const state = useLiveHostStore.getState();
   const { live } = state;
   if (!live || live.current_phase !== "answering") return;
@@ -1105,7 +1209,7 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
   // 2026-09-10/13（再レビュー対応）：live/children/現在ターンのanswers が確認済みで
   // 進行環境も確立済みのときだけ pause/resume 更新へ進む（未確認の間に空/古い
   // state.answersを見て「busyでない」と誤判定して回答時間を再開しない。多層防御）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return;
   if (!answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) return;
 
   const busy = isAnsweringBusy(state.answers, live);
@@ -1118,18 +1222,22 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
   // はbusy判定・現在のanswering_paused・残り時間の計算を全てRPC内で行ロック後に
   // 再計算するため、複数タブ・順序逆転・同時実行でも矛盾した状態にならない。
   // is_host()を要求しないため、観客・回答者側からの補助tickでも呼べる。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御
   const pauseStagingCheck = await assertStagingOperationAllowed();
   if (!pauseStagingCheck.ok) {
     console.error("[live] ステージング安全確認に失敗したため自動進行の書き込みを中止", pauseStagingCheck.reason);
     return;
   }
-  const { data: pauseData, error: pauseError } = await supabase
-    .rpc("sync_answering_pause_if_due", {
-      p_live_id: live.id,
-      p_expected_turn_id: live.current_turn_id,
-    })
-    .single();
+  const pauseRes = await runAutoWrite(tickLeaderTicket, () =>
+    supabase
+      .rpc("sync_answering_pause_if_due", {
+        p_live_id: live.id,
+        p_expected_turn_id: live.current_turn_id,
+      })
+      .single(),
+  );
+  if (!pauseRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+  const { data: pauseData, error: pauseError } = pauseRes;
   if (pauseError) {
     console.error("sync_answering_pause_if_due failed", pauseError);
     return;
@@ -1144,7 +1252,11 @@ async function syncAnsweringPause(tickGeneration: number, tickLiveId: string | n
 // 認証済みクライアントで行わせる（本人としての書き込みなので既存RLSにそのまま合致する）。
 // 事前に計算したスケジュールではなく、tickのたびに低確率で抽選する方式にすることで、
 // 回答フェーズの持ち時間（standardは90秒）の間に自然にばらけて送信されるようにしている。
-async function runBotBehavior(tickGeneration: number, tickLiveId: string | null) {
+async function runBotBehavior(
+  tickGeneration: number,
+  tickLiveId: string | null,
+  tickLeaderTicket: number,
+) {
   const state = useLiveHostStore.getState();
   const { live, turns, participants, answers, scores } = state;
   if (!live || live.current_phase !== "answering" || !live.current_turn_id) return;
@@ -1154,7 +1266,7 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
   // 2026-09-13（再レビュー対応・P2）：live/children/answers が同期中／進行環境が
   // 未確立なら、ボット回答も採点も行わない（古いstateだけを根拠にDB書き込みを
   // 開始しない）。
-  if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return;
+  if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return;
 
   const bots = useLiveBotStore.getState().bots;
   const now = Date.now();
@@ -1190,7 +1302,7 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
   );
   const stillOnThisTurn = () =>
     insertGuardPasses({
-      frozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      frozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket),
       currentLiveId: () => useLiveHostStore.getState().live?.id ?? null,
       currentTurnId: () => useLiveHostStore.getState().live?.current_turn_id ?? null,
       expectedLiveId: live.id,
@@ -1230,11 +1342,15 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
     const senderBot = bots[Math.floor(Math.random() * bots.length)];
     void (async () => {
       if (!(await ensureBotStagingAllowed())) return;
-      const { error } = await senderBot.client.rpc("send_tsukkomi", {
-        p_live_id: live.id,
-        p_kind: kind,
-        p_text: text,
-      });
+      const res = await runAutoWrite(tickLeaderTicket, () =>
+        senderBot.client.rpc("send_tsukkomi", {
+          p_live_id: live.id,
+          p_kind: kind,
+          p_text: text,
+        }),
+      );
+      if (!res) return;
+      const { error } = res;
       // RPC失敗（レート制限・フェーズ変化・通信エラー等）でも進行は止めない。
       // 生のPostgres/Supabaseエラーは画面へ出さず、コンソール警告に留める。
       if (error) console.warn("[tsukkomi] ボット反応の送信に失敗", error);
@@ -1303,12 +1419,16 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
       // live/turn/回答状態が変わっている可能性があるため、INSERT直前に同じ条件を
       // 再度確認する（待機前の確認だけでは古い状態のままINSERTしてしまう恐れがある）。
       if (!answerInsertChecksPass()) return;
-      const { error } = await bot.client.from("answers").insert({
-        turn_id: turn.id,
-        participant_id: bot.participantId,
-        seq,
-        body: randomBotAnswerBody(),
-      });
+      const res = await runAutoWrite(tickLeaderTicket, () =>
+        bot.client.from("answers").insert({
+          turn_id: turn.id,
+          participant_id: bot.participantId,
+          seq,
+          body: randomBotAnswerBody(),
+        }),
+      );
+      if (!res) return;
+      const { error } = res;
       outcome = classifyBotAnswerInsertError(error);
       if (outcome === "unknown-conflict" || outcome === "transient") {
         console.warn("[bot] 回答の送信に失敗（バックオフ後に再試行）", outcome, error);
@@ -1353,11 +1473,15 @@ async function runBotBehavior(tickGeneration: number, tickLiveId: string | null)
     // live/turn/回答・採点状態が変わっている可能性があるため、INSERT直前に同じ条件を
     // 再度確認する。
     if (!scoreInsertChecksPass()) return;
-    const { error } = await bot.client.from("scores").insert({
-      answer_id: activeAnswer.id,
-      judge_participant_id: bot.participantId,
-      points: isPerfectRound ? 3 : randomBotScore(),
-    });
+    const res = await runAutoWrite(tickLeaderTicket, () =>
+      bot.client.from("scores").insert({
+        answer_id: activeAnswer.id,
+        judge_participant_id: bot.participantId,
+        points: isPerfectRound ? 3 : randomBotScore(),
+      }),
+    );
+    if (!res) return;
+    const { error } = res;
     if (!error) {
       botCooldownUntil.set(bot.participantId, now + randomDelay(1_000, 3_000));
     }
@@ -1655,11 +1779,15 @@ function retryScoresSnapshot() {
 // スライスが同期中になった」「await前と対象ライブ／ターンが変わった」「司会進行環境が
 // 未確立になった」を検出し、古い前提のままDB書き込みを行わないための共通判定。
 // tickLiveId：この tick に入った時点の live.id（await をまたいで変わっていないか）。
+// 2026-10-15（2A.2b-W1）：tickLeaderTicket（tick開始時の自動進行writer ticket）が
+// 今も有効であることもAND条件に加える（leadershipを失ったtickは以降一切書き込まない）。
 function progressFrozenForTick(
   tickGeneration: number,
   tickLiveId: string | null,
   requireAnswers: boolean,
+  tickLeaderTicket: number,
 ): boolean {
+  if (!autoWriterTicketValid(tickLeaderTicket)) return true;
   const s = useLiveHostStore.getState();
   const live = s.live;
   return progressionFrozen(
@@ -1678,19 +1806,20 @@ function progressFrozenForTick(
   );
 }
 
-// フェーズ・ターンの自動進行。
-async function advanceIfDue() {
-  const tickGeneration = progressGeneration;
+// 読み取り側の維持（全adminタブのtickTimerから呼ぶ。DBへは書き込まない）。
+// 自動進行してよい状態（live・進行環境・children・answeringならanswersまで確認済み）なら
+// そのliveを返し、未確認なら読み取り再試行だけを行ってnullを返す。
+// advanceIfDue も先頭でこれを通す（自動進行の判定条件は従来と同じ）。
+function maintainHostSnapshots(): LiveRow | null {
   const state = useLiveHostStore.getState();
   // 2026-09-11（再レビュー対応・問題3）：lives行の最新状態を確認できない間は
   // 自動進行を凍結し、読み取り再試行だけを行う（表示用の古いliveは残す）。
   if (!state.liveSnapshotConfirmed) {
     retryLiveSnapshot();
-    return;
+    return null;
   }
   const { live } = state;
-  if (!live) return;
-  const tickLiveId = live.id;
+  if (!live) return null;
 
   // 2026-09-13（再レビュー対応・P1-1）：lives行はあるが司会進行環境が未確立
   // （Realtime未購読 / answeringタイマー未復元 / runtimeReadyLiveId不一致）なら、
@@ -1701,7 +1830,7 @@ async function advanceIfDue() {
   //  「runtime確立済み＝軽量 fetchLiveRow / 未確立＝ensureHostRecovery」を判定）。
   if (!isHostRuntimeEstablished(live)) {
     retryLiveSnapshot();
-    return;
+    return null;
   }
 
   // 2026-09-09/11（再レビュー対応）：participants/groups/topics/turnsが今のライブに
@@ -1711,7 +1840,7 @@ async function advanceIfDue() {
   // 飛ばしてfinal_resultへ誤って進む恐れがある。
   if (!childrenSnapshotReady(state.childrenSnapshotLiveId, live.id)) {
     retryChildrenSnapshot(live.id);
-    return;
+    return null;
   }
 
   if (live.current_phase === "answering") {
@@ -1722,19 +1851,42 @@ async function advanceIfDue() {
     // 確認できたら次tickから通常処理へ戻る。
     if (!answersSnapshotMatches(state.answersSnapshot, live.id, live.current_turn_id)) {
       retryAnswersSnapshot(live.current_turn_id);
-      return;
+      return null;
     }
+    // 表示中の回答のscoresが未確認なら取り直す（自動writerでないタブの表示も
+    // 回復させるため。自動進行の可否はresolveIfDue側で従来どおり判定する）。
+    const active = state.answers.find((a) => a.revealed_at && !a.resolved);
+    if (
+      active &&
+      !scoresSnapshotMatches(state.scoresSnapshot, live.id, live.current_turn_id, active.id)
+    ) {
+      retryScoresSnapshot();
+    }
+  }
+  return live;
+}
 
+// フェーズ・ターンの自動進行。自動進行writer（Web Locks保持タブ）の autoProgressTimer
+// からだけ呼ばれる。tickLeaderTicket は tick 開始時のwriter ticketで、await をまたいだ後・
+// 各DB書き込みの直前（runAutoWrite）・結果の反映前に毎回照合する。
+async function advanceIfDue(tickLeaderTicket: number) {
+  if (!autoWriterTicketValid(tickLeaderTicket)) return;
+  const tickGeneration = progressGeneration;
+  const live = maintainHostSnapshots();
+  if (!live) return;
+  const tickLiveId = live.id;
+
+  if (live.current_phase === "answering") {
     // 2026-09-13（再レビュー対応・P2）：各awaitの「前」に凍結を再確認しながら順に
     // 実行する。processRevealQueueのawait中にRealtime取得が始まってスライスが
     // 未確認になった場合、runBotBehavior以降は実行しない。
     const guarded = await runGuardedSteps(
-      () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      () => progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket),
       [
-        { name: "processRevealQueue", run: () => processRevealQueue(tickGeneration, tickLiveId) },
-        { name: "runBotBehavior", run: () => runBotBehavior(tickGeneration, tickLiveId) },
-        { name: "resolveIfDue", run: () => resolveIfDue(tickGeneration, tickLiveId) },
-        { name: "syncAnsweringPause", run: () => syncAnsweringPause(tickGeneration, tickLiveId) },
+        { name: "processRevealQueue", run: () => processRevealQueue(tickGeneration, tickLiveId, tickLeaderTicket) },
+        { name: "runBotBehavior", run: () => runBotBehavior(tickGeneration, tickLiveId, tickLeaderTicket) },
+        { name: "resolveIfDue", run: () => resolveIfDue(tickGeneration, tickLiveId, tickLeaderTicket) },
+        { name: "syncAnsweringPause", run: () => syncAnsweringPause(tickGeneration, tickLiveId, tickLeaderTicket) },
       ],
     );
     if (guarded.blockedAt !== null) return;
@@ -1754,7 +1906,7 @@ async function advanceIfDue() {
       perfNow: () => performance.now(),
       minIntervalMs: ANSWERING_ADVANCE_MIN_INTERVAL_MS,
       live: useLiveHostStore.getState().live,
-      isFrozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true),
+      isFrozen: () => progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket),
       callRpc: async (l) => {
         const stagingCheck = await assertStagingOperationAllowed();
         if (!stagingCheck.ok) {
@@ -1764,18 +1916,26 @@ async function advanceIfDue() {
           );
           return { data: null, error: stagingCheck.reason };
         }
-        const { data, error } = await supabase
-          .rpc("host_advance_answering_to_group_result", {
-            p_live_id: l.id,
-            p_expected_turn_id: l.current_turn_id,
-            p_group_result_duration_ms: getPhaseDurationsMs(live.timing_profile).group_result,
-          })
-          .single();
+        const res = await runAutoWrite(tickLeaderTicket, () =>
+          supabase
+            .rpc("host_advance_answering_to_group_result", {
+              p_live_id: l.id,
+              p_expected_turn_id: l.current_turn_id,
+              p_group_result_duration_ms: getPhaseDurationsMs(live.timing_profile).group_result,
+            })
+            .single(),
+        );
+        // 送らなかった／実行中にleadershipを失った：結果は反映しない（エラー扱いで何もしない）。
+        if (!res || !autoWriterTicketValid(tickLeaderTicket)) return { data: null, error: "not-leader" };
+        const { data, error } = res;
         if (error) console.error("host_advance_answering_to_group_result failed", error);
         return { data: data as { updated: boolean; live: LiveRow | null } | null, error };
       },
-      applyLive: (l) => applyAuthoritativeLive(l),
+      applyLive: (l) => {
+        if (autoWriterTicketValid(tickLeaderTicket)) applyAuthoritativeLive(l);
+      },
       afterAdvanced: async (l) => {
+        if (!autoWriterTicketValid(tickLeaderTicket)) return;
         if (l.current_turn_id) await refreshAnswersForTurn(l.current_turn_id);
       },
     });
@@ -1795,7 +1955,7 @@ async function advanceIfDue() {
   // ガードだった）。削除し、締切到達の最終判断は常にRPC（＝DBのnow()）へ委ねる。
 
   if (live.current_phase === "group_result") {
-    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false, tickLeaderTicket)) return; // P2-1
     // 2026-09-09（再レビュー対応・0065）：以前は次ターンの特定(JS側でturns/groups
     // から計算)・turnsのstatus更新・lives更新が別々の呼び出しに分かれており、
     // turns更新のエラーを確認していなかった。次ターンの特定・active化・lives更新を
@@ -1814,13 +1974,17 @@ async function advanceIfDue() {
       );
       return;
     }
-    const { data: advanceData, error: advanceError } = await supabase
-      .rpc("host_advance_group_result_to_next", {
-        p_live_id: live.id,
-        p_expected_turn_id: live.current_turn_id,
-        p_topic_reveal_duration_ms: getPhaseDurationsMs(live.timing_profile).topic_reveal,
-      })
-      .single();
+    const advanceRes = await runAutoWrite(tickLeaderTicket, () =>
+      supabase
+        .rpc("host_advance_group_result_to_next", {
+          p_live_id: live.id,
+          p_expected_turn_id: live.current_turn_id,
+          p_topic_reveal_duration_ms: getPhaseDurationsMs(live.timing_profile).topic_reveal,
+        })
+        .single(),
+    );
+    if (!advanceRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+    const { data: advanceData, error: advanceError } = advanceRes;
 
     if (advanceError) {
       console.error("host_advance_group_result_to_next failed", advanceError);
@@ -1846,7 +2010,7 @@ async function advanceIfDue() {
   }
 
   if (live.current_phase === "topic_reveal") {
-    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false, tickLeaderTicket)) return; // P2-1
     // 3回目レビュー対応（項目2）：このライブのtiming_profileから取得する
     // （以前はビルド時のNEXT_PUBLIC_LIVE_TIMING_MODEだけで決まる固定値だった
     // ため、通し稽古ビルドでDB側の締切と食い違うことがあった）。
@@ -1867,13 +2031,17 @@ async function advanceIfDue() {
       );
       return;
     }
-    const { data: revealData, error: revealError } = await supabase
-      .rpc("host_advance_topic_reveal_to_answering", {
-        p_live_id: live.id,
-        p_expected_turn_id: live.current_turn_id,
-        p_answering_duration_ms: answerMs,
-      })
-      .single();
+    const topicRevealRes = await runAutoWrite(tickLeaderTicket, () =>
+      supabase
+        .rpc("host_advance_topic_reveal_to_answering", {
+          p_live_id: live.id,
+          p_expected_turn_id: live.current_turn_id,
+          p_answering_duration_ms: answerMs,
+        })
+        .single(),
+    );
+    if (!topicRevealRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+    const { data: revealData, error: revealError } = topicRevealRes;
     if (revealError) {
       console.error("host_advance_topic_reveal_to_answering failed", revealError);
       return;
@@ -1886,7 +2054,7 @@ async function advanceIfDue() {
   }
 
   if (live.current_phase === "interlude") {
-    if (progressFrozenForTick(tickGeneration, tickLiveId, false)) return; // P2-1
+    if (progressFrozenForTick(tickGeneration, tickLiveId, false, tickLeaderTicket)) return; // P2-1
     // 2026-09-25（0079対応）：以前は生のupdateLive（期待フェーズの確認すら無い
     // 単純UPDATE）だった。締切をDBのnow()から生成し、締切超過をサーバー側で
     // 確認するSECURITY DEFINER RPCに置き換えた。
@@ -1898,12 +2066,16 @@ async function advanceIfDue() {
       );
       return;
     }
-    const { data: openingData, error: openingError } = await supabase
-      .rpc("host_advance_interlude_to_opening", {
-        p_live_id: live.id,
-        p_opening_duration_ms: getPhaseDurationsMs(live.timing_profile).opening,
-      })
-      .single();
+    const openingRes = await runAutoWrite(tickLeaderTicket, () =>
+      supabase
+        .rpc("host_advance_interlude_to_opening", {
+          p_live_id: live.id,
+          p_opening_duration_ms: getPhaseDurationsMs(live.timing_profile).opening,
+        })
+        .single(),
+    );
+    if (!openingRes || !autoWriterTicketValid(tickLeaderTicket)) return;
+    const { data: openingData, error: openingError } = openingRes;
     if (openingError) {
       console.error("host_advance_interlude_to_opening failed", openingError);
       return;
@@ -1936,6 +2108,7 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
   scoresSnapshot: null,
   liveSnapshotConfirmed: false,
   lastRefreshedAt: null,
+  autoProgressStatus: "inactive",
 
   loadTopicBank: async () => {
     const { data, error } = await supabase
@@ -2036,6 +2209,9 @@ export const useLiveHostStore = create<LiveHostState>()((set, get) => ({
       clearInterval(tickTimer);
       tickTimer = null;
     }
+    // 2A.2b-W1：自動進行timerとwriter ticketも必ず止める（lock自体の解放は
+    // HostProgressController側のwriter.stop()が担う）。
+    stopHostAutoProgress();
     cleanupChannels();
     initInFlight = null;
     answeringAdvancer.inFlight = false;

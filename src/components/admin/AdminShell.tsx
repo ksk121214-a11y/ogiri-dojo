@@ -11,6 +11,7 @@
 // color: inheritでそのまま引き継いでしまい、白い入力欄の中の文字が
 // 薄くて読みにくくなっていたため。ここで濃い文字色を明示することで、
 // 配下の要素（自身で色を指定していないものすべて）に正しく継承させる。
+import { hostAutoWriterStatusLabel } from "@/lib/hostAutoWriter";
 import { useLiveHostStore } from "@/store/useLiveHostStore";
 
 export default function AdminShell({
@@ -28,6 +29,9 @@ export default function AdminShell({
   // カバーできない（サーバー側の完全自動進行ではないため）。/admin配下・
   // 司会コンソールいずれの画面でも、進行中のライブがある間はこの注意文を出す。
   const hasProgressingLive = useLiveHostStore((s) => s.live !== null);
+  // 2026-10-15（2A.2b-W1）：このタブの自動進行の担当状態（複数タブでも自動進行は
+  // 1タブだけ。HostProgressController参照）。固定文言のみ表示する。
+  const autoProgressLabel = useLiveHostStore((s) => hostAutoWriterStatusLabel(s.autoProgressStatus));
 
   return (
     <div className="min-h-svh w-full bg-gray-50 text-gray-900">
@@ -41,6 +45,7 @@ export default function AdminShell({
             ライブ進行中は管理画面を開いておいてください。ブラウザを閉じたりPCをスリープすると進行が停止する可能性があります。
           </p>
         )}
+        {autoProgressLabel && <p className="text-xs text-gray-500">{autoProgressLabel}</p>}
         {children}
       </div>
     </div>

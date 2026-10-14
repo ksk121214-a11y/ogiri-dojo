@@ -83,44 +83,52 @@ const count = (needle: string) => src.split(needle).length - 1;
   console.log("PASS: 配線-5（Realtime/refresh/再試行の再取得開始時点で未確認化する）");
 }
 
-// 6: advanceIfDue：(a) live未確認→retryLiveSnapshot、(b) 進行環境未確立→ensureHostRecovery、
-//    (c) children未確認→retryChildrenSnapshot。
+// 6: 読み取り維持(maintainHostSnapshots)：(a) live未確認→retryLiveSnapshot、
+//    (b) 進行環境未確立→ensureHostRecovery、(c) children未確認→retryChildrenSnapshot。
+//    2026-10-15（2A.2b-W1）：この3段ガードは全adminタブの読み取りtickと、自動writerの
+//    advanceIfDueの両方で共有するため maintainHostSnapshots へ移した（advanceIfDueは先頭で呼ぶ）。
 {
-  const fn = src.match(/async function advanceIfDue\(\)\s*\{[\s\S]*?\n\}/);
-  assert.ok(fn, "advanceIfDue が見つからない");
+  const fn = src.match(/function maintainHostSnapshots\(\): LiveRow \| null \{[\s\S]*?\n\}/);
+  assert.ok(fn, "maintainHostSnapshots が見つからない");
   assert.ok(
-    /if \(!state\.liveSnapshotConfirmed\) \{\s*\n\s*retryLiveSnapshot\(\);\s*\n\s*return;/.test(fn[0]),
-    "advanceIfDue が live 未確認時に retryLiveSnapshot だけして return していない",
+    /if \(!state\.liveSnapshotConfirmed\) \{\s*\n\s*retryLiveSnapshot\(\);\s*\n\s*return null;/.test(fn[0]),
+    "maintainHostSnapshots が live 未確認時に retryLiveSnapshot だけして return していない",
   );
   assert.ok(
-    /if \(!isHostRuntimeEstablished\(live\)\) \{\s*\n\s*retryLiveSnapshot\(\);\s*\n\s*return;/.test(fn[0]),
-    "advanceIfDue が『進行環境未確立→retryLiveSnapshot（throttle付き完全復旧合流）』していない（P1-1）",
+    /if \(!isHostRuntimeEstablished\(live\)\) \{\s*\n\s*retryLiveSnapshot\(\);\s*\n\s*return null;/.test(fn[0]),
+    "maintainHostSnapshots が『進行環境未確立→retryLiveSnapshot（throttle付き完全復旧合流）』していない（P1-1）",
   );
   assert.ok(
-    /if \(!childrenSnapshotReady\(state\.childrenSnapshotLiveId, live\.id\)\) \{\s*\n\s*retryChildrenSnapshot\(live\.id\);\s*\n\s*return;/.test(fn[0]),
-    "advanceIfDue が children 未確認時に retryChildrenSnapshot だけして return していない",
+    /if \(!childrenSnapshotReady\(state\.childrenSnapshotLiveId, live\.id\)\) \{\s*\n\s*retryChildrenSnapshot\(live\.id\);\s*\n\s*return null;/.test(fn[0]),
+    "maintainHostSnapshots が children 未確認時に retryChildrenSnapshot だけして return していない",
   );
-  console.log("PASS: 配線-6（advanceIfDue: live未確認/環境未確立/children未確認 の3段ガード）");
+  const adv = src.match(/async function advanceIfDue\(tickLeaderTicket: number\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(adv, "advanceIfDue が見つからない");
+  assert.ok(
+    /if \(!autoWriterTicketValid\(tickLeaderTicket\)\) return;\s*\n\s*const tickGeneration = progressGeneration;\s*\n\s*const live = maintainHostSnapshots\(\);\s*\n\s*if \(!live\) return;/.test(adv![0]),
+    "advanceIfDue が先頭で writer ticket 照合 → maintainHostSnapshots を通していない",
+  );
+  console.log("PASS: 配線-6（maintainHostSnapshots: live未確認/環境未確立/children未確認 の3段ガード、advanceIfDueも経由）");
 }
 
 // 7: P2（await ごとに凍結を再確認）：answering分岐が runGuardedSteps を使い、
 //    ステップは processRevealQueue → runBotBehavior → resolveIfDue → syncAnsweringPause。
 {
-  const fn = src.match(/async function advanceIfDue\(\)\s*\{[\s\S]*?\n\}/);
+  const fn = src.match(/async function advanceIfDue\(tickLeaderTicket: number\)\s*\{[\s\S]*?\n\}/);
   assert.ok(fn);
   assert.ok(
-    /const guarded = await runGuardedSteps\(\s*\n\s*\(\) => progressFrozenForTick\(tickGeneration, tickLiveId, true\),/.test(fn[0]),
+    /const guarded = await runGuardedSteps\(\s*\n\s*\(\) => progressFrozenForTick\(tickGeneration, tickLiveId, true, tickLeaderTicket\),/.test(fn[0]),
     "answering分岐が runGuardedSteps + progressFrozenForTick を使っていない",
   );
   for (const step of ["processRevealQueue", "runBotBehavior", "resolveIfDue", "syncAnsweringPause"]) {
     assert.ok(
-      new RegExp(`name: "${step}", run: \\(\\) => ${step}\\(tickGeneration, tickLiveId\\)`).test(fn[0]),
-      `runGuardedSteps のステップに ${step}(tickGeneration, tickLiveId) が無い`,
+      new RegExp(`name: "${step}", run: \\(\\) => ${step}\\(tickGeneration, tickLiveId, tickLeaderTicket\\)`).test(fn[0]),
+      `runGuardedSteps のステップに ${step}(tickGeneration, tickLiveId, tickLeaderTicket) が無い`,
     );
   }
   assert.ok(/if \(guarded\.blockedAt !== null\) return;/.test(fn[0]), "blockedAt を見て return していない");
   assert.ok(
-    /function progressFrozenForTick\(\s*\n?\s*tickGeneration: number,\s*\n?\s*tickLiveId: string \| null,\s*\n?\s*requireAnswers: boolean,\s*\n?\s*\): boolean/.test(src),
+    /function progressFrozenForTick\(\s*\n?\s*tickGeneration: number,\s*\n?\s*tickLiveId: string \| null,\s*\n?\s*requireAnswers: boolean,\s*\n?\s*tickLeaderTicket: number,\s*\n?\s*\): boolean/.test(src),
     "progressFrozenForTick の定義が想定と違う",
   );
   assert.ok(/return progressionFrozen\(/.test(src), "progressFrozenForTick が progressionFrozen へ委譲していない");
@@ -133,8 +141,12 @@ const count = (needle: string) => src.split(needle).length - 1;
 //    tickGeneration/tickLiveId を受け取り、DB書き込み直前に progressFrozenForTick を呼ぶ。
 {
   for (const fn of ["processRevealQueue", "resolveIfDue", "syncAnsweringPause", "runBotBehavior"]) {
-    const m = src.match(new RegExp(`async function ${fn}\\(tickGeneration: number, tickLiveId: string \\| null\\)`));
-    assert.ok(m, `${fn} が tickGeneration/tickLiveId を受け取っていない`);
+    const m = src.match(
+      new RegExp(
+        `async function ${fn}\\(\\s*tickGeneration: number,\\s*tickLiveId: string \\| null,\\s*tickLeaderTicket: number,\\s*\\)`,
+      ),
+    );
+    assert.ok(m, `${fn} が tickGeneration/tickLiveId/tickLeaderTicket を受け取っていない`);
   }
   // reveal / resolve / pause / resume の各 DB 書き込み直前の多層ガード。
   // 2026-09-25（司会不在時に未発表回答で停止する問題への対応）：revealの生の
@@ -144,7 +156,7 @@ const count = (needle: string) => src.split(needle).length - 1;
     const revealFn = src.match(/async function processRevealQueue\([\s\S]*?\n\}\n/);
     assert.ok(revealFn, "processRevealQueue が見つからない");
     const guardIdx = revealFn![0].indexOf(
-      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御",
     );
     const rpcIdx = revealFn![0].indexOf('.rpc("reveal_next_answer_if_due"');
     assert.ok(
@@ -159,7 +171,7 @@ const count = (needle: string) => src.split(needle).length - 1;
     const resolveFn = src.match(/async function resolveIfDue\([\s\S]*?\n\}\n/);
     assert.ok(resolveFn, "resolveIfDue が見つからない");
     const guardIdx = resolveFn![0].indexOf(
-      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御",
     );
     const rpcIdx = resolveFn![0].indexOf('.rpc("resolve_answer_if_due"');
     assert.ok(
@@ -175,7 +187,7 @@ const count = (needle: string) => src.split(needle).length - 1;
     const pauseFn = src.match(/async function syncAnsweringPause\([\s\S]*?\n\}\n/);
     assert.ok(pauseFn, "syncAnsweringPause が見つからない");
     const guardIdx = pauseFn![0].indexOf(
-      "if (progressFrozenForTick(tickGeneration, tickLiveId, true)) return; // P2：多層防御",
+      "if (progressFrozenForTick(tickGeneration, tickLiveId, true, tickLeaderTicket)) return; // P2：多層防御",
     );
     const rpcIdx = pauseFn![0].indexOf('.rpc("sync_answering_pause_if_due"');
     assert.ok(
@@ -191,7 +203,7 @@ const count = (needle: string) => src.split(needle).length - 1;
   const fn = src.match(/async function runBotBehavior\([\s\S]*?\n\}\n/);
   assert.ok(fn, "runBotBehavior が見つからない");
   assert.ok(
-    /if \(progressFrozenForTick\(tickGeneration, tickLiveId, true\)\) return;/.test(fn[0]),
+    /if \(progressFrozenForTick\(tickGeneration, tickLiveId, true, tickLeaderTicket\)\) return;/.test(fn[0]),
     "runBotBehavior 冒頭の凍結ガードが無い（answers/children同期中はボット行動しない）",
   );
   assert.ok(

@@ -88,6 +88,7 @@ SOURCE_FILES=(
   "$SCRIPT_DIR/../roundTopicCandidates.ts"
   "$SCRIPT_DIR/../judgingDisplayState.ts"
   "$SCRIPT_DIR/../judgingDisplayBackfill.ts"
+  "$SCRIPT_DIR/../hostAutoWriter.ts"
 )
 
 # src/lib/__tests__/配下の*.check.tsを全て検出する。
@@ -779,5 +780,27 @@ else
   FAILED=1
 fi
 rm -rf "$FIRST_LIVE_REWARD_DIR"
+
+# 2026-10-15（2A.2b-W1）：複数adminタブでの司会自動進行の単一writer化（Web Locks）を、
+# useLiveHostStore.tsを本番と同じ実装のまま（タブごとに別モジュールインスタンスとして）
+# 検証する。専用tsconfig経由。
+HOST_AUTO_WRITER_DIR="$(mktemp -d)"
+HOST_AUTO_WRITER_TSCONFIG="$SCRIPT_DIR/store/tsconfig.hostAutoWriter.json"
+HOST_AUTO_WRITER_ENTRY="$HOST_AUTO_WRITER_DIR/src/lib/__tests__/store/useLiveHostStoreAutoWriter.check.js"
+
+echo "--- useLiveHostStoreAutoWriter.check.ts ---"
+if npx tsc -p "$HOST_AUTO_WRITER_TSCONFIG" --outDir "$HOST_AUTO_WRITER_DIR" && [ -f "$HOST_AUTO_WRITER_ENTRY" ]; then
+  if ! STORE_CHECK_OUT_DIR="$HOST_AUTO_WRITER_DIR" \
+    STORE_CHECK_REPO_ROOT="$REPO_ROOT" \
+    NEXT_PUBLIC_SUPABASE_URL="http://localhost:54321" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="dummy-test-key-for-local-check" \
+    node -r "$SCRIPT_DIR/pathAliasHook.js" "$HOST_AUTO_WRITER_ENTRY"; then
+    FAILED=1
+  fi
+else
+  echo "FAIL: useLiveHostStoreAutoWriter.check.ts のコンパイルに失敗、または出力が見つかりません" >&2
+  FAILED=1
+fi
+rm -rf "$HOST_AUTO_WRITER_DIR"
 
 exit $FAILED

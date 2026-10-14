@@ -22,7 +22,7 @@ const bodyOf = (src: string, startRe: RegExp): string => {
 
 // 1: advanceIfDueに phase_deadline との Date.now() 比較が残っていない
 {
-  const body = bodyOf(hostSrc, /async function advanceIfDue\(\)/);
+  const body = bodyOf(hostSrc, /async function advanceIfDue\(tickLeaderTicket: number\)/);
   assert.ok(
     !/Date\.now\(\)\s*<\s*new Date\(latest\.phase_deadline\)/.test(body),
     "advanceIfDueにクライアント時計でphase_deadline前を判定してRPCを止める処理が残っている",
