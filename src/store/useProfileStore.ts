@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 import { isGuestUser } from "@/lib/guestStatus";
+import { isStoredReferralSourceValue } from "@/lib/referralSurveySummary";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useUserStore } from "@/store/useUserStore";
@@ -138,12 +139,10 @@ function toDojoProfile(row: {
   };
 }
 
-// 2026-09-22追加：join_live側のCHECK制約・許可値と同じ値域
-// （supabase/migrations/0074_referral_source_survey.sql参照）。
-const VALID_REFERRAL_SOURCE_VALUES = ["x", "friend", "app", "other"] as const;
-function isValidReferralSourceValue(value: string): boolean {
-  return (VALID_REFERRAL_SOURCE_VALUES as readonly string[]).includes(value);
-}
+// 2026-09-22追加：join_live側のCHECK制約と同じ値域。2026-10-14（0090）以降は
+// DBに保存され得る値（旧選択肢appを含む）で判定する。ここで受け取るのは
+// クライアントの選択値ではなくjoin_liveがDB側で確定した値のため、過去にapp
+// と回答済みの会員の値も正しく反映できる必要がある。
 
 const PROFILE_UPDATE_GENERIC_ERROR = "更新に失敗しました。時間をおいて再度お試しください";
 // 2026-09-13（再々レビュー対応）：Supabase待機中にA→Bへ切り替わっていた場合、
@@ -294,7 +293,7 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     if (!authUser || authUser.id !== userId) return;
     if (!profile || profile.id !== userId) return;
     if (isGuestUser(authUser, profile)) return;
-    if (!isValidReferralSourceValue(referralSource)) return;
+    if (!isStoredReferralSourceValue(referralSource)) return;
 
     set((s) =>
       s.profile

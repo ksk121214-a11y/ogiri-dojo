@@ -6,9 +6,11 @@ import {
   CONTACT_MAILTO,
   ENACTED_ON,
   OPERATOR_NAME,
-  PRIVACY_VERSION,
+  SHORT_VIDEO_LICENSE_EFFECTIVE_ON,
+  SHORT_VIDEO_LICENSE_REVISION_PRIVACY_VERSION,
+  SHORT_VIDEO_LICENSE_REVISION_TERMS_VERSION,
   TERMS_LAST_REVISED_ON,
-  TERMS_VERSION,
+  formatShortVideoLicenseConsentVersions,
 } from "@/lib/legalInfo";
 
 export const metadata: Metadata = {
@@ -57,6 +59,13 @@ const TOC = [
 // 認証ID・内部ユーザーIDは掲載対象に含めず、名誉・信用を不当に害する目的での使用も
 // 禁止する。将来、顔・声を用いる機能を追加する場合は本条の許諾に含めず別途明示同意を
 // 得る方針も明記した。
+// 2026-10-14：第1条第4項（動画配信サービスへの短尺動画掲載）の効力発生日・同意条件を、
+// 現在の法務文書バージョン定数から分離した専用定数（SHORT_VIDEO_LICENSE_*、
+// src/lib/legalInfo.ts）へ切り替え、同意条件を「許可バージョンの組のいずれかへの同意」
+// （過去分terms v3＋privacy v4・現在分terms v4＋privacy v5）へ改めた。法務文書の改定で
+// 効力発生日（2026年10月10日）が移動したり、既存の同意者が対象外になったりしないように
+// するため。この文言改定に伴い、利用規約もTERMS_VERSION 2026-10-14-v4・改定日
+// 2026年10月14日へ更新した。
 export default function TermsPage() {
   return (
     <LegalPageLayout
@@ -97,16 +106,16 @@ export default function TermsPage() {
         <p>
           4. 第8条第3項に定める許諾のうち、動画配信サービス（YouTube、TikTok、Instagramその他運営が指定する
           動画配信サービスのアカウント）への短尺動画・切り抜き動画としての掲載に関する部分は、本規約の
-          {TERMS_LAST_REVISED_ON}改定（利用規約バージョン{TERMS_VERSION}、プライバシーポリシーバージョン
-          {PRIVACY_VERSION}。以下本項において「本改定」といいます。）により追加されたものであり、次のいずれも
+          {SHORT_VIDEO_LICENSE_EFFECTIVE_ON}改定（利用規約バージョン{SHORT_VIDEO_LICENSE_REVISION_TERMS_VERSION}、
+          プライバシーポリシーバージョン{SHORT_VIDEO_LICENSE_REVISION_PRIVACY_VERSION}。以下本項において「本改定」といいます。）により追加されたものであり、次のいずれも
           満たす対象投稿等についてのみ適用されます。本改定より前に成立していた公式Xへの掲載に関する許諾
           （前項）とは別の許諾であり、これを拡張又は代替するものではありません。
         </p>
         <ul className="list-disc pl-5">
-          <li>本改定の効力発生日である{TERMS_LAST_REVISED_ON}以後に生成されたものであること</li>
+          <li>本改定の効力発生日である{SHORT_VIDEO_LICENSE_EFFECTIVE_ON}以後に生成されたものであること</li>
           <li>
-            当該対象投稿等を生成した利用者が、その生成時点において、本規約バージョン{TERMS_VERSION}及び
-            プライバシーポリシーバージョン{PRIVACY_VERSION}への同意を完了していたこと
+            当該対象投稿等を生成した利用者が、その生成時点において、
+            {formatShortVideoLicenseConsentVersions("本規約")}のいずれかへの同意を完了していたこと
           </li>
         </ul>
         <p>

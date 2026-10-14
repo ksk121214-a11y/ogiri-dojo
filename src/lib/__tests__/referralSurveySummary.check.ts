@@ -4,7 +4,10 @@
 import assert from "node:assert/strict";
 
 import {
+  isStoredReferralSourceValue,
+  REFERRAL_SOURCE_ANSWER_OPTIONS,
   referralSourceDisplayLabel,
+  shouldShowReferralSurvey,
   summarizeReferralSurvey,
   toOverallReferralSurveyCounts,
   type ReferralSurveyParticipantRow,
@@ -18,6 +21,8 @@ const row = (referralSource: string | null, isGuest = false): ReferralSurveyPart
 // 1: 空配列は全項目0（対象0件をそのまま返し、0除算等で例外にならない）。
 assert.deepEqual(summarizeReferralSurvey([]), {
   x: 0,
+  youtube: 0,
+  tiktok: 0,
   friend: 0,
   app: 0,
   other: 0,
@@ -39,6 +44,8 @@ const sample: ReferralSurveyParticipantRow[] = [
 ];
 assert.deepEqual(summarizeReferralSurvey(sample), {
   x: 3,
+  youtube: 0,
+  tiktok: 0,
   friend: 2,
   app: 1,
   other: 0,
@@ -57,6 +64,8 @@ const withGuests: ReferralSurveyParticipantRow[] = [
 ];
 assert.deepEqual(summarizeReferralSurvey(withGuests), {
   x: 1,
+  youtube: 0,
+  tiktok: 0,
   friend: 0,
   app: 0,
   other: 0,
@@ -70,6 +79,8 @@ console.log("PASS: is_guest=trueの行は内訳・未回答・対象人数のい
 const allUnanswered: ReferralSurveyParticipantRow[] = [row(null), row(null), row(null)];
 assert.deepEqual(summarizeReferralSurvey(allUnanswered), {
   x: 0,
+  youtube: 0,
+  tiktok: 0,
   friend: 0,
   app: 0,
   other: 0,
@@ -83,6 +94,8 @@ console.log("PASS: 全員未回答の場合はanswered=0・noAnswer=targetにな
 const allCategories: ReferralSurveyParticipantRow[] = [row("x"), row("friend"), row("app"), row("other"), row(null)];
 assert.deepEqual(summarizeReferralSurvey(allCategories), {
   x: 1,
+  youtube: 0,
+  tiktok: 0,
   friend: 1,
   app: 1,
   other: 1,
@@ -98,6 +111,8 @@ console.log("PASS: x/friend/app/other/未回答が1件ずつでも正しく内�
 const guestsOnly: ReferralSurveyParticipantRow[] = [row(null, true), row(null, true)];
 assert.deepEqual(summarizeReferralSurvey(guestsOnly), {
   x: 0,
+  youtube: 0,
+  tiktok: 0,
   friend: 0,
   app: 0,
   other: 0,
@@ -112,6 +127,8 @@ console.log("PASS: ゲストだけが参加している場合、回答済み・�
 const oneMemberOneGuest: ReferralSurveyParticipantRow[] = [row(null, false), row(null, true)];
 assert.deepEqual(summarizeReferralSurvey(oneMemberOneGuest), {
   x: 0,
+  youtube: 0,
+  tiktok: 0,
   friend: 0,
   app: 0,
   other: 0,
@@ -126,6 +143,8 @@ console.log("PASS: 通常会員1人（未回答）とゲスト1人の参加は�
 const answeredMemberWithGuest: ReferralSurveyParticipantRow[] = [row("friend", false), row("x", true)];
 assert.deepEqual(summarizeReferralSurvey(answeredMemberWithGuest), {
   x: 0,
+  youtube: 0,
+  tiktok: 0,
   friend: 1,
   app: 0,
   other: 0,
@@ -147,9 +166,9 @@ assert.equal(referralSourceDisplayLabel(null, false), "未回答");
 console.log("PASS: 通常会員のreferral_source=nullは「未回答」と表示され、ゲストの「対象外」と区別される");
 
 // 11: 通常会員の回答済みは、選択した流入元の日本語ラベルを表示する。
-assert.equal(referralSourceDisplayLabel("x", false), "X（旧Twitter）");
-assert.equal(referralSourceDisplayLabel("friend", false), "友人・知人の紹介");
-assert.equal(referralSourceDisplayLabel("app", false), "アプリ内");
+assert.equal(referralSourceDisplayLabel("x", false), "X");
+assert.equal(referralSourceDisplayLabel("friend", false), "友人");
+assert.equal(referralSourceDisplayLabel("app", false), "アプリ内（旧選択肢）");
 assert.equal(referralSourceDisplayLabel("other", false), "その他");
 console.log("PASS: 通常会員の回答済みは選択した流入元（x/friend/app/other）の日本語ラベルを表示する");
 
@@ -158,18 +177,87 @@ console.log("PASS: 通常会員の回答済みは選択した流入元（x/frien
 // 12: RPCの生の行(x_count/friend_count/app_count/other_count/answered_total)を
 //     camelCaseのOverallReferralSurveyCountsへそのまま対応付ける。
 assert.deepEqual(
-  toOverallReferralSurveyCounts({ x_count: 5, friend_count: 3, app_count: 2, other_count: 1, answered_total: 11 }),
-  { x: 5, friend: 3, app: 2, other: 1, answeredTotal: 11 },
+  toOverallReferralSurveyCounts({
+    x_count: 5,
+    youtube_count: 4,
+    tiktok_count: 6,
+    friend_count: 3,
+    other_count: 1,
+    app_count: 2,
+    answered_total: 21,
+  }),
+  { x: 5, youtube: 4, tiktok: 6, friend: 3, app: 2, other: 1, answeredTotal: 21 },
 );
-console.log("PASS: toOverallReferralSurveyCountsはRPCの戻り値(x_count等)を正しくcamelCaseへ変換する（要求例の5/3/2/1/11を再現）");
+console.log("PASS: toOverallReferralSurveyCountsはRPCの戻り値(x_count等)を正しくcamelCaseへ変換する（youtube/tiktok/旧appを含む）");
 
 // 13: 全項目0（未回答の会員しかいない）の場合もそのまま0で変換される
 //     （呼び出し側でanswered_total===0を「アンケートの回答はまだありません」の
 //     判定に使うための前提）。
 assert.deepEqual(
-  toOverallReferralSurveyCounts({ x_count: 0, friend_count: 0, app_count: 0, other_count: 0, answered_total: 0 }),
-  { x: 0, friend: 0, app: 0, other: 0, answeredTotal: 0 },
+  toOverallReferralSurveyCounts({
+    x_count: 0,
+    youtube_count: 0,
+    tiktok_count: 0,
+    friend_count: 0,
+    other_count: 0,
+    app_count: 0,
+    answered_total: 0,
+  }),
+  { x: 0, youtube: 0, tiktok: 0, friend: 0, app: 0, other: 0, answeredTotal: 0 },
 );
 console.log("PASS: 全項目0のRPC結果はanswered_total=0のまま変換される（「回答はまだありません」判定に使える）");
+
+// ---- 2026-10-14（0090）：選択肢変更（X・YouTube・TikTok・友人・その他） ----
+
+// 14: 新規回答の選択肢は指定どおりの順番の5択で、旧選択肢app（アプリ内）を含まない。
+assert.deepEqual(
+  REFERRAL_SOURCE_ANSWER_OPTIONS.map((o) => o.value),
+  ["x", "youtube", "tiktok", "friend", "other"],
+);
+assert.deepEqual(
+  REFERRAL_SOURCE_ANSWER_OPTIONS.map((o) => o.label),
+  ["X", "YouTube", "TikTok", "友人", "その他"],
+);
+assert.ok(!REFERRAL_SOURCE_ANSWER_OPTIONS.some((o) => (o.value as string) === "app" || o.label.includes("アプリ内")));
+console.log("PASS: 新規回答の選択肢はX・YouTube・TikTok・友人・その他の順の5択で、「アプリ内」を含まない");
+
+// 15: youtube/tiktokはライブ単位の集計・個別表示で正しく扱われ、過去のapp回答も
+//     「アプリ内（旧選択肢）」として回答済みに数え続ける（未回答扱いにしない）。
+assert.deepEqual(
+  summarizeReferralSurvey([row("youtube"), row("youtube"), row("tiktok"), row("app"), row("other"), row(null)]),
+  { x: 0, youtube: 2, tiktok: 1, friend: 0, app: 1, other: 1, noAnswer: 1, answered: 5, target: 6 },
+);
+assert.equal(referralSourceDisplayLabel("youtube", false), "YouTube");
+assert.equal(referralSourceDisplayLabel("tiktok", false), "TikTok");
+console.log("PASS: youtube/tiktokが集計・表示され、過去のapp回答は回答済みとして集計・表示され続ける");
+
+// 16: DBに保存され得る値（join_liveの返却値をローカル反映する際の判定）は、
+//     新しい5択に加えて旧選択肢appも含む。選択肢外の値は含まない。
+for (const v of ["x", "youtube", "tiktok", "friend", "app", "other"]) {
+  assert.ok(isStoredReferralSourceValue(v), `${v}が保存済み値として扱われない`);
+}
+assert.ok(!isStoredReferralSourceValue("instagram"));
+assert.ok(!isStoredReferralSourceValue(""));
+console.log("PASS: 保存済み値の判定は新しい5択と旧appを受け付け、選択肢外の値を拒否する");
+
+// 17: アンケートの表示条件。回答済み（旧appを含む）には表示せず、未回答の既存会員・
+//     新規会員（どちらもreferral_source/answered_atが両方null）には表示する。
+const unanswered = { referralSource: null, referralSourceAnsweredAt: null };
+assert.equal(shouldShowReferralSurvey({ isGuest: false, profileLoading: false, profile: unanswered }), true);
+for (const v of ["x", "youtube", "tiktok", "friend", "app", "other"]) {
+  assert.equal(
+    shouldShowReferralSurvey({
+      isGuest: false,
+      profileLoading: false,
+      profile: { referralSource: v, referralSourceAnsweredAt: "2026-09-30T03:00:00Z" },
+    }),
+    false,
+    `${v}で回答済みなのに表示される`,
+  );
+}
+assert.equal(shouldShowReferralSurvey({ isGuest: true, profileLoading: false, profile: unanswered }), false);
+assert.equal(shouldShowReferralSurvey({ isGuest: false, profileLoading: true, profile: unanswered }), false);
+assert.equal(shouldShowReferralSurvey({ isGuest: false, profileLoading: false, profile: null }), false);
+console.log("PASS: 回答済み（旧appを含む）・ゲスト・読み込み中には表示せず、未回答の既存会員・新規会員には表示する");
 
 console.log("ALL REFERRAL_SURVEY_SUMMARY CHECKS PASSED");

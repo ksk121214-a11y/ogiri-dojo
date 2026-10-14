@@ -261,7 +261,8 @@ end $$;
 
 -- ============================================================
 -- テスト10：RPCの戻り値には個人を特定できる情報（id・表示名等）が一切含まれず、
---          選択肢ごとの件数・回答済み合計の5列だけが返る。関数のカタログ定義
+--          選択肢ごとの件数・回答済み合計だけが返る（2026-10-14：0090で
+--          youtube_count/tiktok_countを追加し7列になったため、期待値を更新）。関数のカタログ定義
 --          （pg_proc）から戻り値の列構成そのものを確認する（実行結果の値では
 --          なく宣言そのものを見るため、将来列を増やした際にも確実に検知できる）。
 -- ============================================================
@@ -269,7 +270,7 @@ do $$
 declare
   v_result_desc text;
   v_expected text :=
-    'TABLE(x_count integer, friend_count integer, app_count integer, other_count integer, answered_total integer)';
+    'TABLE(x_count integer, youtube_count integer, tiktok_count integer, friend_count integer, other_count integer, app_count integer, answered_total integer)';
 begin
   select pg_get_function_result(p.oid) into v_result_desc
   from pg_proc p
@@ -280,7 +281,7 @@ begin
     raise exception 'FAIL: RPCの戻り値の列構成が想定と異なる(got=%, expected=%)。個人情報列が混入していないか確認が必要',
       v_result_desc, v_expected;
   end if;
-  raise notice 'PASS: RPCの戻り値はx_count/friend_count/app_count/other_count/answered_totalの5列だけで、個人を特定できる情報を含まない';
+  raise notice 'PASS: RPCの戻り値は選択肢ごとの件数(x/youtube/tiktok/friend/other/app)とanswered_totalの7列だけで、個人を特定できる情報を含まない';
 end $$;
 
 drop table _t0075_before;

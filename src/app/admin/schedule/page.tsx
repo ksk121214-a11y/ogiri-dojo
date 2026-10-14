@@ -554,10 +554,12 @@ function OverallReferralSurveySection() {
           <p className="text-gray-400">アンケートの回答はまだありません</p>
         ) : (
           <div className="flex flex-col gap-1">
-            <p>X（旧Twitter）：{summary.x}人</p>
-            <p>友人・知人の紹介：{summary.friend}人</p>
-            <p>アプリ内：{summary.app}人</p>
+            <p>X：{summary.x}人</p>
+            <p>YouTube：{summary.youtube}人</p>
+            <p>TikTok：{summary.tiktok}人</p>
+            <p>友人：{summary.friend}人</p>
             <p>その他：{summary.other}人</p>
+            <p>アプリ内（旧選択肢）：{summary.app}人</p>
             <p className="mt-1 font-bold">回答済み合計：{summary.answeredTotal}人</p>
           </div>
         )}
@@ -695,9 +697,11 @@ function ReferralSurveySummaryBlock({ summary }: { summary: ReferralSurveyCounts
         <div className="flex flex-col gap-1">
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
             <p>X：{summary.x}人</p>
-            <p>友人・知人の紹介：{summary.friend}人</p>
-            <p>アプリ内：{summary.app}人</p>
+            <p>YouTube：{summary.youtube}人</p>
+            <p>TikTok：{summary.tiktok}人</p>
+            <p>友人：{summary.friend}人</p>
             <p>その他：{summary.other}人</p>
+            <p>アプリ内（旧選択肢）：{summary.app}人</p>
             <p>未回答：{summary.noAnswer}人</p>
           </div>
           <p className="text-gray-500">

@@ -329,6 +329,31 @@ async function main() {
   assert.equal(spy9.count(), 0, "ゲスト参加でrefreshProfileが呼ばれた");
   console.log("PASS: join_liveの通信例外でも例外を投げず日本語エラー・ロック解除され、連打は1本に合流し、再試行で二重登録なく参加できる");
 
+  // ============================================================
+  // テスト10（2026-10-14、0090）：新しい選択肢youtube/tiktokで参加成功すると、
+  //          DBが確定した値がローカルへ反映され、次回の表示判定もfalseになる。
+  // ============================================================
+  for (const [idx, value] of (["youtube", "tiktok"] as const).entries()) {
+    const userId = `user-10-${value}`;
+    const liveId = `live-10-${idx}`;
+    setAuthUser(userId, false);
+    useProfileStore.setState({ profile: makeProfile({ id: userId }) });
+    useLiveFollowerStore.setState({ live: makeLive(liveId), myParticipant: null, error: null });
+    installCountingRefreshProfileSpy();
+
+    const p10 = useLiveFollowerStore.getState().joinLive("audience", value);
+    resolvePendingRpc({
+      data: makeParticipant({ id: `participant-10-${value}`, live_id: liveId, user_id: userId, referral_source: value }),
+      error: null,
+    });
+    await p10;
+
+    const profileAfter10 = useProfileStore.getState().profile;
+    assert.equal(profileAfter10?.referralSource, value, `${value}がprofile.referralSourceへ反映されていない`);
+    assert.ok(profileAfter10?.referralSourceAnsweredAt, `${value}回答後もreferralSourceAnsweredAtがnullのまま`);
+  }
+  console.log("PASS: youtube/tiktokで参加成功すると、DB確定値がprofileへ反映され回答済みになる");
+
   assert.ok(rpcCallCount >= 8, "join_liveのRPCモック自体が呼ばれていない");
   assert.equal(pendingRpcs.length, 0, "解決し忘れたjoin_live呼び出しが残っている（テストの前提が崩れている）");
 

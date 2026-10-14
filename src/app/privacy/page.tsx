@@ -8,9 +8,9 @@ import {
   ENACTED_ON,
   OPERATOR_NAME,
   PRIVACY_LAST_REVISED_ON,
-  PRIVACY_VERSION,
-  TERMS_VERSION,
+  SHORT_VIDEO_LICENSE_EFFECTIVE_ON,
   contactMailtoWithSubject,
+  formatShortVideoLicenseConsentVersions,
 } from "@/lib/legalInfo";
 
 export const metadata: Metadata = {
@@ -154,8 +154,9 @@ export default function PrivacyPage() {
           </li>
           <li>
             <span className="font-bold">アンケート回答</span
-            >：「どこで本サービスを知ったか」（X／友人・知人の紹介／アプリ内／その他）の回答及び回答日時。
-            通常会員は1アカウントにつき一度だけ保存されます。
+            >：「どこで本サービスを知ったか」（X／YouTube／TikTok／友人／その他）の回答及び回答日時。
+            通常会員は1アカウントにつき一度だけ保存されます。過去に「アプリ内」の選択肢で回答された内容は、
+            回答時のまま保存されます。
           </li>
           <li>
             <span className="font-bold">シェアボタンの利用記録</span
@@ -362,10 +363,10 @@ export default function PrivacyPage() {
           ついてのみ行います。
         </p>
         <ul className="list-disc pl-5">
-          <li>本改定の効力発生日である{PRIVACY_LAST_REVISED_ON}以後に生成されたものであること</li>
+          <li>本改定の効力発生日である{SHORT_VIDEO_LICENSE_EFFECTIVE_ON}以後に生成されたものであること</li>
           <li>
-            生成した利用者が、その生成時点において、利用規約バージョン{TERMS_VERSION}及びプライバシーポリシー
-            バージョン{PRIVACY_VERSION}への同意を完了していたこと
+            生成した利用者が、その生成時点において、{formatShortVideoLicenseConsentVersions("利用規約")}の
+            いずれかへの同意を完了していたこと
           </li>
         </ul>
         <p>

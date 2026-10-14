@@ -1030,8 +1030,9 @@ function ParticipantsPanel({
             運営者専用画面でのみ表示する。ゲストは対象外のため、回答済み・対象人数
             のどちらにも含まれない（終了ライブの結果公開欄と同じ集計仕様）。 */}
         <p className="mt-2 text-[11px] text-gray-500">
-          流入元：X {referralCounts.x}人・紹介 {referralCounts.friend}人・アプリ内 {referralCounts.app}
-          人・その他 {referralCounts.other}人・未回答 {referralCounts.noAnswer}人
+          流入元：X {referralCounts.x}人・YouTube {referralCounts.youtube}人・TikTok {referralCounts.tiktok}
+          人・友人 {referralCounts.friend}人・その他 {referralCounts.other}人・アプリ内（旧） {referralCounts.app}
+          人・未回答 {referralCounts.noAnswer}人
         </p>
         <p className="text-[11px] text-gray-500">
           回答済み：{referralCounts.answered}人 / 対象：{referralCounts.target}人

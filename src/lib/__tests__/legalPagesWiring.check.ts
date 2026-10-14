@@ -3,7 +3,7 @@
 // 要求された内容・導線がコード上に存在すること、既存のログイン/ゲスト参加処理
 // （useAuthStore.ts）が変更されていないことを確認する。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -13,10 +13,17 @@ import {
   ENACTED_ON,
   OPERATOR_NAME,
   PRIVACY_VERSION,
+  SHORT_VIDEO_LICENSE_CONSENT_VERSIONS,
+  SHORT_VIDEO_LICENSE_EFFECTIVE_FROM,
+  SHORT_VIDEO_LICENSE_EFFECTIVE_ON,
+  SHORT_VIDEO_LICENSE_REVISION_PRIVACY_VERSION,
+  SHORT_VIDEO_LICENSE_REVISION_TERMS_VERSION,
   TERMS_LAST_REVISED_ON,
   TERMS_VERSION,
   contactMailtoWithSubject,
   contactMailtoWithSubjectAndBody,
+  formatShortVideoLicenseConsentVersions,
+  isShortVideoLicenseApplicable,
 } from "../legalInfo";
 
 const read = (...segments: string[]) => readFileSync(join(process.cwd(), ...segments), "utf8");
@@ -877,11 +884,15 @@ console.log("PASS: 利用規約第1条・LegalConsentNoteのいずれからも�
 //    ではないため、0083自身は当時の値（'2026-09-28-v2'/'2026-09-28-v3'）を保持して
 //    いることだけを確認し、「現在のTERMS_VERSION/PRIVACY_VERSIONと一致すること」の
 //    検証は0088へ移した。
+//    2026-10-14（流入アンケートの記載改定・短尺動画の同意条件の文言改定）：0090でさらに
+//    create or replaceし、terms 2026-10-14-v4 / privacy 2026-10-14-v5へ更新した。0088自身は当時の値（'2026-10-10-v3'/'2026-10-10-v4'）を
+//    保持していることだけを確認し、現在値との一致の検証は0090へ移した。
 {
   const migration0076 = read("supabase", "migrations", "0076_terms_consent.sql");
   const migration0081 = read("supabase", "migrations", "0081_titles_and_first_live_rewards.sql");
   const migration0083 = read("supabase", "migrations", "0083_legal_short_video_consent.sql");
   const migration0088 = read("supabase", "migrations", "0088_delete_own_sns_live_result_comment.sql");
+  const migration0090 = read("supabase", "migrations", "0090_referral_source_youtube_tiktok.sql");
   assert.ok(
     migration0076.includes("select '2026-09-25-v1'::text, '2026-09-25-v1'::text;"),
     "supabase/migrations/0076_terms_consent.sqlのcurrent_legal_document_versions()の元の定義が変更されている（0076は編集禁止）",
@@ -905,11 +916,22 @@ console.log("PASS: 利用規約第1条・LegalConsentNoteのいずれからも�
     "0088がcurrent_legal_document_versions()をcreate or replaceしていない（ライブ結果コメント自己削除機能に伴う実質改定がDB側の現在バージョン判定に反映されていない）",
   );
   assert.ok(
-    migration0088.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
-    `supabase/migrations/0088のcurrent_legal_document_versions()（現在の最終定義）が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}/${PRIVACY_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
+    migration0088.includes("select '2026-10-10-v3'::text, '2026-10-10-v4'::text;"),
+    "0088のcurrent_legal_document_versions()（当時の再定義）が変更されている（0088は編集禁止）",
   );
+  assert.ok(
+    /create or replace function public\.current_legal_document_versions\(\)/.test(migration0090) &&
+      migration0090.includes(`'${TERMS_VERSION}'::text, '${PRIVACY_VERSION}'::text`),
+    `supabase/migrations/0090のcurrent_legal_document_versions()（現在の最終定義）が、src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSION（${TERMS_VERSION}/${PRIVACY_VERSION}）と一致しない（規約改定時は両方を同時に更新すること）`,
+  );
+  // 0090より後のマイグレーションがcurrent_legal_document_versions()を再定義していない
+  // （再定義した場合は、このチェックの「最終定義」の参照先も更新すること）。
+  const laterRedefinitions = readdirSync(join(process.cwd(), "supabase", "migrations"))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && f > "0090_" && !f.startsWith("0090_"))
+    .filter((f) => read("supabase", "migrations", f).includes("function public.current_legal_document_versions()"));
+  assert.deepEqual(laterRedefinitions, [], `0090より後にcurrent_legal_document_versions()を再定義している: ${laterRedefinitions.join(", ")}`);
 }
-console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値（0088の最終定義）はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している。0076・0081・0083自体は編集されていない（当時の値のまま）");
+console.log("PASS: record_terms_consent()は引数を取らずDB側で現在のバージョンを確定し、その値（0090の最終定義）はsrc/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと一致している。0076・0081・0083・0088自体は編集されていない（当時の値のまま）");
 
 // 41b（利用規約とプライバシーポリシーの最終改定日の分離）：0082リリース時点では
 //    プライバシーポリシーだけを改定していたが、0083（第8条の実質改定）・0088
@@ -920,19 +942,21 @@ console.log("PASS: record_terms_consent()は引数を取らずDB側で現在の�
 {
   const legalInfoSrc = read("src", "lib", "legalInfo.ts");
   assert.ok(
-    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年10月10日";/.test(legalInfoSrc),
-    "利用規約を今回改定したのに、TERMS_LAST_REVISED_ONが今回の改定日になっていない",
+    /export const TERMS_LAST_REVISED_ON: string \| null = "2026年10月14日";/.test(legalInfoSrc),
+    "利用規約を今回改定したのに、TERMS_LAST_REVISED_ONが今回の改定日（2026年10月14日）になっていない",
   );
+  // 2026-10-14：流入アンケートの記載改定（プライバシーポリシー）と短尺動画の同意条件の
+  // 文言改定（利用規約・プライバシーポリシー）のため、両方の改定日を更新した。
   assert.ok(
-    /export const PRIVACY_LAST_REVISED_ON: string \| null = "2026年10月10日";/.test(legalInfoSrc),
-    "プライバシーポリシーの最終改定日(PRIVACY_LAST_REVISED_ON)が今回の改定日になっていない",
+    /export const PRIVACY_LAST_REVISED_ON: string \| null = "2026年10月14日";/.test(legalInfoSrc),
+    "プライバシーポリシーの最終改定日(PRIVACY_LAST_REVISED_ON)が今回の改定日（2026年10月14日）になっていない",
   );
   assert.ok(termsPage.includes("TERMS_LAST_REVISED_ON"), "利用規約ページがTERMS_LAST_REVISED_ONを表示していない（共通のLAST_REVISED_ONを使い続けている可能性）");
   assert.ok(!termsPage.includes("PRIVACY_LAST_REVISED_ON"), "利用規約ページがプライバシーポリシー側の最終改定日を参照してしまっている");
   assert.ok(privacyPage.includes("PRIVACY_LAST_REVISED_ON"), "プライバシーポリシーページがPRIVACY_LAST_REVISED_ONを表示していない");
   assert.ok(!privacyPage.includes("TERMS_LAST_REVISED_ON"), "プライバシーポリシーページが利用規約側の最終改定日を参照してしまっている");
 }
-console.log("PASS: 利用規約・プライバシーポリシーの最終改定日は文書ごとに独立した定数のままであり、今回はどちらも同じ日付で改定表示になっている");
+console.log("PASS: 利用規約・プライバシーポリシーの最終改定日は文書ごとに独立した定数のままであり、今回はどちらも2026年10月14日の改定表示になっている");
 
 // 42（アカウント削除時の説明を実装と一致させる）：プライバシーポリシーに、
 //    本人投稿の本文がモデレーション等のため運営内部に非表示で保持される場合が
@@ -1422,29 +1446,45 @@ console.log("PASS: 利用規約第8条・プライバシーポリシーの公式
   const scopeBody4 = sectionBody(termsPage, "scope");
   const officialSnsBody3 = sectionBody(privacyPage, "official-x-posting");
 
-  // (a) 効力発生日の条件が両方にある。
+  // (a) 効力発生日の条件が両方にある。2026-10-14：効力発生日は現在の法務文書の
+  //     改定日（TERMS_LAST_REVISED_ON/PRIVACY_LAST_REVISED_ON）ではなく、短尺動画専用の
+  //     固定定数SHORT_VIDEO_LICENSE_EFFECTIVE_ONを使う（無関係な改定で移動させない）。
   for (const [name, body] of [
     ["利用規約第1条", scopeBody4],
     ["プライバシーポリシー", officialSnsBody3],
   ] as const) {
     assert.ok(
-      body.includes("効力発生日である") && body.includes("{TERMS_LAST_REVISED_ON}以後に生成された") || body.includes("効力発生日である") && body.includes("{PRIVACY_LAST_REVISED_ON}以後に生成された"),
-      `${name}に、動画配信サービスへの掲載が効力発生日以後に生成された対象投稿等に限られる旨の記載がない`,
+      body.includes("効力発生日である{SHORT_VIDEO_LICENSE_EFFECTIVE_ON}以後に生成された"),
+      `${name}に、動画配信サービスへの掲載が効力発生日（SHORT_VIDEO_LICENSE_EFFECTIVE_ON）以後に生成された対象投稿等に限られる旨の記載がない`,
+    );
+    assert.ok(
+      !body.includes("{TERMS_LAST_REVISED_ON}以後に生成された") && !body.includes("{PRIVACY_LAST_REVISED_ON}以後に生成された"),
+      `${name}の短尺動画の効力発生日が、現在の法務文書の改定日を流用している`,
     );
   }
 
-  // (b) 新バージョンへの同意完了という、日付とは別のもう一つの条件が両方にある。
-  //     TERMS_VERSION/PRIVACY_VERSIONの実際の値（変数展開ではなくJSX式のまま）を
-  //     使って条件が書かれていることを確認する。
-  for (const [name, body] of [
-    ["利用規約第1条", scopeBody4],
-    ["プライバシーポリシー", officialSnsBody3],
+  // (b) 許可バージョンへの同意完了という、日付とは別のもう一つの条件が両方にある。
+  //     2026-10-14：現在のTERMS_VERSION/PRIVACY_VERSIONではなく、短尺動画専用の許可
+  //     バージョン一覧（SHORT_VIDEO_LICENSE_CONSENT_VERSIONS）から文言を生成する。
+  for (const [name, body, termsLabel] of [
+    ["利用規約第1条", scopeBody4, "本規約"],
+    ["プライバシーポリシー", officialSnsBody3, "利用規約"],
   ] as const) {
     assert.ok(
-      body.includes("{TERMS_VERSION}") && body.includes("{PRIVACY_VERSION}") && body.includes("同意を完了していたこと"),
-      `${name}に、動画配信サービスへの掲載が「利用者がTERMS_VERSION/PRIVACY_VERSIONへ同意した後」の対象投稿等に限られる旨の記載がない（日付だけの条件になっている）`,
+      body.includes(`{formatShortVideoLicenseConsentVersions("${termsLabel}")}`) &&
+        body.includes("いずれかへの同意を完了していたこと"),
+      `${name}に、動画配信サービスへの掲載が「許可バージョンのいずれかへ同意した後」の対象投稿等に限られる旨の記載がない（日付だけの条件になっている）`,
+    );
+    assert.ok(
+      !body.includes("{TERMS_VERSION}") && !body.includes("{PRIVACY_VERSION}"),
+      `${name}の短尺動画の条項が、現在の法務文書バージョン（TERMS_VERSION/PRIVACY_VERSION）を流用している`,
     );
   }
+  assert.ok(
+    scopeBody4.includes("{SHORT_VIDEO_LICENSE_EFFECTIVE_ON}改定（利用規約バージョン{SHORT_VIDEO_LICENSE_REVISION_TERMS_VERSION}") &&
+      scopeBody4.includes("プライバシーポリシーバージョン{SHORT_VIDEO_LICENSE_REVISION_PRIVACY_VERSION}。以下本項において「本改定」"),
+    "利用規約第1条の「本改定」が短尺動画許諾を追加した改定（専用定数）を指していない",
+  );
 
   // 「投稿内容」ではなく「対象投稿等」全体（得点・順位・リアクション・ライブ画面等を
   // 含む）が対象になっていることの確認（第8条で定義した対象投稿等をそのまま参照する
@@ -1515,8 +1555,10 @@ console.log("PASS: 動画配信サービスへの短尺動画掲載の適用条�
   // 機能の追加で別の理由からバージョンが更に進んだため、期待値もその現在の
   // 最終値（src/lib/legalInfo.ts）へ更新した（この外部サービス欄の追加自体は
   // 今回も版を進める理由になっていない）。
-  assert.equal(TERMS_VERSION, "2026-10-10-v3", "外部サービス欄の追加に伴いTERMS_VERSIONが意図せず変更されている");
-  assert.equal(PRIVACY_VERSION, "2026-10-10-v4", "外部サービス欄の追加に伴いPRIVACY_VERSIONが意図せず変更されている");
+  // 2026-10-14：流入アンケートの記載改定・短尺動画の同意条件の文言改定で
+  // TERMS_VERSION/PRIVACY_VERSIONが2026-10-14-v4/2026-10-14-v5へ進んだ。
+  assert.equal(TERMS_VERSION, "2026-10-14-v4", "外部サービス欄の追加に伴いTERMS_VERSIONが意図せず変更されている");
+  assert.equal(PRIVACY_VERSION, "2026-10-14-v5", "外部サービス欄の追加に伴いPRIVACY_VERSIONが意図せず変更されている");
 }
 console.log("PASS: プライバシーポリシーの外部サービス欄にGoogle（Gmail・YouTube）・TikTok・Instagramが公式プライバシーポリシーへのリンク付きで追加され、Xも公式投稿の掲載先である旨が追記され、SDK組み込みと誤解されない説明と国外処理事業者への反映があり、バージョン・改定日はさらに変更されていない");
 
@@ -1627,5 +1669,83 @@ console.log("PASS: プライバシーポリシーの外部サービス欄にGoog
   }
 }
 console.log("PASS: 0083がクライアントの期待バージョンとDBの現在値が完全一致する場合だけ記録する新RPC(record_terms_consent_v2)を新設し、旧RPCを安全な互換停止（CLIENT_UPDATE_REQUIRED固定・同意行を作らない）にし、0082には触れておらず、新アプリの同意記録経路はすべて新RPCへ統一され、VERSION_MISMATCH/CLIENT_UPDATE_REQUIREDは生のDBエラーではなく再読み込みを促す専用の案内文言に変換される");
+
+// 57（2026-10-14、0090：利用規約v4・プライバシーポリシーv5と短尺動画許諾の分離）：
+//    - プライバシーポリシーの流入アンケートの記載が新しい5択と一致する。
+//    - 短尺動画許諾の効力発生日（2026年10月10日）・「本改定」の版（v3/v4）・許可
+//      バージョンの組（過去分v3+v4・現在分v4+v5）が専用定数として固定され、現在のTERMS_VERSION/
+//      PRIVACY_VERSIONの組を含む（追記漏れで新規利用者が対象外にならない）。
+//    - 画面の条項文言・フロントの判定関数・DB側（0090）の判定が同じ値を使う。
+{
+  const surveyItem = privacyPage.slice(privacyPage.indexOf("アンケート回答"), privacyPage.indexOf("シェアボタンの利用記録"));
+  assert.ok(surveyItem.includes("（X／YouTube／TikTok／友人／その他）"), "プライバシーポリシーの流入アンケートの選択肢が新しい5択と一致しない");
+  assert.ok(!surveyItem.includes("友人・知人の紹介／アプリ内"), "プライバシーポリシーに流入アンケートの旧選択肢の列挙が残っている");
+
+  assert.equal(SHORT_VIDEO_LICENSE_EFFECTIVE_ON, "2026年10月10日");
+  assert.equal(SHORT_VIDEO_LICENSE_EFFECTIVE_FROM, "2026-10-10T00:00:00+09:00");
+  assert.equal(SHORT_VIDEO_LICENSE_REVISION_TERMS_VERSION, "2026-10-10-v3");
+  assert.equal(SHORT_VIDEO_LICENSE_REVISION_PRIVACY_VERSION, "2026-10-10-v4");
+  assert.deepEqual(SHORT_VIDEO_LICENSE_CONSENT_VERSIONS, [
+    { termsVersion: "2026-10-10-v3", privacyVersion: "2026-10-10-v4" },
+    { termsVersion: "2026-10-14-v4", privacyVersion: "2026-10-14-v5" },
+  ]);
+  // 未適用の中間案（terms v3＋privacy v5）は許可の組に含めない。
+  assert.ok(
+    !SHORT_VIDEO_LICENSE_CONSENT_VERSIONS.some((v) => v.termsVersion === "2026-10-10-v3" && v.privacyVersion === "2026-10-14-v5"),
+    "中間案（terms v3＋privacy v5）が短尺動画の許可の組に含まれている",
+  );
+  assert.ok(
+    SHORT_VIDEO_LICENSE_CONSENT_VERSIONS.some((v) => v.termsVersion === TERMS_VERSION && v.privacyVersion === PRIVACY_VERSION),
+    "現在のTERMS_VERSION/PRIVACY_VERSIONの組が短尺動画の許可バージョン一覧に無い（法務文書の改定時に追記が必要）",
+  );
+  // 法務文書の改定日（2026年10月14日）と短尺動画の効力発生日（2026年10月10日）は別の値。
+  assert.equal(TERMS_LAST_REVISED_ON, "2026年10月14日");
+  assert.notEqual(SHORT_VIDEO_LICENSE_EFFECTIVE_ON, TERMS_LAST_REVISED_ON, "短尺動画の効力発生日が利用規約の改定日に連動している");
+
+  // 画面の条項文言（利用規約・プライバシーポリシーで同じ一覧から生成）。
+  assert.equal(
+    formatShortVideoLicenseConsentVersions("本規約"),
+    "本規約バージョン2026-10-10-v3及びプライバシーポリシーバージョン2026-10-10-v4、又は本規約バージョン2026-10-14-v4及びプライバシーポリシーバージョン2026-10-14-v5",
+  );
+
+  // DB側（0090）の判定が同じ効力発生日・許可バージョンの組を使う。
+  const migration0090 = read("supabase", "migrations", "0090_referral_source_youtube_tiktok.sql");
+  assert.ok(migration0090.includes("select '2026-10-10 00:00:00+09'::timestamptz;"), "0090の短尺動画の効力発生日がフロントと一致しない");
+  for (const v of SHORT_VIDEO_LICENSE_CONSENT_VERSIONS) {
+    assert.ok(
+      migration0090.includes(`('${v.termsVersion}'::text, '${v.privacyVersion}'::text)`),
+      `0090の短尺動画の許可バージョン一覧に${v.termsVersion}/${v.privacyVersion}が無い`,
+    );
+  }
+
+  // フロントの判定関数（DBテスト0090_privacy_v5_and_short_video_license.test.sqlと同じシナリオ）。
+  const at = (iso: string) => new Date(iso);
+  const v4 = (consentedAt: string) => ({ termsVersion: "2026-10-10-v3", privacyVersion: "2026-10-10-v4", consentedAt: at(consentedAt) });
+  const v5 = (consentedAt: string) => ({ termsVersion: "2026-10-14-v4", privacyVersion: "2026-10-14-v5", consentedAt: at(consentedAt) });
+  const existing = [v4("2026-10-10T09:00:00+09:00")];
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-11T20:00:00+09:00"), existing), true, "v4同意者の10/11生成物が対象外");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-13T23:59:59+09:00"), existing), true, "v4同意者の10/13生成物が対象外");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-14T00:00:00+09:00"), existing), true, "v4同意者の10/14生成物が対象外");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-10T08:59:59+09:00"), existing), false, "同意前の生成物が対象になった");
+  const newcomer = [v5("2026-10-15T10:00:00+09:00")];
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-15T11:00:00+09:00"), newcomer), true, "v5同意者の同意後の生成物が対象外");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-15T09:59:59+09:00"), newcomer), false, "v5同意者の同意前の生成物が対象になった");
+  const early = [v4("2026-10-09T22:00:00+09:00")];
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-09T23:59:59+09:00"), early), false, "効力発生日前の生成物が対象になった");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-10T00:00:00+09:00"), early), true, "効力発生日ちょうどの生成物が対象外");
+  const oldOnly = [{ termsVersion: "2026-09-28-v2", privacyVersion: "2026-09-28-v3", consentedAt: at("2026-09-28T12:00:00+09:00") }];
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-12T12:00:00+09:00"), oldOnly), false, "許可一覧に無い旧版のみの同意者が対象になった");
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-12T12:00:00+09:00"), []), false, "同意記録なしが対象になった");
+  const interim = [{ termsVersion: "2026-10-10-v3", privacyVersion: "2026-10-14-v5", consentedAt: at("2026-10-14T12:00:00+09:00") }];
+  assert.equal(isShortVideoLicenseApplicable(at("2026-10-15T12:00:00+09:00"), interim), false, "中間案（v3+v5）のみの同意者が対象になった");
+
+  // 効力発生日は法務文書の版・改定日の定数に依存しない（legalInfo.tsのソース上で、
+  // SHORT_VIDEO_LICENSE_*の定義がTERMS_*/PRIVACY_*を参照していない）。
+  const legalInfoSrc = read("src", "lib", "legalInfo.ts");
+  for (const line of legalInfoSrc.split("\n").filter((l) => l.startsWith("export const SHORT_VIDEO_LICENSE_"))) {
+    assert.ok(!/TERMS_|PRIVACY_/.test(line.split("=").slice(1).join("=")), `短尺動画の定数が現在の法務版を参照している: ${line}`);
+  }
+}
+console.log("PASS: プライバシーポリシーの流入アンケート記載は新しい5択と一致し、短尺動画許諾は現在の法務版から分離した専用定数（効力発生日2026年10月10日・許可の組v3+v4/v4+v5）で画面・フロント判定・DB(0090)が一致し、v3+v4既存利用者・v4+v5利用者・10/10〜13・10/14以降・同意前・10/9以前・旧版のみ・中間案のみの生成物を正しく判定する");
 
 console.log("ALL LEGAL_PAGES_WIRING CHECKS PASSED");

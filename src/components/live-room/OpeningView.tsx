@@ -8,6 +8,7 @@ import { hasSeenCurtain } from "@/lib/curtainSeen";
 import { isGuestUser } from "@/lib/guestStatus";
 import type { ParticipantRole } from "@/lib/liveRoomTypes";
 import { splitParticipantsByPreferredRole } from "@/lib/participantRoleSplit";
+import { shouldShowReferralSurvey } from "@/lib/referralSurveySummary";
 import { playSfx } from "@/lib/sfx";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLiveFollowerStore } from "@/store/useLiveFollowerStore";
@@ -40,8 +41,7 @@ export default function OpeningView() {
   // 2026-09-01: 集客施策の効果測定のため、参加登録時に「どこで知ったか」を
   // 任意で選んでもらう（未選択のままでも参加はできる、選択必須にはしない）。
   const [referralSource, setReferralSource] = useState("");
-  const showReferralSurvey =
-    !isGuest && !profileLoading && !!profile && profile.referralSource == null && profile.referralSourceAnsweredAt == null;
+  const showReferralSurvey = shouldShowReferralSurvey({ isGuest, profileLoading, profile });
   // interlude(幕間)を経由せず、いきなりopeningから見始めた人にも一度は必ずカーテンが
   // 開く演出・音・BGMを体験してもらうため、このタブでまだ見ていなければここで見せる。
   const [showCurtain] = useState(() => !hasSeenCurtain());

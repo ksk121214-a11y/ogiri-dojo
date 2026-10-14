@@ -15,12 +15,14 @@
 --
 -- 2026-10-10（ライブ結果コメント自己削除機能に伴う規約改定対応）：0088が
 -- current_legal_document_versions()を再度create or replaceし、利用規約・
--- プライバシーポリシーの「現在バージョン」は2026-10-10-v3/2026-10-10-v4へ進んだ
+-- プライバシーポリシーの「現在バージョン」は2026-10-10-v3/2026-10-10-v4へ進んだ。
+-- 2026-10-14：0090（流入アンケートの記載改定・短尺動画の同意条件の文言改定）で
+-- terms 2026-10-14-v4 / privacy 2026-10-14-v5へさらに進んだため、現在値として使う値を2026-10-14-v4/2026-10-14-v5へ更新した
 -- （0083自身の定義(2026-09-28-v2/2026-09-28-v3)はファイルとして変更していない）。
 -- このテストファイルはrecord_terms_consent_v2自体の汎用的な振る舞い（権限・
 -- 一致判定・冪等性・既存同意履歴の保全）を検証するものであり、「現在の正しい
 -- バージョン」として使う値は、このテストが実行される時点でDBが実際に返す
--- 最新値（0088適用後の値）に追従させる必要がある。旧バージョンの値は、
+-- 最新値（現在は0090適用後の値）に追従させる必要がある。旧バージョンの値は、
 -- 「不一致で拒否されるべき値」の例としてのみ引き続き使う。
 
 \set ON_ERROR_STOP on
@@ -47,10 +49,10 @@ declare
 begin
   select terms_version, privacy_version into v_terms, v_privacy
     from public.current_legal_document_versions();
-  if v_terms <> '2026-10-10-v3' then
+  if v_terms <> '2026-10-14-v4' then
     raise exception 'FAIL: terms_versionが現在の最終値になっていない(got=%)', v_terms;
   end if;
-  if v_privacy <> '2026-10-10-v4' then
+  if v_privacy <> '2026-10-14-v5' then
     raise exception 'FAIL: privacy_versionが現在の最終値になっていない(got=%)', v_privacy;
   end if;
   raise notice 'PASS: current_legal_document_versions()は利用規約・プライバシーポリシー両方の現在の最終バージョンを返す';
@@ -75,10 +77,10 @@ declare
 begin
   select count(*) into v_count_member from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a001'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   select count(*) into v_count_guest from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a002'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   if v_count_member <> 0 then
     raise exception 'FAIL: 通常会員の旧同意記録が新バージョンの判定に誤ってヒットしている';
   end if;
@@ -99,7 +101,7 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', '08300000-0000-0000-0000-00000000a001', true);
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
 end $$;
 reset role;
 
@@ -107,7 +109,7 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', '08300000-0000-0000-0000-00000000a002', true);
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
 end $$;
 reset role;
 
@@ -118,7 +120,7 @@ declare
 begin
   select count(*) into v_new_count from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a001'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   select count(*) into v_total_count from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a001';
   if v_new_count <> 1 then
@@ -130,7 +132,7 @@ begin
 
   select count(*) into v_new_count from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a002'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   select count(*) into v_total_count from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a002';
   if v_new_count <> 1 then
@@ -148,8 +150,8 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', '08300000-0000-0000-0000-00000000a001', true);
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
 end $$;
 reset role;
 
@@ -159,7 +161,7 @@ declare
 begin
   select count(*) into v_count from public.terms_consents
     where user_id = '08300000-0000-0000-0000-00000000a001'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   if v_count <> 1 then
     raise exception 'FAIL: 同じ現在バージョンへの再同意の複数回呼び出しで重複行ができている(count=%)', v_count;
   end if;
@@ -201,7 +203,7 @@ end $$;
 
 -- ============================================================
 -- テスト5（不一致は例外なく拒否・同意行を作らない）：クライアントが渡す期待
--- バージョンがDBの現在値（2026-10-10-v3 / 2026-10-10-v4）と完全一致しない
+-- バージョンがDBの現在値（2026-10-14-v4 / 2026-10-14-v5）と完全一致しない
 -- 組み合わせは、片方だけの一致・空文字・任意の文字列・旧バージョン・NULLの
 -- いずれもVERSION_MISMATCHで拒否され、同意行を一切作らない
 -- （クライアントが主張するバージョンをそのまま信用しない）。
@@ -212,8 +214,8 @@ declare
     array['2026-09-25-v1', '2026-09-28-v2'], -- 旧バージョンの組（0081時点の値。現在から見れば二重に古い）
     array['', ''],                            -- 空文字
     array['not-a-real-version', 'also-not-real'], -- 任意の文字列
-    array['2026-10-10-v3', '2026-10-10-v3'],  -- terms側だけ一致、privacy側は不一致
-    array['2026-10-10-v9', '2026-10-10-v4'],  -- privacy側だけ一致、terms側は不一致
+    array['2026-10-14-v4', '2026-10-14-v4'],  -- terms側だけ一致、privacy側は不一致
+    array['2026-10-10-v9', '2026-10-14-v5'],  -- privacy側だけ一致、terms側は不一致
     array['9999-01-01-v1', '9999-01-01-v1']   -- 存在しない未来のバージョンを主張
   ];
   v_case text[];
@@ -238,14 +240,14 @@ begin
 
   -- NULL相当（明示的にNULLを渡す）も同様にVERSION_MISMATCHで拒否する。
   begin
-    perform public.record_terms_consent_v2(null, '2026-10-10-v4');
+    perform public.record_terms_consent_v2(null, '2026-10-14-v5');
     raise exception 'FAIL: terms側がnullなのにVERSION_MISMATCHで拒否されなかった';
   exception
     when others then
       if sqlerrm <> 'VERSION_MISMATCH' then raise exception 'FAIL: 想定外のエラー(%)', sqlerrm; end if;
   end;
   begin
-    perform public.record_terms_consent_v2('2026-10-10-v3', null);
+    perform public.record_terms_consent_v2('2026-10-14-v4', null);
     raise exception 'FAIL: privacy側がnullなのにVERSION_MISMATCHで拒否されなかった';
   exception
     when others then
@@ -275,7 +277,7 @@ do $$
 begin
   set local role authenticated;
   begin
-    perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+    perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
     raise exception 'FAIL: 未ログインでもrecord_terms_consent_v2が実行できてしまった';
   exception
     when others then
@@ -298,7 +300,7 @@ do $$
 begin
   set local role anon;
   begin
-    perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+    perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
     raise exception 'FAIL: anonロールがrecord_terms_consent_v2を実行できてしまった';
   exception
     when insufficient_privilege then

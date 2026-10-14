@@ -7,6 +7,38 @@
 // is_guest=trueの匿名ゲストはアンケート自体の対象外なので、未回答数・対象人数・
 // すべての内訳から除外する（0074のjoin_liveが常にnullを入れるため、含めると
 // 実際には聞いていない「未回答」が水増しされてしまう）。
+// 2026-10-14：選択肢を「X・YouTube・TikTok・友人・その他」の5択へ変更した
+// （0090）。「アプリ内」(app)は新規回答の選択肢からは外したが、過去の回答は
+// 削除・変換せず履歴としてDBに残すため、読み取り・表示・集計では引き続き
+// 扱う。新規回答で送れる値（REFERRAL_SOURCE_ANSWER_OPTIONS）と、DBに保存され
+// 得る値（REFERRAL_SOURCE_STORED_VALUES）を区別すること。
+export const REFERRAL_SOURCE_ANSWER_OPTIONS = [
+  { value: "x", label: "X" },
+  { value: "youtube", label: "YouTube" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "friend", label: "友人" },
+  { value: "other", label: "その他" },
+] as const;
+
+export const REFERRAL_SOURCE_STORED_VALUES = ["x", "youtube", "tiktok", "friend", "app", "other"] as const;
+
+export function isStoredReferralSourceValue(value: string): boolean {
+  return (REFERRAL_SOURCE_STORED_VALUES as readonly string[]).includes(value);
+}
+
+// 参加登録画面（OpeningView）でアンケートを表示するかどうか。通常会員で、
+// プロフィール読み込み済み、かつ一度も回答していない（referral_source・
+// referral_source_answered_atが両方null）場合だけ表示する。過去にappを含む
+// どの値で回答済みでも再表示しない（0090で回答済み状態はリセットしていない）。
+export function shouldShowReferralSurvey(params: {
+  isGuest: boolean;
+  profileLoading: boolean;
+  profile: { referralSource: string | null; referralSourceAnsweredAt: string | null } | null;
+}): boolean {
+  const { isGuest, profileLoading, profile } = params;
+  return !isGuest && !profileLoading && !!profile && profile.referralSource == null && profile.referralSourceAnsweredAt == null;
+}
+
 export interface ReferralSurveyParticipantRow {
   referralSource: string | null;
   isGuest: boolean;
@@ -14,6 +46,8 @@ export interface ReferralSurveyParticipantRow {
 
 export interface ReferralSurveyCounts {
   x: number;
+  youtube: number;
+  tiktok: number;
   friend: number;
   app: number;
   other: number;
@@ -26,6 +60,8 @@ export function summarizeReferralSurvey(rows: ReferralSurveyParticipantRow[]): R
   const targets = rows.filter((r) => !r.isGuest);
 
   let x = 0;
+  let youtube = 0;
+  let tiktok = 0;
   let friend = 0;
   let app = 0;
   let other = 0;
@@ -36,10 +72,16 @@ export function summarizeReferralSurvey(rows: ReferralSurveyParticipantRow[]): R
       case "x":
         x += 1;
         break;
+      case "youtube":
+        youtube += 1;
+        break;
+      case "tiktok":
+        tiktok += 1;
+        break;
       case "friend":
         friend += 1;
         break;
-      case "app":
+      case "app": // 旧選択肢（過去の回答の履歴として集計し続ける）
         app += 1;
         break;
       case "other":
@@ -53,6 +95,8 @@ export function summarizeReferralSurvey(rows: ReferralSurveyParticipantRow[]): R
 
   return {
     x,
+    youtube,
+    tiktok,
     friend,
     app,
     other,
@@ -66,9 +110,11 @@ export function summarizeReferralSurvey(rows: ReferralSurveyParticipantRow[]): R
 // と同じ「ゲストは対象外」という扱いを個別表示にも一致させ、通常会員の未回答
 // （「未回答」）とゲスト（アンケート自体の対象外）を混同しないようにする。
 const REFERRAL_SOURCE_LABEL: Record<string, string> = {
-  x: "X（旧Twitter）",
-  friend: "友人・知人の紹介",
-  app: "アプリ内",
+  x: "X",
+  youtube: "YouTube",
+  tiktok: "TikTok",
+  friend: "友人",
+  app: "アプリ内（旧選択肢）",
   other: "その他",
 };
 
@@ -96,6 +142,8 @@ export function referralSourceDisplayLabel(referralSource: string | null, isGues
 // からのボット推測除外は対応範囲外）。
 export interface OverallReferralSurveyRow {
   x_count: number;
+  youtube_count: number;
+  tiktok_count: number;
   friend_count: number;
   app_count: number;
   other_count: number;
@@ -104,6 +152,8 @@ export interface OverallReferralSurveyRow {
 
 export interface OverallReferralSurveyCounts {
   x: number;
+  youtube: number;
+  tiktok: number;
   friend: number;
   app: number;
   other: number;
@@ -113,6 +163,8 @@ export interface OverallReferralSurveyCounts {
 export function toOverallReferralSurveyCounts(row: OverallReferralSurveyRow): OverallReferralSurveyCounts {
   return {
     x: row.x_count,
+    youtube: row.youtube_count,
+    tiktok: row.tiktok_count,
     friend: row.friend_count,
     app: row.app_count,
     other: row.other_count,

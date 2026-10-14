@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 
 import CurtainOverlay from "@/components/live-demo/CurtainOverlay";
 import ScreenShell from "@/components/live-demo/ScreenShell";
+import { REFERRAL_SOURCE_ANSWER_OPTIONS } from "@/lib/referralSurveySummary";
 
 // 開幕（参加登録受付中）フェーズの表示だけを担う共用部品。本番(OpeningView)・体験版/撮影モード
 // (OpeningScreen)はどちらもこれへpropsを渡すだけで、Supabase・本番ストア・デモストアには
@@ -88,10 +89,11 @@ export default function OpeningPresentation({
                 className="rounded-full border border-white/30 bg-transparent px-3 py-1.5 font-sans text-xs text-white [&>option]:bg-[#12101a]"
               >
                 <option value="">選択しない</option>
-                <option value="x">X（旧Twitter）</option>
-                <option value="friend">友人・知人の紹介</option>
-                <option value="app">アプリ内（寄合帳・ホーム等）で知った</option>
-                <option value="other">その他</option>
+                {REFERRAL_SOURCE_ANSWER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
           )}

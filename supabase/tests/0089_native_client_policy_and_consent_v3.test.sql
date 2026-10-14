@@ -84,7 +84,7 @@ begin
 end $$;
 
 -- ============================================================
--- 方針3: RPCはちょうど1行を返し、値が契約どおり（法務版は0088の現在版と一致、
+-- 方針3: RPCはちょうど1行を返し、値が契約どおり（法務版は現在版（0090）と一致、
 --        最低版≦推奨版、URL4つは期待するHTTPS絶対URL）。
 -- ============================================================
 do $$
@@ -115,9 +115,9 @@ begin
   if string_to_array(r.ios_min_supported_version, '.')::int[] > string_to_array(r.ios_recommended_version, '.')::int[] then
     raise exception 'FAIL: 最低版が推奨版より大きい';
   end if;
-  -- 0088の現在版（src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと同じ値）。
-  if r.terms_version <> '2026-10-10-v3' or r.privacy_version <> '2026-10-10-v4' then
-    raise exception 'FAIL: 法務版が0088の現在版と一致しない(terms=%, privacy=%)', r.terms_version, r.privacy_version;
+  -- 現在版（0090で更新。src/lib/legalInfo.tsのTERMS_VERSION/PRIVACY_VERSIONと同じ値）。
+  if r.terms_version <> '2026-10-14-v4' or r.privacy_version <> '2026-10-14-v5' then
+    raise exception 'FAIL: 法務版が現在版（0090）と一致しない(terms=%, privacy=%)', r.terms_version, r.privacy_version;
   end if;
   if r.terms_version is distinct from v_cur_terms or r.privacy_version is distinct from v_cur_privacy then
     raise exception 'FAIL: 法務版がcurrent_legal_document_versions()と一致しない';
@@ -128,7 +128,7 @@ begin
      or r.account_deletion_request_url <> 'https://ogiri-dojo.vercel.app/account-deletion' then
     raise exception 'FAIL: URLが期待値と一致しない';
   end if;
-  raise notice 'PASS: get_client_policy_v1はちょうど1行を返し、法務版（0088現在版）・iOS版・URL4つがすべて契約どおり';
+  raise notice 'PASS: get_client_policy_v1はちょうど1行を返し、法務版（0090現在版）・iOS版・URL4つがすべて契約どおり';
 end $$;
 
 -- ============================================================
@@ -357,7 +357,7 @@ begin
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
         language sql stable as $fn$
-          select '2026-10-10-v3'::text, '2026-10-10-v4'::text
+          select '2026-10-14-v4'::text, '2026-10-14-v5'::text
           union all
           select 'SECRET_LEGAL_VALUE'::text, 'SECRET_LEGAL_VALUE'::text
         $fn$;
@@ -395,7 +395,7 @@ begin
     where conrelid = 'public.client_policy_config'::regclass
       and conname in ('client_policy_config_terms_url', 'client_policy_config_ios_min_le_recommended');
   select terms_version, privacy_version into v_terms, v_privacy from public.current_legal_document_versions();
-  if v_count <> 1 or v_constraints <> 2 or v_terms <> '2026-10-10-v3' or v_privacy <> '2026-10-10-v4' then
+  if v_count <> 1 or v_constraints <> 2 or v_terms <> '2026-10-14-v4' or v_privacy <> '2026-10-14-v5' then
     raise exception 'FAIL: テスト用の変更が巻き戻っていない(rows=%, constraints=%, terms=%, privacy=%)', v_count, v_constraints, v_terms, v_privacy;
   end if;
   if (select count(*) from public.get_client_policy_v1()) <> 1 then
@@ -442,7 +442,7 @@ begin
   set local role anon;
   perform set_config('myapp.uid', '', true);
   begin
-    perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-10-v3', '2026-10-10-v4');
+    perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-14-v4', '2026-10-14-v5');
     raise exception 'FAIL: anonがrecord_terms_consent_v3を実行できてしまった';
   exception when insufficient_privilege then
     raise notice 'PASS: anonはrecord_terms_consent_v3を実際に呼べない（insufficient_privilege）';
@@ -458,7 +458,7 @@ begin
   set local role authenticated;
   perform set_config('myapp.uid', '', true);
   begin
-    perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-10-v3', '2026-10-10-v4');
+    perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-14-v4', '2026-10-14-v5');
     raise exception 'FAIL: 未ログインでrecord_terms_consent_v3が成功してしまった';
   exception when raise_exception then
     if sqlerrm <> 'NOT_LOGGED_IN' then
@@ -481,7 +481,7 @@ begin
   perform set_config('myapp.uid', '08900000-0000-0000-0000-00000000a005', true);
   foreach v_case in array array[null, '08900000-0000-0000-0000-00000000a003']::uuid[] loop
     begin
-      perform public.record_terms_consent_v3(v_case, '2026-10-10-v3', '2026-10-10-v4');
+      perform public.record_terms_consent_v3(v_case, '2026-10-14-v4', '2026-10-14-v5');
       raise exception 'FAIL: expected userId=%でrecord_terms_consent_v3が成功してしまった', v_case;
     exception when raise_exception then
       if sqlerrm <> 'USER_MISMATCH' then
@@ -513,15 +513,15 @@ declare
   v_terms text;
   v_privacy text;
   v_pairs text[][] := array[
-    array[null, '2026-10-10-v4'],
-    array['2026-10-10-v3', null],
-    array['', '2026-10-10-v4'],
-    array['2026-10-10-v3', ''],
+    array[null, '2026-10-14-v5'],
+    array['2026-10-14-v4', null],
+    array['', '2026-10-14-v5'],
+    array['2026-10-14-v4', ''],
     array['2026-09-28-v2', '2026-09-28-v3'],
-    array['2026-10-10-v3', '2026-09-28-v3'],
-    array['2026-09-28-v2', '2026-10-10-v4'],
+    array['2026-10-14-v4', '2026-09-28-v3'],
+    array['2026-09-28-v2', '2026-10-14-v5'],
     array['2099-01-01-v9', '2099-01-01-v9'],
-    array['2026-10-10-v3 ', '2026-10-10-v4']
+    array['2026-10-14-v4 ', '2026-10-14-v5']
   ];
   i int;
 begin
@@ -577,12 +577,12 @@ begin
       if v_case = 'zero_rows' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
-        language sql stable as $fn$ select '2026-10-10-v3'::text, '2026-10-10-v4'::text where false $fn$;
+        language sql stable as $fn$ select '2026-10-14-v4'::text, '2026-10-14-v5'::text where false $fn$;
       elsif v_case = 'two_rows_first_match' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
         language sql stable as $fn$
-          select '2026-10-10-v3'::text, '2026-10-10-v4'::text
+          select '2026-10-14-v4'::text, '2026-10-14-v5'::text
           union all
           select 'SECRET_LEGAL_A'::text, 'SECRET_LEGAL_B'::text
         $fn$;
@@ -592,32 +592,32 @@ begin
         language sql stable as $fn$
           select 'SECRET_LEGAL_A'::text, 'SECRET_LEGAL_B'::text
           union all
-          select '2026-10-10-v3'::text, '2026-10-10-v4'::text
+          select '2026-10-14-v4'::text, '2026-10-14-v5'::text
         $fn$;
       elsif v_case = 'two_identical_current_rows' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
         language sql stable as $fn$
-          select '2026-10-10-v3'::text, '2026-10-10-v4'::text
+          select '2026-10-14-v4'::text, '2026-10-14-v5'::text
           union all
-          select '2026-10-10-v3'::text, '2026-10-10-v4'::text
+          select '2026-10-14-v4'::text, '2026-10-14-v5'::text
         $fn$;
       elsif v_case = 'null_terms' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
-        language sql stable as $fn$ select null::text, '2026-10-10-v4'::text $fn$;
+        language sql stable as $fn$ select null::text, '2026-10-14-v5'::text $fn$;
       elsif v_case = 'null_privacy' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
-        language sql stable as $fn$ select '2026-10-10-v3'::text, null::text $fn$;
+        language sql stable as $fn$ select '2026-10-14-v4'::text, null::text $fn$;
       elsif v_case = 'empty_terms' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
-        language sql stable as $fn$ select ''::text, '2026-10-10-v4'::text $fn$;
+        language sql stable as $fn$ select ''::text, '2026-10-14-v5'::text $fn$;
       elsif v_case = 'empty_privacy' then
         create or replace function public.current_legal_document_versions()
         returns table (terms_version text, privacy_version text)
-        language sql stable as $fn$ select '2026-10-10-v3'::text, ''::text $fn$;
+        language sql stable as $fn$ select '2026-10-14-v4'::text, ''::text $fn$;
       end if;
 
       v_msg := null;
@@ -626,7 +626,7 @@ begin
       set local role authenticated;
       perform set_config('myapp.uid', '08900000-0000-0000-0000-00000000a005', true);
       begin
-        perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a005', '2026-10-10-v3', '2026-10-10-v4');
+        perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a005', '2026-10-14-v4', '2026-10-14-v5');
         v_msg := 'SUCCEEDED';
       exception when others then
         get stacked diagnostics v_msg = message_text, v_detail = pg_exception_detail, v_hint = pg_exception_hint;
@@ -669,13 +669,13 @@ declare
 begin
   select count(*), min(terms_version), min(privacy_version) into v_count, v_terms, v_privacy
     from public.current_legal_document_versions();
-  if v_count <> 1 or v_terms <> '2026-10-10-v3' or v_privacy <> '2026-10-10-v4' then
+  if v_count <> 1 or v_terms <> '2026-10-14-v4' or v_privacy <> '2026-10-14-v5' then
     raise exception 'FAIL: current_legal_document_versions()が通常の1行へ戻っていない(count=%, terms=%, privacy=%)', v_count, v_terms, v_privacy;
   end if;
   if exists (select 1 from public.terms_consents where user_id = '08900000-0000-0000-0000-00000000a005') then
     raise exception 'FAIL: 法務版異常のテスト後に同意行が残っている';
   end if;
-  raise notice 'PASS: 法務版関数は通常の1行（2026-10-10-v3/2026-10-10-v4）へ戻り、異常ケースの同意行は残っていない';
+  raise notice 'PASS: 法務版関数は通常の1行（2026-10-14-v4/2026-10-14-v5）へ戻り、異常ケースの同意行は残っていない';
 end $$;
 
 -- ============================================================
@@ -686,9 +686,9 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', '08900000-0000-0000-0000-00000000a001', true);
-  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-10-v3', '2026-10-10-v4');
-  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-10-v3', '2026-10-10-v4');
-  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-14-v4', '2026-10-14-v5');
+  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-14-v4', '2026-10-14-v5');
+  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a001', '2026-10-14-v4', '2026-10-14-v5');
 end $$;
 reset role;
 
@@ -696,8 +696,8 @@ do $$
 begin
   set local role authenticated;
   perform set_config('myapp.uid', '08900000-0000-0000-0000-00000000a002', true);
-  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a002', '2026-10-10-v3', '2026-10-10-v4');
-  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a002', '2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a002', '2026-10-14-v4', '2026-10-14-v5');
+  perform public.record_terms_consent_v3('08900000-0000-0000-0000-00000000a002', '2026-10-14-v4', '2026-10-14-v5');
 end $$;
 reset role;
 
@@ -713,7 +713,7 @@ begin
   end if;
   foreach v_uid in array array['08900000-0000-0000-0000-00000000a001', '08900000-0000-0000-0000-00000000a002']::uuid[] loop
     select count(*) into v_count from public.terms_consents
-      where user_id = v_uid and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      where user_id = v_uid and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
     if v_count <> 1 then
       raise exception 'FAIL: %の現在版の同意行が1件ではない(got=%)', v_uid, v_count;
     end if;
@@ -784,8 +784,8 @@ begin
       raise exception 'FAIL: v2の旧版エラーがVERSION_MISMATCHではない(got=%)', sqlerrm;
     end if;
   end;
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
-  perform public.record_terms_consent_v2('2026-10-10-v3', '2026-10-10-v4');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
+  perform public.record_terms_consent_v2('2026-10-14-v4', '2026-10-14-v5');
   begin
     perform public.record_terms_consent();
     raise exception 'FAIL: 退役済みのrecord_terms_consent()が成功してしまった';
@@ -803,7 +803,7 @@ declare
 begin
   select count(*) into v_count from public.terms_consents
     where user_id = '08900000-0000-0000-0000-00000000a004'
-      and terms_version = '2026-10-10-v3' and privacy_version = '2026-10-10-v4';
+      and terms_version = '2026-10-14-v4' and privacy_version = '2026-10-14-v5';
   if v_count <> 1 then
     raise exception 'FAIL: v2の成功・冪等動作が変わっている(got=%)', v_count;
   end if;
