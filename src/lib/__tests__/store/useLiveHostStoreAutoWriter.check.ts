@@ -84,7 +84,25 @@ interface Call {
   name: string;
 }
 let calls: Call[] = [];
-const autoCalls = (tab?: string, name?: string) =>
+// 2026-10-15（W1-F1）：安全確認GET・自動進行RPCの応答をテスト側で1件ずつ決着させる。
+// nullなら従来どおり即応答。
+type Resp = { data: unknown; error: unknown };
+interface Held {
+  tab: string;
+  name: string;
+  resolve: (r: Resp) => void;
+  reject: (e: unknown) => void;
+}
+let holdMarkers = false;
+let holdAutoRpcs = false;
+let heldMarkers: Held[] = [];
+let heldRpcs: Held[] = [];
+function hold(list: Held[], tab: string, name: string): Promise<Resp> {
+  return new Promise<Resp>((resolve, reject) => {
+    list.push({ tab, name, resolve, reject });
+  });
+}
+const autoCalls =(tab?: string, name?: string) =>
   calls.filter((c) => AUTO_RPCS.has(c.name) && (!tab || c.tab === tab) && (!name || c.name === name));
 
 // ---- タブ ----
@@ -113,16 +131,49 @@ const tabs: Tab[] = [];
 const activeIntervals = new Set<unknown>();
 const realSetInterval = global.setInterval;
 const realClearInterval = global.clearInterval;
+// 2026-10-15（W1-F1）：偽タイマー。manualStoreTicks=true の間にストアが作ったintervalは
+// 実タイマーに載せず、advanceTicks(ms) で仮想時刻を進めたときだけ発火させる。
+let manualStoreTicks = false;
+const manualIntervals = new Map<object, { fn: () => void; ms: number; due: number }>();
+let fakeNow = 0;
 // Supabaseクライアント等が内部で作るintervalは数えず、ストア（useLiveHostStore）が作ったものだけを数える。
 (global as unknown as Record<string, unknown>).setInterval = ((fn: () => void, ms?: number) => {
+  if (!(new Error().stack ?? "").includes("useLiveHostStore.js")) return realSetInterval(fn, ms);
+  if (manualStoreTicks) {
+    const h = {};
+    manualIntervals.set(h, { fn, ms: ms ?? 0, due: fakeNow + (ms ?? 0) });
+    activeIntervals.add(h);
+    return h;
+  }
   const h = realSetInterval(fn, ms);
-  if ((new Error().stack ?? "").includes("useLiveHostStore.js")) activeIntervals.add(h);
+  activeIntervals.add(h);
   return h;
 }) as unknown as typeof setInterval;
 (global as unknown as Record<string, unknown>).clearInterval = ((h: ReturnType<typeof setInterval>) => {
   activeIntervals.delete(h);
+  if (manualIntervals.delete(h as unknown as object)) return;
   realClearInterval(h);
 }) as unknown as typeof clearInterval;
+
+// 決着済みPromiseの後続処理（mockの応答→ストアの反映）を流し切る。
+async function flush() {
+  for (let i = 0; i < 30; i++) await new Promise<void>((r) => setImmediate(r));
+}
+
+// 仮想時刻をms進め、期限が来た偽intervalを時刻順に1回ずつ発火させる。
+async function advanceTicks(ms: number) {
+  const end = fakeNow + ms;
+  for (;;) {
+    let next: { fn: () => void; ms: number; due: number } | null = null;
+    for (const e of manualIntervals.values()) if (!next || e.due < next.due) next = e;
+    if (!next || next.due > end) break;
+    fakeNow = next.due;
+    next.due += next.ms;
+    next.fn();
+    await flush();
+  }
+  fakeNow = end;
+}
 
 const loadedStores: StoreModule[] = [];
 function loadModules(): { store: StoreModule; supabase: SupabaseModule["supabase"] } {
@@ -162,6 +213,7 @@ function patchSupabase(sb: SupabaseModule["supabase"], tab: Tab) {
         tab.markerReads += 1;
         const gate = tab.markerGate;
         if (gate) await gate;
+        if (holdMarkers) return hold(heldMarkers, tab.id, "_environment_marker");
         return { data: { environment: "staging" }, error: null };
       }
       return { data: tableRows(table), error: null };
@@ -195,6 +247,10 @@ function patchSupabase(sb: SupabaseModule["supabase"], tab: Tab) {
   anySb.from = (table: string) => makeChain(table);
   anySb.rpc = (name: string) => {
     calls.push({ tab: tab.id, name });
+    if (holdAutoRpcs && AUTO_RPCS.has(name)) {
+      const held = hold(heldRpcs, tab.id, name);
+      return { single: () => held, then: (ok: (v: unknown) => unknown, ng?: (e: unknown) => unknown) => held.then(ok, ng) };
+    }
     const gate = AUTO_RPCS.has(name) ? tab.rpcGate : null;
     if (gate) {
       // 遅れて決着する旧writerの応答は「更新なし」（DBを進めない）にし、新leaderが最新状態で送れるようにする。
@@ -613,15 +669,23 @@ async function main() {
     a.identity = { authUserId: "user-b", profileId: "user-b", isHost: true };
     a.markerGate = null;
     startSession(a, false, "user-b");
-    await waitFor(() => autoCalls(a.id).length === 1, "user-bとして1回送信");
-    // user-b側は送信後「周回の判断待ち」を反映済みで、以後は送らない。user-aの古いtickは
-    // topic_revealの前提を持ったまま止まっているので、ticketが有効扱いになれば送ってしまう。
-    gate2.resolve();
+    // 2026-10-15（W1-F1）：同じタブでは、user-aの古いtickが決着するまでuser-bのtickを始めない
+    // （同一タブ内の自動進行tickのsingle-flight）。
+    await waitFor(() => timers(a).autoTimer, "user-bの自動timer開始");
     await sleep(1_200);
-    assert.equal(autoCalls(a.id).length, 1, "別ユーザーへ切り替わった古いtickが自動進行RPCを送った");
+    assert.equal(autoCalls(a.id).length, 0, "古いtickが未決着なのにuser-bのtickが送信した");
+    assert.equal(a.markerReads, 2, "古いtickが未決着なのに新しい安全確認が始まった");
+    // user-aの古いtickはtopic_revealの前提を持ったまま止まっているので、ticketが有効扱いに
+    // なれば決着直後（次の500ms tickより前）に送ってしまう。
+    gate2.resolve();
+    await sleep(50);
+    assert.equal(autoCalls(a.id).length, 0, "別ユーザーへ切り替わった古いtickが自動進行RPCを送った");
+    await waitFor(() => autoCalls(a.id).length === 1, "古いtickの決着後にuser-bとして1回送信");
+    await sleep(1_200);
+    assert.equal(autoCalls(a.id).length, 1, "user-bの送信が1回でない");
     a.detach!();
     a.detach = null;
-    console.log("PASS: 別ユーザーへ切り替わった古い処理は反映されない（ticketは作り直しても重複しない）");
+    console.log("PASS: 別ユーザーへ切り替わった古い処理は反映されない（古いtickの決着までは新しいtickも始めず、決着後に1回だけ送信）");
 
     // isHost剥奪：leader判定中（認証確認）に失敗 → fail-closed
     await closeAll();
@@ -721,6 +785,329 @@ async function main() {
     console.log(`PASS: ${trigger} - 送信済みの自動書き込みが決着するまでlockを保持し、決着後にだけBが引き継いで1回送信`);
     await closeAll();
   }
+
+  // ===== 9〜11) 2026-10-15（W1-F1）：同一タブ内の自動進行tickのsingle-flight（偽タイマー）=====
+  // ストアの500ms intervalは advanceTicks() でだけ発火させ、安全確認GETと自動進行RPCは
+  // テスト側で1件ずつ決着させる（heldMarkers / heldRpcs）。
+  manualStoreTicks = true;
+  holdMarkers = true;
+  holdAutoRpcs = true;
+  const inFlight = (t: Tab) => t.store.hostAutoTickInFlight();
+  const okMarker = (h: Held | undefined) => {
+    assert.ok(h, "決着させる安全確認GETが無い");
+    h!.resolve({ data: { environment: "staging" }, error: null });
+  };
+  const takeRpc = (target: string): Held => {
+    const h = heldRpcs.shift();
+    assert.ok(h, `決着させる${target}が無い`);
+    assert.equal(h!.name, target);
+    return h!;
+  };
+  type RpcOutcome = "updated" | "noop" | "error" | "reject";
+  type Outcome = RpcOutcome | "markerFail" | "markerReject";
+  // 応答のliveは同じフェーズのまま返す（ロック解放後の再試行を観察するため）。
+  const settleRpc = (h: Held, outcome: RpcOutcome, live: LiveRow | null = db.live) => {
+    if (outcome === "updated") h.resolve({ data: { updated: true, live, advanced_to: null, answer: null }, error: null });
+    else if (outcome === "noop") h.resolve({ data: { updated: false, live, advanced_to: null, answer: null }, error: null });
+    else if (outcome === "error") h.resolve({ data: null, error: { message: "テスト用エラー応答" } });
+    else h.reject(new Error("テスト用reject"));
+  };
+  const settleMarker = (h: Held | undefined, outcome: "markerFail" | "markerReject") => {
+    assert.ok(h, "決着させる安全確認GETが無い");
+    if (outcome === "markerFail") h!.resolve({ data: null, error: { message: "テスト用安全確認失敗" } });
+    else h!.reject(new Error("テスト用安全確認reject"));
+  };
+  // そのoutcomeで出るはずのconsole出力（先頭の文字列の一部）。
+  const expectedLogs = (outcome: Outcome, target: string): string[] =>
+    outcome === "error"
+      ? [`${target} failed`]
+      : outcome === "reject"
+        ? ["[live] 自動進行tickが例外で終了"]
+        : outcome === "markerFail" || outcome === "markerReject"
+          ? ["[live] ステージング安全確認に失敗"]
+          : [];
+  const captureConsole = () => {
+    const logs: string[] = [];
+    const orig = { error: console.error, warn: console.warn, log: console.log, info: console.info };
+    for (const k of ["error", "warn", "log", "info"] as const) {
+      console[k] = (...x: unknown[]) => {
+        logs.push(`${k}:${String(x[0])}`);
+      };
+    }
+    return {
+      logs,
+      restore: () => Object.assign(console, orig),
+    };
+  };
+  const assertLogs = (logs: string[], expected: string[], label: string) => {
+    assert.equal(logs.length, expected.length, `${label}: console出力が想定外: ${JSON.stringify(logs)}`);
+    expected.forEach((e, i) => assert.ok(logs[i].includes(e), `${label}: console出力が想定外: ${JSON.stringify(logs)}`));
+  };
+  // 進行環境が確立して自動tickが安全確認まで進むまで、偽タイマーを進める。
+  async function tickUntil(cond: () => boolean, what: string) {
+    const start = Date.now();
+    while (!cond()) {
+      if (Date.now() - start > 5_000) throw new Error(`待機タイムアウト: ${what}`);
+      await advanceTicks(500);
+      await sleep(10);
+    }
+  }
+  const PHASE_TARGETS = [
+    { phase: "group_result", target: "host_advance_group_result_to_next" },
+    { phase: "topic_reveal", target: "host_advance_topic_reveal_to_answering" },
+    { phase: "interlude", target: "host_advance_interlude_to_opening" },
+  ] as const;
+
+  // ===== 9) 各フェーズ×結果：未決着中はtick・安全確認GET・RPCとも1本、決着後の次tickでだけ1本再試行 =====
+  for (const pt of PHASE_TARGETS) {
+    for (const outcome of ["updated", "noop", "error", "reject", "markerFail", "markerReject"] as const) {
+      const label = `${pt.phase}/${outcome}`;
+      heldMarkers = [];
+      heldRpcs = [];
+      setLive({ current_phase: pt.phase as LiveRow["current_phase"] });
+      const a = newTab(`A-${label}`);
+      await waitFor(() => status(a) === "leader" && timers(a).autoTimer, `${label}: Aがleader`);
+      const b = newTab(`B-${label}`);
+      await waitFor(() => status(b) === "standby", `${label}: Bが待機`);
+      // 1〜2. leaderとして自動tickを開始し、安全確認GETで止める
+      await tickUntil(() => heldMarkers.length >= 1, `${label}: Aのtickが安全確認で停止`);
+      const markerBase = a.markerReads - 1;
+      const cap = captureConsole();
+      try {
+        assert.equal(heldMarkers.length, 1, `${label}: 安全確認GETが1本でない`);
+        assert.equal(heldMarkers[0].tab, a.id);
+        assert.equal(inFlight(a), true, `${label}: 実行中tickが記録されていない`);
+        // 3〜4. 500msを複数回進めても、新しいtick・安全確認GET・RPCは始まらない
+        await advanceTicks(2_500);
+        assert.equal(a.markerReads - markerBase, 1, `${label}: 安全確認待ちの間に安全確認GETが増えた`);
+        assert.equal(heldMarkers.length, 1);
+        assert.equal(autoCalls().length, 0, `${label}: 安全確認待ちの間にRPCが送られた`);
+        if (outcome === "markerFail" || outcome === "markerReject") {
+          // 5. 安全確認の失敗・reject → RPCは送らずロックを解放
+          settleMarker(heldMarkers.shift(), outcome);
+          await flush();
+          assert.equal(autoCalls().length, 0, `${label}: 安全確認失敗なのにRPCが送られた`);
+        } else {
+          okMarker(heldMarkers.shift());
+          await flush();
+          assert.equal(autoCalls(a.id, pt.target).length, 1, `${label}: 安全確認の後にRPCが1本送られていない`);
+          // RPCも未決着にしたまま500msを複数回進める
+          await advanceTicks(2_500);
+          assert.equal(autoCalls().length, 1, `${label}: RPC未決着中に同じRPCの2本目が送られた: ${autoCalls().map((c) => c.name).join(",")}`);
+          assert.equal(a.markerReads - markerBase, 1, `${label}: RPC未決着中に安全確認GETが増えた`);
+          assert.equal(inFlight(a), true);
+          // 5. RPCの物理Promiseを決着させる
+          settleRpc(takeRpc(pt.target), outcome);
+          await flush();
+          assert.equal(autoCalls().length, 1);
+        }
+        assert.equal(inFlight(a), false, `${label}: 決着後もロックが残っている`);
+        assert.equal(a.markerReads - markerBase, 1, `${label}: 次のtickより前に再試行した`);
+        // 6〜7. 次の通常tickでだけ再試行し、それも1本だけ
+        await advanceTicks(500);
+        assert.equal(a.markerReads - markerBase, 2, `${label}: 決着後の次tickで再試行しない`);
+        assert.equal(inFlight(a), true);
+        await advanceTicks(1_500);
+        assert.equal(a.markerReads - markerBase, 2, `${label}: 再試行中に安全確認GETが増えた`);
+        okMarker(heldMarkers.shift());
+        await flush();
+        await advanceTicks(1_500);
+        const sent = outcome === "markerFail" || outcome === "markerReject" ? 1 : 2;
+        assert.equal(autoCalls(a.id, pt.target).length, sent, `${label}: 再試行のRPCが1本でない`);
+        assert.equal(heldRpcs.length, 1);
+        settleRpc(takeRpc(pt.target), "noop");
+        await flush();
+        assert.equal(inFlight(a), false, `${label}: 再試行の決着後もロックが残っている`);
+        assert.equal(autoCalls(b.id).length, 0, `${label}: followerから自動RPCが送られた`);
+        assert.equal(autoCalls().length, sent, `${label}: 想定外の自動RPC: ${autoCalls().map((c) => c.name).join(",")}`);
+        assert.equal(heldMarkers.length + heldRpcs.length, 0);
+      } finally {
+        cap.restore();
+      }
+      assertLogs(cap.logs, expectedLogs(outcome, pt.target), label);
+      await closeAll();
+    }
+    console.log(
+      `PASS: tick single-flight - ${pt.phase}（安全確認・RPCの未決着中はtick/GET/RPCとも1本、updated=true/false・エラー応答・reject・安全確認の失敗/rejectのいずれでも解放され、次tickでだけ1本再試行）`,
+    );
+  }
+
+  // ===== 10) stop→再start：旧tickが決着するまで新ticketのtickを始めない／旧結果は反映しない =====
+  {
+    const cases: { outcome: RpcOutcome | "markerOk"; pt: (typeof PHASE_TARGETS)[number] }[] = [
+      { outcome: "updated", pt: PHASE_TARGETS[0] },
+      { outcome: "noop", pt: PHASE_TARGETS[1] },
+      { outcome: "error", pt: PHASE_TARGETS[2] },
+      { outcome: "reject", pt: PHASE_TARGETS[1] },
+      // 旧tickが安全確認GETで止まっている（RPC送信前）ケース
+      { outcome: "markerOk", pt: PHASE_TARGETS[1] },
+    ];
+    for (const { outcome, pt } of cases) {
+      const label = `stop→再start/${pt.phase}/${outcome}`;
+      heldMarkers = [];
+      heldRpcs = [];
+      setLive({ current_phase: pt.phase as LiveRow["current_phase"] });
+      // Web Locks非対応のタブ（writerが自動timerを動かさない）で、ストアのAPIを直接呼ぶ。
+      const t = newTab(`R-${outcome}`, { noLocks: true });
+      await waitFor(() => !t.store.useLiveHostStore.getState().loading && status(t) === "unsupported", `${label}: 読み取り完了`);
+      const valid = new Set<number>([101]);
+      const isValid = (k: number) => valid.has(k);
+      // 1. 旧ticketでtickを開始し、物理Promiseを止める
+      t.store.startHostAutoProgress(101, isValid);
+      await tickUntil(() => heldMarkers.length >= 1, `${label}: 旧tickが安全確認で停止`);
+      const markerBase = t.markerReads - 1;
+      if (outcome !== "markerOk") {
+        okMarker(heldMarkers.shift());
+        await flush();
+        assert.equal(heldRpcs.length, 1, `${label}: 旧tickのRPCが送られていない`);
+      }
+      const cap = captureConsole();
+      try {
+        // 2〜3. stop → 新ticketでstart
+        t.store.stopHostAutoProgress();
+        valid.delete(101);
+        valid.add(102);
+        t.store.startHostAutoProgress(102, isValid);
+        assert.equal(timers(t).autoTimer, true);
+        assert.equal(inFlight(t), true, `${label}: stop→startでロックが早期解放された`);
+        const liveBefore = t.store.useLiveHostStore.getState().live;
+        // 4〜5. 旧Promiseが未決着の間は、新ticketのtick・安全確認GET・RPCが0件
+        await advanceTicks(2_500);
+        assert.equal(t.markerReads - markerBase, 1, `${label}: 旧tickが未決着なのに新ticketのtickが始まった`);
+        assert.equal(autoCalls().length, outcome === "markerOk" ? 0 : 1, `${label}: 旧tickが未決着なのに新ticketのRPCが送られた`);
+        // 6〜7. 旧Promiseを決着させる（旧結果はstateへ反映されない）
+        const staleLive = { ...db.live!, phase_deadline: "2099-01-01T00:00:00Z" } as LiveRow;
+        if (outcome === "markerOk") okMarker(heldMarkers.shift());
+        else settleRpc(takeRpc(pt.target), outcome, staleLive);
+        await flush();
+        assert.equal(inFlight(t), false, `${label}: 旧tickの決着後もロックが残っている`);
+        assert.equal(t.store.useLiveHostStore.getState().live, liveBefore, `${label}: 旧ticketの結果がstateへ反映された`);
+        assert.equal(autoCalls().length, outcome === "markerOk" ? 0 : 1, `${label}: 旧ticketのtickが決着後にRPCを送った`);
+        // 8. 次の通常tickから新ticketが1本だけ実行される
+        await advanceTicks(500);
+        assert.equal(t.markerReads - markerBase, 2, `${label}: 決着後の次tickで新ticketが始まらない`);
+        await advanceTicks(1_500);
+        assert.equal(t.markerReads - markerBase, 2, `${label}: 新ticketのtickが2本以上始まった`);
+        okMarker(heldMarkers.shift());
+        await flush();
+        await advanceTicks(1_500);
+        const before = outcome === "markerOk" ? 0 : 1;
+        assert.equal(autoCalls(t.id, pt.target).length, before + 1, `${label}: 新ticketのRPCが1本でない`);
+        settleRpc(takeRpc(pt.target), "noop");
+        await flush();
+        assert.equal(inFlight(t), false);
+        assert.equal(heldMarkers.length + heldRpcs.length, 0);
+        t.store.stopHostAutoProgress();
+        valid.clear();
+      } finally {
+        cap.restore();
+      }
+      assertLogs(cap.logs, outcome === "reject" ? ["[live] 自動進行tickが例外で終了"] : [], label);
+      await closeAll();
+    }
+    console.log("PASS: stop→再start（旧tick未決着中は新ticketのtick/GET/RPC 0件、旧結果はstateへ反映せず、決着後の次tickから新ticketが1本だけ実行：updated=true/false・エラー応答・reject・安全確認待ち）");
+
+    // 永久に決着しない：そのタブの自動進行は止まったまま（多重送信しない）、停止後に後片付けは残らない
+    heldMarkers = [];
+    heldRpcs = [];
+    setLive({ current_phase: "topic_reveal" });
+    const h = newTab("Hang");
+    await waitFor(() => status(h) === "leader" && timers(h).autoTimer, "Hang: leader");
+    await tickUntil(() => heldMarkers.length >= 1, "Hang: tickが停止");
+    const hung = heldMarkers.shift();
+    await advanceTicks(10_000);
+    assert.equal(h.markerReads, 1, "永久未決着のtick中に新しいtickが始まった");
+    assert.equal(autoCalls().length, 0);
+    assert.equal(inFlight(h), true);
+    closeTab(h);
+    await sleep(50);
+    assert.equal(activeIntervals.size, 0, "永久未決着でも停止後にintervalが残っている");
+    assert.equal(locks.holderCount() + locks.pendingCount(), 0, "永久未決着でも停止後にlock・待機要求が残っている");
+    assert.equal(h.doc.listenerCount() + h.win.listenerCount(), 0, "停止後にlistenerが残っている");
+    assert.equal(inFlight(h), true, "未決着のままロックが早期解放された");
+    // 後で決着しても（ticketは無効）RPCは送らない
+    okMarker(hung);
+    await flush();
+    assert.equal(autoCalls().length, 0, "停止後に決着した古いtickがRPCを送った");
+    assert.equal(inFlight(h), false);
+    console.log("PASS: 永久未決着（そのタブの自動進行は止まったまま・GET/RPCとも増えない、停止後のinterval・lock・listener 0、遅れて決着しても送信しない）");
+    await closeAll();
+  }
+
+  // ===== 11) lifecycle：hidden・pagehide・logout・isHost剥奪・unmountでも実行中tickのロックを早期解除しない =====
+  for (const trigger of ["hidden", "pagehide", "logout", "isHost剥奪", "unmount"] as const) {
+    const label = `lifecycle/${trigger}`;
+    heldMarkers = [];
+    heldRpcs = [];
+    setLive({ current_phase: "topic_reveal" });
+    const a = newTab(`L-${trigger}`);
+    await waitFor(() => status(a) === "leader" && timers(a).autoTimer, `${label}: leader`);
+    await tickUntil(() => heldMarkers.length >= 1, `${label}: tickが停止`);
+    const markerBase = a.markerReads - 1;
+    const cap = captureConsole();
+    try {
+      if (trigger === "hidden") {
+        hide(a);
+        await sleep(50);
+        assert.equal(timers(a).autoTimer, false);
+        assert.equal(inFlight(a), true, `${label}: 停止でロックが早期解放された`);
+        show(a);
+      } else if (trigger === "pagehide") {
+        // bfcacheへ入るときと同じく、pagehideの時点で文書はhidden（visibilitychangeは送らない）。
+        a.doc.visibilityState = "hidden";
+        a.win.dispatch("pagehide");
+        await sleep(50);
+        assert.equal(timers(a).autoTimer, false);
+        assert.equal(inFlight(a), true, `${label}: 停止でロックが早期解放された`);
+        a.doc.visibilityState = "visible";
+        a.win.dispatch("pageshow");
+      } else {
+        if (trigger === "logout") a.identity = { authUserId: null, profileId: null, isHost: false };
+        if (trigger === "isHost剥奪") a.identity = { ...a.identity, isHost: false };
+        a.detach!();
+        a.detach = null;
+        await sleep(50);
+        assert.deepEqual(timers(a), { readTimer: false, autoTimer: false });
+        assert.equal(inFlight(a), true, `${label}: 停止でロックが早期解放された`);
+        a.identity = { authUserId: a.userId, profileId: a.userId, isHost: true };
+        startSession(a, false);
+      }
+      // 同じタブが新しいticketでleaderに戻っても、旧tickが未決着の間は新しいtickを始めない
+      await waitFor(() => status(a) === "leader" && timers(a).autoTimer, `${label}: 再びleader`);
+      await advanceTicks(2_500);
+      assert.equal(a.markerReads - markerBase, 1, `${label}: 旧tickが未決着なのに新しいtickが始まった`);
+      assert.equal(autoCalls().length, 0);
+      assert.equal(inFlight(a), true);
+      okMarker(heldMarkers.shift());
+      await flush();
+      assert.equal(autoCalls().length, 0, `${label}: 停止前の古いtickがRPCを送った`);
+      assert.equal(inFlight(a), false);
+      await advanceTicks(500);
+      okMarker(heldMarkers.shift());
+      await flush();
+      settleRpc(takeRpc("host_advance_topic_reveal_to_answering"), "noop");
+      await flush();
+      assert.equal(autoCalls().length, 1, `${label}: 再開後のRPCが1本でない`);
+      assert.equal(heldMarkers.length + heldRpcs.length, 0);
+    } finally {
+      cap.restore();
+    }
+    assertLogs(cap.logs, [], label);
+    closeTab(a);
+    await sleep(50);
+    assert.equal(activeIntervals.size, 0, `${label}: 最終停止後にintervalが残っている`);
+    assert.equal(locks.holderCount() + locks.pendingCount(), 0, `${label}: 最終停止後にlock・待機要求が残っている`);
+    assert.equal(a.doc.listenerCount() + a.win.listenerCount(), 0, `${label}: 最終停止後にlistenerが残っている`);
+    assert.equal(inFlight(a), false);
+    await closeAll();
+  }
+  console.log("PASS: lifecycle（hidden・pagehide・logout・isHost剥奪・unmountで停止しても実行中tickのロックは決着まで保持、旧tickは送信せず、再開後は1本だけ、最終停止後のinterval・lock・listener 0）");
+
+  manualStoreTicks = false;
+  holdMarkers = false;
+  holdAutoRpcs = false;
+  assert.ok(locks.maxConcurrentHolders <= 1, `Web Lockのleaderが同時に${locks.maxConcurrentHolders}件になった`);
+  console.log(`PASS: Web Lockの同時leader最大数=${locks.maxConcurrentHolders}`);
 
   assert.equal(unhandled, 0, "未処理Promiseがあった");
   console.log("ALL USE_LIVE_HOST_STORE_AUTO_WRITER CHECKS PASSED");

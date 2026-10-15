@@ -244,6 +244,15 @@ let autoWriterIsValid: (ticket: number) => boolean = () => false;
 // 待ってからlockを返す（handoff中にwriterが2件にならないようにする）。
 let autoWritesInFlight = 0;
 let autoWritesIdleWaiters: (() => void)[] = [];
+// 2026-10-15（2A.2b-W1-F1）：同一タブ内の自動進行tick（advanceIfDue 1回ぶん）のsingle-flight。
+// 500msのtimerは前回のadvanceIfDueの決着を待たずに発火するため、安全確認GET＋進行RPCが
+// 500msを超えると同じタブから同じRPCを並行送信できていた。
+// - 実行中tickの物理Promiseを保持し、非nullの間の発火は見送る（キューに積まない）。
+// - 解放はそのPromise自身の決着時だけ。stopHostAutoProgress()（hidden・pagehide・logout・
+//   isHost剥奪・unmount）では解放しないため、stop→再startをまたいでも旧tickが決着するまで
+//   新ticketのtickを始めない（旧tickの結果はadvanceIfDue内のticket照合で反映されない）。
+// - 旧tickが永久に決着しなければ、このタブの自動進行は止まったままになる（多重送信防止を優先）。
+let autoTickInFlight: Promise<void> | null = null;
 // 2026-09-09（再レビュー対応）：stopHostProgress()を呼ぶたびに+1する世代番号。
 // init()の非同期処理は開始時点の世代を覚えておき、要所（特にtickTimer/Realtime
 // channelを作る直前）で現在の世代と比較する。ずれていれば、そのinit()呼び出しは
@@ -445,11 +454,27 @@ export function startHostAutoProgress(ticket: number, isValid: (ticket: number) 
   autoWriterTicket = ticket;
   autoWriterIsValid = isValid;
   autoProgressTimer = setInterval(() => {
-    void advanceIfDue(ticket);
+    runAutoProgressTick(ticket);
   }, 500);
 }
 
+// 自動進行tickを1回だけ始める。実行中のtickがあれば何もしない（autoTickInFlight参照）。
+// 例外は握りつぶさず記録し、未処理Promiseとして外へ出さない。
+function runAutoProgressTick(ticket: number) {
+  if (autoTickInFlight) return;
+  const tick: Promise<void> = advanceIfDue(ticket)
+    .catch((e) => {
+      console.error("[live] 自動進行tickが例外で終了（次のtickで再試行）", e);
+    })
+    .finally(() => {
+      // 自分のtickのときだけ解放する（後から始まった別のtickの記録を消さない）。
+      if (autoTickInFlight === tick) autoTickInFlight = null;
+    });
+  autoTickInFlight = tick;
+}
+
 // 自動進行timerを止め、ticketを無効化する（実行中のtickもRPC直前の照合で止まる）。
+// 実行中tickのsingle-flight（autoTickInFlight）はここでは解放しない。
 export function stopHostAutoProgress() {
   autoWriterTicket = null;
   autoWriterIsValid = () => false;
@@ -476,6 +501,11 @@ export async function catchUpHostAutoProgress(): Promise<boolean> {
 // 検証用：このタブで動いているtimerの有無（ID等は含まない）。
 export function hostProgressTimerState(): { readTimer: boolean; autoTimer: boolean } {
   return { readTimer: tickTimer !== null, autoTimer: autoProgressTimer !== null };
+}
+
+// 検証用：このタブで自動進行tick（advanceIfDue）が実行中か。
+export function hostAutoTickInFlight(): boolean {
+  return autoTickInFlight !== null;
 }
 
 // 2026-09-03:「Supabase取得エラーを空配列・nullとして上書きしない」対応。
