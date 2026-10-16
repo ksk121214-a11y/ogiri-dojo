@@ -11,6 +11,11 @@
 --   - 回答本文そのものはログ・例外メッセージへ出さない（ケース名・SQLSTATE・件数だけ）。
 --   - トランザクション内ではnow()が一定のため、締切・reveal_sequence_untilの境界を
 --     ミリ秒単位で決定的に試験できる。
+--   - run.shは全マイグレーション（0092のVALIDATEまで）を適用してからこのテストを流すため、
+--     通常状態の制約はconvalidated=true（定義にNOT VALIDが付かない）を期待する。
+--     0091自体がNOT VALIDで追加されることは、テスト6でトランザクション内だけ制約を外し、
+--     不適合な旧行を作ってから0091本体を\irで再適用して確かめる（rollbackで0092適用済みの
+--     convalidated=trueへ戻ることをテスト7で確認する）。
 
 \set ON_ERROR_STOP on
 
@@ -409,7 +414,7 @@ begin
 end $$;
 
 -- ============================================================
--- テスト5：カタログ上の制約状態
+-- テスト5：カタログ上の制約状態（通常状態＝0092のVALIDATE適用済み）
 -- ============================================================
 do $$
 declare
@@ -418,7 +423,7 @@ declare
   v_expected_def constant text :=
     'CHECK ((((char_length(body) >= 1) AND (char_length(body) <= 50)) AND (btrim(body, '
     || '((((((((chr(9) || chr(10)) || chr(11)) || chr(12)) || chr(13)) || chr(32)) || chr(160)) '
-    || '|| chr(12288)) || chr(65279))) <> ''''::text))) NOT VALID';
+    || '|| chr(12288)) || chr(65279))) <> ''''::text)))';
 begin
   select count(*) into v_n from pg_constraint where conname = 'answers_body_shape_check';
   if v_n <> 1 then
@@ -434,13 +439,13 @@ begin
   if v_con.contype <> 'c' then
     raise exception 'FAIL: answers_body_shape_checkがCHECK制約ではない(contype=%)', v_con.contype;
   end if;
-  if v_con.convalidated is not false then
-    raise exception 'FAIL: answers_body_shape_checkがNOT VALIDではない(convalidated=%)', v_con.convalidated;
+  if v_con.convalidated is not true then
+    raise exception 'FAIL: 通常状態（0092適用済み）のanswers_body_shape_checkがVALIDATE済みではない(convalidated=%)', v_con.convalidated;
   end if;
   if v_con.def <> v_expected_def then
-    raise exception 'FAIL: answers_body_shape_checkの定義が期待と違う';
+    raise exception 'FAIL: answers_body_shape_checkの定義が期待と違う（通常状態ではNOT VALIDが付かないはず）';
   end if;
-  raise notice 'PASS: answers_body_shape_checkはpublic.answersのCHECK制約1件、convalidated=false、定義は期待どおり';
+  raise notice 'PASS: answers_body_shape_checkはpublic.answersのCHECK制約1件、convalidated=true、定義は期待どおり（NOT VALIDなし）';
 
   -- answersのCHECK制約はこの1件だけ（他に紛れ込んでいない）。
   select count(*) into v_n from pg_constraint where conrelid = 'public.answers'::regclass and contype = 'c';
@@ -508,6 +513,13 @@ declare
 begin
   select * into v_c from _t0091_ctx;
   insert into _t0091_notvalid values ('snapshot_with_0091', pg_temp.t0091_catalog_snapshot());
+  -- 通常状態（0092適用済み）の定義。0091の再適用後は、これに" NOT VALID"が付いた形になるはず。
+  insert into _t0091_notvalid
+    select 'def_validated', pg_get_constraintdef(oid) from pg_constraint
+    where conname = 'answers_body_shape_check' and convalidated;
+  if not exists (select 1 from _t0091_notvalid where k = 'def_validated') then
+    raise exception 'FAIL: テスト6の前提（通常状態でconvalidated=true）が崩れている';
+  end if;
 
   -- 0091適用前の状態を再現する。
   alter table public.answers drop constraint answers_body_shape_check;
@@ -546,6 +558,11 @@ begin
   if (select convalidated from pg_constraint where conname = 'answers_body_shape_check') is not false then
     raise exception 'FAIL: 再適用後のanswers_body_shape_checkがNOT VALIDでない';
   end if;
+  if (select pg_get_constraintdef(oid) from pg_constraint where conname = 'answers_body_shape_check')
+     is distinct from (select v from _t0091_notvalid where k = 'def_validated') || ' NOT VALID' then
+    raise exception 'FAIL: 再適用後の定義が「通常状態の定義＋NOT VALID」になっていない';
+  end if;
+  raise notice 'PASS: 0091を単独で再適用するとconvalidated=false、定義は通常状態と同じ式にNOT VALIDが付いた形';
   if (select count(*) from public.answers where id = any(v_legacy_ids)) <> 3
      or not exists (select 1 from public.answers where id = v_legacy_ids[1] and body = '')
      or not exists (select 1 from public.answers where id = v_legacy_ids[2] and body = chr(12288) || chr(160))
@@ -635,7 +652,7 @@ end $$;
 rollback;
 
 -- ============================================================
--- テスト7：rollback後、試験データが残っておらず、制約は通常フローの状態に戻っている
+-- テスト7：rollback後、試験データが残っておらず、制約は通常フロー（0092適用済み）の状態に戻っている
 -- ============================================================
 do $$
 begin
@@ -644,10 +661,11 @@ begin
      or exists (select 1 from public.lives where title = '0091回答本文制約テスト') then
     raise exception 'FAIL: 0091テストの試験データが残っている';
   end if;
-  if (select count(*) from pg_constraint where conname = 'answers_body_shape_check' and convalidated = false) <> 1 then
-    raise exception 'FAIL: rollback後、answers_body_shape_check(NOT VALID)が1件ではない';
+  if (select count(*) from pg_constraint where conname = 'answers_body_shape_check') <> 1
+     or (select count(*) from pg_constraint where conname = 'answers_body_shape_check' and convalidated = true) <> 1 then
+    raise exception 'FAIL: rollback後、answers_body_shape_check(convalidated=true)が1件だけになっていない';
   end if;
-  raise notice 'PASS: 試験データは残っておらず、answers_body_shape_check(NOT VALID)は1件のまま';
+  raise notice 'PASS: 試験データは残っておらず、answers_body_shape_checkは0092適用済みの状態(convalidated=true)で1件';
 end $$;
 
 select '0091 ALL TESTS PASSED' as result;

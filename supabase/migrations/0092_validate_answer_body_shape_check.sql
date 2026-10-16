@@ -1,0 +1,37 @@
+-- answers_body_shape_check（0091でNOT VALID追加）をVALIDATEする（フェーズ2B.M-V、2026-10-17）。
+--
+-- 背景：
+--   0091はanswers.bodyの入力制約answers_body_shape_checkをNOT VALIDで追加した。
+--   CHECK制約はNOT VALIDでも追加後の新規INSERT・UPDATEには即時適用されるため、
+--   新しく書き込まれる回答は0091の時点ですでに保護されている。
+--   ただしNOT VALIDのままだと、既存行が制約に適合しているかはカタログ上保証されない
+--   （pg_constraint.convalidated = false）。
+--
+-- このマイグレーションの目的：
+--   既存行も含めてanswers_body_shape_checkに適合することをカタログ上で保証する
+--   （VALIDATE成功後はconvalidated = true）。手作業のVALIDATEではなく履歴管理された
+--   マイグレーションとして行い、新規環境・staging・productionが同じ最終状態になるようにする。
+--
+-- 失敗時の挙動：
+--   不適合な既存行が1件でもあれば、VALIDATE CONSTRAINTはcheck_violation（SQLSTATE 23514）で
+--   失敗し、このマイグレーションは適用済みにならない（制約はNOT VALIDのまま残る）。
+--   存在しない制約名の場合も失敗する。どちらも黙って成功扱いにはしない。
+--
+-- 適用前の確認（staging・productionとも必須）：
+--   適用前に、回答本文を表示せずに不適合件数だけを確認し、0件であることを確かめてから
+--   適用する。件数確認では本文・ID・利用者情報を出力しない。
+--   0件でない場合はこのマイグレーションを適用せず、別フェーズで扱いを決める。
+--
+-- このマイグレーションではデータ修正を行わない：
+--   不適合な既存行の削除・更新・整形はここでは一切行わない。
+--
+-- ロック：
+--   VALIDATE CONSTRAINTはpublic.answersにSHARE UPDATE EXCLUSIVEロックを取り、既存行を
+--   走査するだけで、行の書き換え・テーブルの再作成は行わない（通常のINSERT・UPDATE・
+--   DELETE・SELECTとは競合しない）。
+--
+-- このマイグレーションは制約1件をVALIDATEするだけで、RLS・GRANT/REVOKE・関数・トリガー・
+-- 他の制約/index・既存行は一切変更しない。
+
+alter table public.answers
+  validate constraint answers_body_shape_check;
